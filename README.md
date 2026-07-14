@@ -4,13 +4,17 @@ Model Independent Review Environment
 
 ```mermaid
 flowchart LR
-    CLI["CLI commands and terminal renderer"] --> Core["Application core"]
-    Browser["SvelteKit app"] --> HTTP["Local HTTP API"]
-    HTTP --> Core
-    Core --> Git["Local Git"]
-    Core --> Store["Review session store"]
+    CLI["CLI commands and terminal renderer"] --> Core["Review service"]
+
+    Assets["Embedded SvelteKit assets"] --> Server["Loopback Go server"]
+    Server -->|"Serves app"| Browser["SvelteKit app"]
+    Browser -->|"JSON + SSE"| Server
+    Server --> Core
+
+    Core --> Git["Read-only Git and snapshot capture"]
+    Core --> Store["SQLite and private object store"]
     Core --> Models["Model adapters"]
-    HTTP --> Assets["Embedded SvelteKit assets"]
+    Core --> Analyzers["Optional Setaryb and Mccabre CLI adapters"]
 ```
 
 ## References

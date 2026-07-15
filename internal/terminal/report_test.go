@@ -36,8 +36,8 @@ func TestRenderSeparatesVerifiedCandidatesAndRefutedAtFixedWidth(t *testing.T) {
 		RequestedComparison: "base..head", Status: "complete",
 		Change:     change,
 		Findings:   []FindingView{{Revision: review.FindingRevision{FindingID: "finding-1", Revision: 1, Claim: "The changed return can violate the invariant.", Impact: "Callers receive an invalid value.", Category: "correctness", Severity: "high", Verification: review.VerificationSupported, Anchors: []review.Anchor{anchor}}, Lane: review.FindingLaneVerified}},
-		Candidates: []CandidateView{{Candidate: review.CandidateRecord{ID: "candidate-1", Candidate: review.Candidate{Claim: "A retained candidate needs investigation.", Impact: "Potential issue.", Category: "correctness", Severity: "medium", Anchors: []review.CandidateAnchor{anchor}}}, Reason: "inconclusive"}},
-		Refuted:    []CandidateView{{Candidate: review.CandidateRecord{ID: "candidate-2", Candidate: review.Candidate{Claim: "A refuted hypothesis.", Impact: "No impact.", Category: "correctness", Severity: "low", Anchors: []review.CandidateAnchor{anchor}}}, Reason: "refuted"}},
+		Candidates: []CandidateView{{Candidate: review.CandidateRecord{ID: "candidate-1", Candidate: review.Candidate{Claim: "A retained candidate needs investigation.", Impact: "Potential issue.", Category: "correctness", Severity: "medium", Anchors: []review.Anchor{anchor}}}, Reason: "inconclusive"}},
+		Refuted:    []CandidateView{{Candidate: review.CandidateRecord{ID: "candidate-2", Candidate: review.Candidate{Claim: "A refuted hypothesis.", Impact: "No impact.", Category: "correctness", Severity: "low", Anchors: []review.Anchor{anchor}}}, Reason: "refuted"}},
 	}
 
 	var hidden bytes.Buffer

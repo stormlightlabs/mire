@@ -41,12 +41,12 @@ func TestVerificationPersistsRunEvidenceAndDerivedLaneAcrossRestart(t *testing.T
 		t.Fatalf("RunReviewPasses() error = %v", err)
 	}
 	candidate := candidateResult.Candidates[0]
-	anchor := review.CandidateAnchor{SnapshotID: change.SnapshotID, Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"}
+	anchor := review.Anchor{SnapshotID: change.SnapshotID, Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"}
 	output := review.VerificationEnvelope{
 		SchemaVersion: review.VerificationSchemaVersion, State: review.VerificationSupported,
 		SuspectedInvariant: "The guard must reject invalid input.",
-		ConcretePath:       []review.VerificationPathStep{{Summary: "Invalid input reaches the changed branch.", SnapshotID: change.SnapshotID, Anchors: []review.CandidateAnchor{anchor}, ArtifactDigest: "path-digest"}},
-		SupportingEvidence: []review.Evidence{{SnapshotID: change.SnapshotID, Anchors: []review.CandidateAnchor{anchor}, Summary: "The changed branch lacks a rejecting guard.", ArtifactDigest: "source-digest"}},
+		ConcretePath:       []review.VerificationPathStep{{Summary: "Invalid input reaches the changed branch.", SnapshotID: change.SnapshotID, Anchors: []review.Anchor{anchor}, ArtifactDigest: "path-digest"}},
+		SupportingEvidence: []review.Evidence{{SnapshotID: change.SnapshotID, Anchors: []review.Anchor{anchor}, Summary: "The changed branch lacks a rejecting guard.", ArtifactDigest: "source-digest"}},
 		RefutationAttempt:  "Searched for a guard and a test that would disprove the path.",
 	}
 	verificationResult, err := review.VerifyCandidate(context.Background(), change, candidate, &dbFixtureModel{output: mustDBJSON(t, output)}, review.VerifierOptions{

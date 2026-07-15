@@ -85,7 +85,7 @@ func TestFindingRevisionChatReferenceIsResolvedToActiveRound(t *testing.T) {
 	}
 	change := review.ChangeModel{SchemaVersion: "mire/v1/change-model", SessionID: session.ID, SnapshotID: frozen.ID, SnapshotDigest: frozen.ManifestDigest,
 		Digest: "change-digest", Files: []review.FileChange{{Status: "modified", TargetPath: "README.md", TargetDigest: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", Hunks: []review.Hunk{{ID: "README.md#1", Digest: "hunk-1", Available: true}}}}}
-	candidate := review.CandidateRecord{ID: "candidate", RunID: "review-run", PassName: "correctness", Candidate: review.Candidate{Claim: "The README is misleading.", Impact: "Users may misunderstand the behavior.", Category: "documentation", Severity: "low", Anchors: []review.CandidateAnchor{{SnapshotID: frozen.ID, Side: snapshot.TreeSideTarget, Path: "README.md", HunkID: "README.md#1", HunkDigest: "hunk-1"}}}}
+	candidate := review.CandidateRecord{ID: "candidate", RunID: "review-run", PassName: "correctness", Candidate: review.Candidate{Claim: "The README is misleading.", Impact: "Users may misunderstand the behavior.", Category: "documentation", Severity: "low", Anchors: []review.Anchor{{SnapshotID: frozen.ID, Side: snapshot.TreeSideTarget, Path: "README.md", HunkID: "README.md#1", HunkDigest: "hunk-1"}}}}
 	finding, err := review.NewFindingRevision(change, candidate, round.ID, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)

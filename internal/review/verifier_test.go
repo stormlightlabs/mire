@@ -147,12 +147,12 @@ func TestValidateEvidenceFloorBoundaries(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			candidateCopy := candidate
-			candidateCopy.Candidate.Anchors = append([]CandidateAnchor(nil), candidate.Candidate.Anchors...)
+			candidateCopy.Candidate.Anchors = append([]Anchor(nil), candidate.Candidate.Anchors...)
 			recordCopy := valid
 			recordCopy.ConcretePath = append([]VerificationPathStep(nil), valid.ConcretePath...)
-			recordCopy.ConcretePath[0].Anchors = append([]CandidateAnchor(nil), valid.ConcretePath[0].Anchors...)
+			recordCopy.ConcretePath[0].Anchors = append([]Anchor(nil), valid.ConcretePath[0].Anchors...)
 			recordCopy.Evidence = append([]Evidence(nil), valid.Evidence...)
-			recordCopy.Evidence[0].Anchors = append([]CandidateAnchor(nil), valid.Evidence[0].Anchors...)
+			recordCopy.Evidence[0].Anchors = append([]Anchor(nil), valid.Evidence[0].Anchors...)
 			test.mutate(&candidateCopy, &recordCopy)
 			if err := ValidateEvidenceFloor(change, candidateCopy, recordCopy); err == nil {
 				t.Fatal("ValidateEvidenceFloor() error = nil, want boundary rejection")
@@ -216,18 +216,18 @@ func verifierFixtureChange() ChangeModel {
 func verifierFixtureCandidate() CandidateRecord {
 	return CandidateRecord{ID: "candidate-1", RunID: "review-run-1", PassName: "correctness", Ordinal: 0, Fingerprint: "candidate-fingerprint", Candidate: Candidate{
 		Claim: "The changed guard is bypassed.", Impact: "Invalid input reaches the protected branch.", Category: "correctness", Severity: "high", Confidence: 0.99,
-		Anchors: []CandidateAnchor{{SnapshotID: "snapshot-1", Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"}},
+		Anchors: []Anchor{{SnapshotID: "snapshot-1", Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"}},
 	}}
 }
 
 func verifierFixtureEnvelope(state VerificationState) VerificationEnvelope {
-	anchor := CandidateAnchor{SnapshotID: "snapshot-1", Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"}
+	anchor := Anchor{SnapshotID: "snapshot-1", Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"}
 	return VerificationEnvelope{
 		SchemaVersion: VerificationSchemaVersion, State: state, SuspectedInvariant: "The guard must reject invalid input before the changed branch.",
-		ConcretePath:       []VerificationPathStep{{Kind: "control_flow", Summary: "Invalid input reaches the changed branch.", SnapshotID: "snapshot-1", Anchors: []CandidateAnchor{anchor}, ArtifactDigest: "path-digest"}},
-		SupportingEvidence: []Evidence{{Kind: "source", SnapshotID: "snapshot-1", Anchors: []CandidateAnchor{anchor}, Summary: "The changed branch has no rejecting guard.", ArtifactDigest: "source-digest"}},
-		GuardSearch:        []Evidence{{Kind: "guard", SnapshotID: "snapshot-1", Anchors: []CandidateAnchor{anchor}, Summary: "No guard protects the branch.", ArtifactDigest: "guard-digest"}},
-		TestSearch:         []Evidence{{Kind: "test", SnapshotID: "snapshot-1", Anchors: []CandidateAnchor{anchor}, Summary: "No test covers invalid input.", ArtifactDigest: "test-digest"}},
+		ConcretePath:       []VerificationPathStep{{Kind: "control_flow", Summary: "Invalid input reaches the changed branch.", SnapshotID: "snapshot-1", Anchors: []Anchor{anchor}, ArtifactDigest: "path-digest"}},
+		SupportingEvidence: []Evidence{{Kind: "source", SnapshotID: "snapshot-1", Anchors: []Anchor{anchor}, Summary: "The changed branch has no rejecting guard.", ArtifactDigest: "source-digest"}},
+		GuardSearch:        []Evidence{{Kind: "guard", SnapshotID: "snapshot-1", Anchors: []Anchor{anchor}, Summary: "No guard protects the branch.", ArtifactDigest: "guard-digest"}},
+		TestSearch:         []Evidence{{Kind: "test", SnapshotID: "snapshot-1", Anchors: []Anchor{anchor}, Summary: "No test covers invalid input.", ArtifactDigest: "test-digest"}},
 		RefutationAttempt:  "Tried to find an input guard and a covering test; neither refuted the path.",
 	}
 }

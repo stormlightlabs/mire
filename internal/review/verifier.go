@@ -94,28 +94,28 @@ func (relation EvidenceRelation) Valid() bool {
 
 // Evidence is one immutable, snapshot-bound verifier observation.
 type Evidence struct {
-	ID             string            `json:"id"`
-	Relation       EvidenceRelation  `json:"relation"`
-	SnapshotID     string            `json:"snapshot_id"`
-	Anchors        []CandidateAnchor `json:"anchors"`
-	Summary        string            `json:"summary"`
-	ProducingRunID string            `json:"producing_run_id"`
-	ArtifactDigest string            `json:"artifact_digest"`
-	OutputPointer  string            `json:"output_pointer,omitempty"`
-	Kind           string            `json:"kind,omitempty"`
-	Independent    bool              `json:"independent"`
-	Concrete       bool              `json:"concrete"`
-	Material       bool              `json:"material,omitempty"`
+	ID             string           `json:"id"`
+	Relation       EvidenceRelation `json:"relation"`
+	SnapshotID     string           `json:"snapshot_id"`
+	Anchors        []Anchor         `json:"anchors"`
+	Summary        string           `json:"summary"`
+	ProducingRunID string           `json:"producing_run_id"`
+	ArtifactDigest string           `json:"artifact_digest"`
+	OutputPointer  string           `json:"output_pointer,omitempty"`
+	Kind           string           `json:"kind,omitempty"`
+	Independent    bool             `json:"independent"`
+	Concrete       bool             `json:"concrete"`
+	Material       bool             `json:"material,omitempty"`
 }
 
 // VerificationPathStep is one anchored step in the verifier's concrete path.
 type VerificationPathStep struct {
-	Kind           string            `json:"kind,omitempty"`
-	Summary        string            `json:"summary"`
-	SnapshotID     string            `json:"snapshot_id"`
-	Anchors        []CandidateAnchor `json:"anchors"`
-	ArtifactDigest string            `json:"artifact_digest"`
-	OutputPointer  string            `json:"output_pointer,omitempty"`
+	Kind           string   `json:"kind,omitempty"`
+	Summary        string   `json:"summary"`
+	SnapshotID     string   `json:"snapshot_id"`
+	Anchors        []Anchor `json:"anchors"`
+	ArtifactDigest string   `json:"artifact_digest"`
+	OutputPointer  string   `json:"output_pointer,omitempty"`
 }
 
 // VerificationEnvelope is the strict structured response accepted from a
@@ -504,7 +504,7 @@ func retrieveVerificationArtifacts(ctx context.Context, candidate CandidateRecor
 	return artifacts, diagnostics
 }
 
-func anchorIDs(anchors []CandidateAnchor) []string {
+func anchorIDs(anchors []Anchor) []string {
 	ids := make([]string, 0, len(anchors))
 	for _, anchor := range anchors {
 		ids = append(ids, anchor.HunkID)
@@ -698,15 +698,15 @@ func normalizeEvidence(change ChangeModel, candidate CandidateRecord, runID stri
 	return evidence, nil
 }
 
-func normalizeVerificationAnchor(change ChangeModel, anchor CandidateAnchor) (CandidateAnchor, error) {
+func normalizeVerificationAnchor(change ChangeModel, anchor Anchor) (Anchor, error) {
 	if anchor.SnapshotID == "" {
 		anchor.SnapshotID = change.SnapshotID
 	}
 	if anchor.SnapshotID != change.SnapshotID {
-		return CandidateAnchor{}, errors.New("evidence anchor belongs to another snapshot")
+		return Anchor{}, errors.New("evidence anchor belongs to another snapshot")
 	}
 	if anchor.HunkID == "" {
-		return CandidateAnchor{}, errors.New("evidence anchor hunk ID is required")
+		return Anchor{}, errors.New("evidence anchor hunk ID is required")
 	}
 	for _, file := range change.Files {
 		path := file.TargetPath
@@ -724,15 +724,15 @@ func normalizeVerificationAnchor(change ChangeModel, anchor CandidateAnchor) (Ca
 				anchor.HunkDigest = hunk.Digest
 			}
 			if anchor.HunkDigest != "" && hunk.Digest != "" && anchor.HunkDigest != hunk.Digest {
-				return CandidateAnchor{}, fmt.Errorf("evidence anchor hunk %q digest does not match snapshot", anchor.HunkID)
+				return Anchor{}, fmt.Errorf("evidence anchor hunk %q digest does not match snapshot", anchor.HunkID)
 			}
 			if anchor.Path != path {
-				return CandidateAnchor{}, fmt.Errorf("evidence anchor path %q does not match snapshot", anchor.Path)
+				return Anchor{}, fmt.Errorf("evidence anchor path %q does not match snapshot", anchor.Path)
 			}
 			return anchor, nil
 		}
 	}
-	return CandidateAnchor{}, fmt.Errorf("evidence anchor references unknown hunk %q", anchor.HunkID)
+	return Anchor{}, fmt.Errorf("evidence anchor references unknown hunk %q", anchor.HunkID)
 }
 
 func validOutputPointer(pointer string) bool {

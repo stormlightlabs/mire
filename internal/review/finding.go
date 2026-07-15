@@ -24,10 +24,6 @@ const (
 	FindingPresentationSchemaVersion = "mire/v1/finding-presentation"
 )
 
-// Anchor is the identity-bearing location of a finding. CandidateAnchor is
-// retained as the historical name used by reviewer and verifier payloads.
-type Anchor = CandidateAnchor
-
 // FindingOrigin records the retained outputs that first produced a finding.
 // It is provenance only; it does not grant authority to change the finding.
 type FindingOrigin struct {

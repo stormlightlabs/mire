@@ -9,7 +9,7 @@ import (
 	"github.com/stormlightlabs/mire/internal/snapshot"
 )
 
-func TestCreateCapturedSessionPersistsImmutableSnapshotAndRoundAtomically(t *testing.T) {
+func TestCreateCapturedSessionPersists(t *testing.T) {
 	t.Parallel()
 
 	stateDir := t.TempDir()
@@ -90,7 +90,7 @@ func TestCreateCapturedSessionPersistsImmutableSnapshotAndRoundAtomically(t *tes
 	}
 }
 
-func TestAppendCapturedRoundPreservesHistoryAndRejectsOtherRepository(t *testing.T) {
+func TestAppendCapturedRoundPreserves(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()

@@ -14,9 +14,9 @@ import (
 	"github.com/stormlightlabs/mire/internal/snapshot"
 )
 
-// CandidateAnchor binds a candidate to an exact hunk in the frozen snapshot.
+// Anchor binds a candidate to an exact hunk in the frozen snapshot.
 // A hunk ID, rather than a line number, is the identity-bearing field.
-type CandidateAnchor struct {
+type Anchor struct {
 	SnapshotID        string `json:"snapshot_id"`
 	Side              string `json:"side"`
 	Layer             string `json:"layer,omitempty"`
@@ -36,14 +36,14 @@ type CandidateAnchor struct {
 // reviewer. It is intentionally not a verified finding; later milestones add
 // evidence and adversarial verification.
 type Candidate struct {
-	SourceID   string            `json:"source_id,omitempty"`
-	Claim      string            `json:"claim"`
-	Impact     string            `json:"impact"`
-	Category   string            `json:"category"`
-	Severity   string            `json:"severity"`
-	Confidence float64           `json:"confidence,omitempty"`
-	Anchors    []CandidateAnchor `json:"anchors"`
-	Rationale  string            `json:"rationale,omitempty"`
+	SourceID   string   `json:"source_id,omitempty"`
+	Claim      string   `json:"claim"`
+	Impact     string   `json:"impact"`
+	Category   string   `json:"category"`
+	Severity   string   `json:"severity"`
+	Confidence float64  `json:"confidence,omitempty"`
+	Anchors    []Anchor `json:"anchors"`
+	Rationale  string   `json:"rationale,omitempty"`
 }
 
 func (c Candidate) normalize(change ChangeModel) (Candidate, error) {

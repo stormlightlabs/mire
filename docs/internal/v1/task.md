@@ -13,13 +13,10 @@ Work the frontier: any ticket whose blockers are complete.
 
 ## Dependency frontier
 
-Completed prerequisites: V1-01, V1-02, V1-03, V1-04, V1-05, V1-06, V1-07,
-V1-08, V1-09, and V1-10.
-
-The current frontier contains these tickets:
-
+- **V1-13 — Keep every chat turn bound to review context.**
 - **V1-14 — Run all model roles through OpenAI-compatible endpoints.**
 - **V1-15 — Run all model roles through Anthropic.**
+- **V1-16 — Review and inspect results in a static terminal report.**
 - **V1-18 — Run fixed analyzers with bounded, auditable subprocesses.**
 - **V1-21 — Serve the review API, durable progress, and embedded app securely.**
 
@@ -207,20 +204,20 @@ without rewriting machine evidence or history.
 
 **Acceptance criteria:**
 
-- [ ] Finding revisions are immutable and carry claim, impact, category,
+- [x] Finding revisions are immutable and carry claim, impact, category,
       severity, confidence, verification, anchors, evidence, origin, and
       relationships.
-- [ ] Anchors combine snapshot side/layer, path, blob digest, line range,
+- [x] Anchors combine snapshot side/layer, path, blob digest, line range,
       original hunk, context and hunk digests, plus optional symbol/syntax
       fingerprints; line numbers alone are never identity.
-- [ ] Strong claim/invariant and anchor matches retain an ID across rounds;
+- [x] Strong claim/invariant and anchor matches retain an ID across rounds;
       ambiguous matches create linked possible successors or duplicates instead
       of false continuity.
-- [ ] Human dispositions support `open`, `accepted`, `intentional`, `dismissed`,
+- [x] Human dispositions support `open`, `accepted`, `intentional`, `dismissed`,
       `deferred`, `resolved`, and `accepted_risk` independently of verification.
-- [ ] Disposition changes are append-only and rationales required by the selected
+- [x] Disposition changes are append-only and rationales required by the selected
       disposition are retained.
-- [ ] Editing a comment creates a versioned presentation record and never alters
+- [x] Editing a comment creates a versioned presentation record and never alters
       the finding's evidence or machine-verification history.
 
 **Verification:**
@@ -742,27 +739,3 @@ claimed platforms.
 
 **Notes:** CI should fail if formatting changes tracked files. A thin Makefile may
 alias these commands but must not contain hidden build or release logic.
-
-## Final frontier
-
-V1-01 through V1-10 are complete. The current frontier is:
-
-- **V1-11 — Verify candidates against an evidence floor.**
-- **V1-12 — Preserve finding identity and explicit human decisions.**
-- **V1-13 — Keep every chat turn bound to review context.**
-- **V1-14 — Run all model roles through OpenAI-compatible endpoints.**
-- **V1-15 — Run all model roles through Anthropic.**
-- **V1-16 — Review and inspect results in a static terminal report.**
-- **V1-17 — Export one canonical ledger into all V1 formats.**
-- **V1-18 — Run fixed analyzers with bounded, auditable subprocesses.**
-- **V1-19 — Add syntax-aware lexical evidence from Setaryb.**
-- **V1-20 — Add complexity and clone evidence from Mccabre.**
-- **V1-22 — Explore diffs, slices, lanes, and evidence in the browser.**
-- **V1-23 — Triage, discuss, re-verify, and export in the browser.**
-- **V1-24 — Audit V1 authority, privacy, and failure boundaries.**
-- **V1-25 — Gate review quality with a frozen adjudicated corpus.**
-- **V1-26 — Produce and smoke-test the single native release artifact.**
-
-Continue with any ticket whose listed blockers are complete. Prefer one ticket per
-fresh agent context, and do not add ordering edges merely to keep milestone work
-sequential.

@@ -71,6 +71,11 @@ var migrations = []Migration{
 		Name:    "candidate verification and evidence",
 		SQL:     embeddedMigration("sql/010_verifications.sql"),
 	},
+	{
+		Version: 11,
+		Name:    "immutable findings dispositions and presentations",
+		SQL:     embeddedMigration("sql/011_findings_and_human_decisions.sql"),
+	},
 }
 
 func embeddedMigration(name string) string {

@@ -17,13 +17,19 @@ import (
 // CandidateAnchor binds a candidate to an exact hunk in the frozen snapshot.
 // A hunk ID, rather than a line number, is the identity-bearing field.
 type CandidateAnchor struct {
-	SnapshotID string `json:"snapshot_id"`
-	Side       string `json:"side"`
-	Path       string `json:"path"`
-	HunkID     string `json:"hunk_id"`
-	StartLine  int    `json:"start_line,omitempty"`
-	EndLine    int    `json:"end_line,omitempty"`
-	HunkDigest string `json:"hunk_digest,omitempty"`
+	SnapshotID        string `json:"snapshot_id"`
+	Side              string `json:"side"`
+	Layer             string `json:"layer,omitempty"`
+	Path              string `json:"path"`
+	BlobDigest        string `json:"blob_digest,omitempty"`
+	StartLine         int    `json:"start_line,omitempty"`
+	EndLine           int    `json:"end_line,omitempty"`
+	OriginalHunk      string `json:"original_hunk,omitempty"`
+	HunkID            string `json:"hunk_id"`
+	HunkDigest        string `json:"hunk_digest,omitempty"`
+	ContextDigest     string `json:"context_digest,omitempty"`
+	Symbol            string `json:"symbol,omitempty"`
+	SyntaxFingerprint string `json:"syntax_fingerprint,omitempty"`
 }
 
 // Candidate is one schema-valid, plausible output emitted by a specialized

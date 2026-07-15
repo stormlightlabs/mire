@@ -300,19 +300,19 @@ and allowed repository guidance under the settled policy precedence.
 
 **Acceptance criteria:**
 
-- [ ] The change model identifies files, hunks, tests, contracts,
+- [x] The change model identifies files, hunks, tests, contracts,
       configuration, dependencies, migrations, and public surfaces when the
       snapshot provides evidence for them.
-- [ ] Intent may include the user's prompt, pinned commit messages, base-snapshot
+- [x] Intent may include the user's prompt, pinned commit messages, base-snapshot
       `AGENTS.md`/contribution/architecture guidance, and an earlier same-session
       round.
-- [ ] Built-in safety rules outrank private request/configuration, which outranks
+- [x] Built-in safety rules outrank private request/configuration, which outranks
       base policy, base documentation, and target policy changes in that order.
-- [ ] Path-specific policy only overrides general policy within its own tier;
+- [x] Path-specific policy only overrides general policy within its own tier;
       same-tier conflicts are recorded and use the safer interpretation.
-- [ ] Target policy changes are review evidence, not authority to review
+- [x] Target policy changes are review evidence, not authority to review
       themselves, except for the recorded no-base-revision case.
-- [ ] All context and pinned Git metadata come from immutable snapshot inputs and
+- [x] All context and pinned Git metadata come from immutable snapshot inputs and
       are digest-recorded; repository text cannot grant tools or permissions.
 
 **Verification:**
@@ -320,6 +320,11 @@ and allowed repository guidance under the settled policy precedence.
 - `go test ./...`
 - Run table-driven precedence and path-scope fixtures, including conflicting and
   target-modified policy, and compare canonical change-model output.
+
+**Status:** Complete. `internal/review` assembles a canonical, digest-recorded
+change model from immutable snapshot inputs, verifies captured object and
+manifest digests, and records policy precedence, conflicts, target evidence,
+and no-base exceptions.
 
 ### V1-09 — Produce a review plan and explainable logical slices
 

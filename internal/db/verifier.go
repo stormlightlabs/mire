@@ -190,6 +190,34 @@ func (store *RepositoryStore) GetVerificationRun(ctx context.Context, runID stri
 	return run, nil
 }
 
+// ListVerificationRuns returns all verifier provenance records for a round in
+// stable creation order.
+func (store *RepositoryStore) ListVerificationRuns(ctx context.Context, roundID string) ([]review.VerificationRunRecord, error) {
+	if err := store.validate(); err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := store.database.QueryContext(ctx, verificationRunQuery+` WHERE round_id = ? ORDER BY created_at ASC, id ASC`, strings.TrimSpace(roundID))
+	if err != nil {
+		return nil, fmt.Errorf("list verification runs: %w", err)
+	}
+	defer rows.Close()
+	result := make([]review.VerificationRunRecord, 0)
+	for rows.Next() {
+		run, scanErr := scanVerificationRun(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("list verification runs: %w", scanErr)
+		}
+		result = append(result, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list verification runs: %w", err)
+	}
+	return result, nil
+}
+
 // SaveVerification inserts one immutable verification record. It stores no
 // lane because verified, candidate, and refuted are derived views.
 func (store *RepositoryStore) SaveVerification(ctx context.Context, verification review.VerificationRecord) error {

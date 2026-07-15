@@ -150,6 +150,34 @@ func (store *RepositoryStore) GetPlanRun(ctx context.Context, runID string) (rev
 	return run, nil
 }
 
+// ListPlanRuns returns all planner provenance records for a round in stable
+// creation order.
+func (store *RepositoryStore) ListPlanRuns(ctx context.Context, roundID string) ([]review.RunRecord, error) {
+	if err := store.validate(); err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := store.database.QueryContext(ctx, plannerRunQuery+` WHERE round_id = ? ORDER BY created_at ASC, id ASC`, strings.TrimSpace(roundID))
+	if err != nil {
+		return nil, fmt.Errorf("list planner runs: %w", err)
+	}
+	defer rows.Close()
+	result := make([]review.RunRecord, 0)
+	for rows.Next() {
+		run, scanErr := scanPlanRun(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("list planner runs: %w", scanErr)
+		}
+		result = append(result, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list planner runs: %w", err)
+	}
+	return result, nil
+}
+
 // SaveReviewPlan persists the validated plan projection for one successful
 // planner run. It does not overwrite an existing run's plan.
 func (store *RepositoryStore) SaveReviewPlan(ctx context.Context, plan review.ReviewPlan) error {

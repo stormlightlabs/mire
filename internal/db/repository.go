@@ -225,6 +225,36 @@ func (store *RepositoryStore) GetSession(ctx context.Context, sessionID string) 
 	return session, nil
 }
 
+// GetRepositoryForSession returns the immutable repository metadata owning a
+// session. It is used by audit and export projections that must retain the
+// discovered Git directory without consulting a live worktree.
+func (store *RepositoryStore) GetRepositoryForSession(ctx context.Context, sessionID string) (Repository, error) {
+	if err := store.validate(); err != nil {
+		return Repository{}, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	var repository Repository
+	var created string
+	err := store.database.QueryRowContext(ctx, `
+SELECT r.id, r.canonical_identity, r.display_name, r.discovered_git_dir, r.created_at
+FROM repositories r JOIN sessions s ON s.repository_id = r.id WHERE s.id = ?`, strings.TrimSpace(sessionID)).Scan(
+		&repository.ID, &repository.CanonicalIdentity, &repository.DisplayName, &repository.DiscoveredGitDir, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Repository{}, fmt.Errorf("%w for session: %q", ErrRepositoryNotFound, sessionID)
+	}
+	if err != nil {
+		return Repository{}, fmt.Errorf("get repository for session %q: %w", sessionID, err)
+	}
+	parsed, parseErr := shared.ParseTimestamp(created)
+	if parseErr != nil {
+		return Repository{}, fmt.Errorf("parse repository creation time: %w", parseErr)
+	}
+	repository.CreatedAt = parsed
+	return repository, nil
+}
+
 // ListSessions returns all persisted session metadata in deterministic order.
 func (store *RepositoryStore) ListSessions(ctx context.Context) ([]Session, error) {
 	if err := store.validate(); err != nil {

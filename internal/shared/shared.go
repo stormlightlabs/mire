@@ -1,6 +1,9 @@
 package shared
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -95,4 +98,27 @@ func ParseTimestamp(value string) (time.Time, error) {
 
 func TimestampString(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func MaxInt(left, right int) int {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func Jsonl(value any) ([]byte, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 || string(data) == "null" {
+		return []byte{}, nil
+	}
+	return append(data, '\n'), nil
+}
+
+func Digest(data []byte) string {
+	value := sha256.Sum256(data)
+	return hex.EncodeToString(value[:])
 }

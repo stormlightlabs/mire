@@ -166,6 +166,75 @@ func (store *RepositoryStore) GetReviewRun(ctx context.Context, runID string) (r
 	return run, nil
 }
 
+// ListReviewRuns returns all specialized reviewer runs for a round in stable
+// creation order. The result is an immutable provenance projection suitable
+// for audit and export.
+func (store *RepositoryStore) ListReviewRuns(ctx context.Context, roundID string) ([]review.RunRecord, error) {
+	if err := store.validate(); err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := store.database.QueryContext(ctx, reviewRunQuery+` WHERE round_id = ? ORDER BY created_at ASC, id ASC`, strings.TrimSpace(roundID))
+	if err != nil {
+		return nil, fmt.Errorf("list review runs: %w", err)
+	}
+	defer rows.Close()
+	result := make([]review.RunRecord, 0)
+	for rows.Next() {
+		run, scanErr := scanReviewRun(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("list review runs: %w", scanErr)
+		}
+		result = append(result, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list review runs: %w", err)
+	}
+	return result, nil
+}
+
+// ListReviewArtifacts returns all immutable retrieval descriptors for a round.
+// Content is retained for explicit bundle evidence files; callers exporting a
+// canonical projection should use the descriptor fields only.
+func (store *RepositoryStore) ListReviewArtifacts(ctx context.Context, roundID string) ([]review.RetrievedArtifact, error) {
+	if err := store.validate(); err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := store.database.QueryContext(ctx, `
+SELECT id, run_id, pass_name, kind, path, relation, hunk_ids_json, digest,
+       size, content, excluded, exclusion_reason, truncated
+FROM review_artifacts WHERE round_id = ? ORDER BY pass_name ASC, id ASC`, strings.TrimSpace(roundID))
+	if err != nil {
+		return nil, fmt.Errorf("list review artifacts: %w", err)
+	}
+	defer rows.Close()
+	result := make([]review.RetrievedArtifact, 0)
+	for rows.Next() {
+		var artifact review.RetrievedArtifact
+		var hunkIDs string
+		var excluded, truncated int
+		if err := rows.Scan(&artifact.ID, &artifact.RunID, &artifact.PassName, &artifact.Kind,
+			&artifact.Path, &artifact.Relation, &hunkIDs, &artifact.Digest, &artifact.Size,
+			&artifact.Content, &excluded, &artifact.ExclusionReason, &truncated); err != nil {
+			return nil, fmt.Errorf("list review artifacts: %w", err)
+		}
+		if err := json.Unmarshal([]byte(hunkIDs), &artifact.HunkIDs); err != nil {
+			return nil, fmt.Errorf("decode review artifact %q hunk IDs: %w", artifact.ID, err)
+		}
+		artifact.Excluded, artifact.Truncated = excluded == 1, truncated == 1
+		result = append(result, artifact)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list review artifacts: %w", err)
+	}
+	return result, nil
+}
+
 // SaveReviewPass atomically retains a pass outcome, every candidate emission,
 // every retrieval descriptor, and the cumulative coverage projection.
 func (store *RepositoryStore) SaveReviewPass(ctx context.Context, result review.ReviewPassResult) error {

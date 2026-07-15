@@ -69,6 +69,17 @@ mire show <SESSION>
 mire show <SESSION> --candidates --width 80
 ```
 
+Export the selected session's current round explicitly as an inspectable handoff.
+
+Note that export destinations are never overwritten.
+
+```sh
+mire export <SESSION> --format markdown --output review.md
+mire export <SESSION> --format json --output review.json
+mire export <SESSION> --format sarif --output findings.sarif
+mire export <SESSION> --format bundle --output review-bundle
+```
+
 Start the authenticated local web workbench:
 
 ```sh

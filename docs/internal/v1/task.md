@@ -146,22 +146,22 @@ without implying the export can restore the private snapshot.
 
 **Acceptance criteria:**
 
-- [ ] Canonical `review.json` is versioned independently of SQLite and contains
+- [x] Canonical `review.json` is versioned independently of SQLite and contains
       the normalized ledger, snapshot manifest, artifact descriptors,
       provenance, coverage, and omissions without credentials or snapshot-object
       contents.
-- [ ] Markdown is a readable front door with clearly distinct verified,
+- [x] Markdown is a readable front door with clearly distinct verified,
       candidate, refuted/audit, chat, coverage, and incomplete-analysis sections.
-- [ ] SARIF 2.1.0 contains only representable findings with valid locations,
+- [x] SARIF 2.1.0 contains only representable findings with valid locations,
       stable rule/result identities, and a declared loss of chat, detailed
       verification history, and rich dispositions.
-- [ ] Bundle output contains `REVIEW.md`, `review.json`, `manifest.json`,
+- [x] Bundle output contains `REVIEW.md`, `review.json`, `manifest.json`,
       `diff.patch`, `findings.json`, `evidence.jsonl`, `chat.jsonl`,
       `activity.jsonl`, and `findings.sarif`, plus only named evidence artifacts.
-- [ ] IDs and ordering are deterministic; repeated exports of unchanged state
+- [x] IDs and ordering are deterministic; repeated exports of unchanged state
       are byte-stable except for fields explicitly defined as export-instance
       metadata.
-- [ ] Export is explicit, never silently overwrites a destination, warns that
+- [x] Export is explicit, never silently overwrites a destination, warns that
       code/conversation may be sensitive, and cannot be mistaken for a V1 import
       or replay format.
 

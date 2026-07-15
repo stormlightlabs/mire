@@ -5,6 +5,7 @@ go 1.26.2
 require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/log v1.0.0
+	github.com/go-git/go-git/v6 v6.0.0-alpha.4
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.53.0
 )

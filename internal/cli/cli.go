@@ -7,12 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/stormlightlabs/mire/internal/db"
+	"github.com/stormlightlabs/mire/internal/gitrepo"
+	"github.com/stormlightlabs/mire/internal/snapshot"
 )
 
 var (
@@ -26,11 +25,12 @@ var (
 // Store is primarily useful for tests and application-service callers.
 // Normal commands open the private state store lazily when a stateful command runs.
 type Config struct {
-	Stdout     io.Writer
-	Stderr     io.Writer
-	StateDir   string
-	WorkingDir string
-	Store      *db.RepositoryStore
+	Stdout      io.Writer
+	Stderr      io.Writer
+	StateDir    string
+	WorkingDir  string
+	Store       *db.RepositoryStore
+	ObjectStore *snapshot.ObjectStore
 }
 
 type commandContext struct {
@@ -52,6 +52,21 @@ func (state *commandContext) currentRepository(ctx context.Context) (db.Reposito
 	return DiscoverCurrentRepository(ctx, state.config.WorkingDir)
 }
 
+func (state *commandContext) openObjectStore() (*snapshot.ObjectStore, error) {
+	if state.config.ObjectStore != nil {
+		return state.config.ObjectStore, nil
+	}
+	stateDir := state.config.StateDir
+	if stateDir == "" {
+		var err error
+		stateDir, err = db.DefaultStateDirectory()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return snapshot.OpenObjectStore(stateDir)
+}
+
 // NewRootCommand builds the root [cobra.Command].
 func NewRootCommand(config Config) *cobra.Command {
 	if config.Stdout == nil {
@@ -70,6 +85,7 @@ func NewRootCommand(config Config) *cobra.Command {
 	}
 	root.SetOut(config.Stdout)
 	root.SetErr(config.Stderr)
+	root.AddCommand(newReviewCommand(state))
 	root.AddCommand(newSessionsCommand(state))
 	return root
 }
@@ -83,66 +99,12 @@ func Execute(ctx context.Context) error {
 // DiscoverCurrentRepository performs only read-only Git metadata queries
 // and returns the canonical identity needed by the application service.
 func DiscoverCurrentRepository(ctx context.Context, directory string) (db.RepositoryIdentity, error) {
-	if ctx == nil {
-		ctx = context.Background()
+	identity, err := gitrepo.Discover(ctx, directory)
+	if errors.Is(err, gitrepo.ErrNotGitRepository) {
+		return db.RepositoryIdentity{}, fmt.Errorf("%w: %s", ErrNotGitRepository, directory)
 	}
-	if strings.TrimSpace(directory) == "" {
-		var err error
-		directory, err = os.Getwd()
-		if err != nil {
-			return db.RepositoryIdentity{}, fmt.Errorf("find current directory: %w", err)
-		}
-	}
-	directory, err := filepath.Abs(directory)
 	if err != nil {
-		return db.RepositoryIdentity{}, fmt.Errorf("resolve current directory: %w", err)
+		return db.RepositoryIdentity{}, fmt.Errorf("discover Git repository: %w", err)
 	}
-
-	command := exec.CommandContext(ctx, "git", "-C", directory, "rev-parse", "--show-toplevel", "--absolute-git-dir")
-	output, err := command.Output()
-	if err != nil {
-		var exitError *exec.ExitError
-		if errors.As(err, &exitError) {
-			if strings.Contains(strings.ToLower(string(exitError.Stderr)), "not a git repository") {
-				return db.RepositoryIdentity{}, fmt.Errorf("%w: %s", ErrNotGitRepository, directory)
-			}
-		}
-		return db.RepositoryIdentity{}, fmt.Errorf("discover Git repository from %s: %w", directory, err)
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) != 2 || strings.TrimSpace(lines[0]) == "" || strings.TrimSpace(lines[1]) == "" {
-		return db.RepositoryIdentity{}, fmt.Errorf("discover Git repository from %s: unexpected Git metadata output", directory)
-	}
-
-	root, err := canonicalPath(strings.TrimSpace(lines[0]))
-	if err != nil {
-		return db.RepositoryIdentity{}, fmt.Errorf("canonicalize Git worktree: %w", err)
-	}
-	gitDir, err := canonicalPath(strings.TrimSpace(lines[1]))
-	if err != nil {
-		return db.RepositoryIdentity{}, fmt.Errorf("canonicalize Git directory: %w", err)
-	}
-
-	displayName := filepath.Base(root)
-	if displayName == string(filepath.Separator) || displayName == "." || displayName == "" {
-		displayName = root
-	}
-	return db.RepositoryIdentity{
-		CanonicalIdentity: root,
-		DisplayName:       displayName,
-		DiscoveredGitDir:  gitDir,
-	}, nil
-}
-
-func canonicalPath(path string) (string, error) {
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	resolved, err := filepath.EvalSymlinks(absolute)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Clean(resolved), nil
+	return identity, nil
 }

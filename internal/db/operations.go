@@ -81,6 +81,7 @@ type Round struct {
 	ID           string
 	SessionID    string
 	RepositoryID string
+	SnapshotID   string
 	Number       int
 	Status       RoundStatus
 	CreatedAt    time.Time
@@ -1028,7 +1029,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 }
 
 const roundQuery = `
-SELECT id, session_id, repository_id, number, status, created_at, updated_at
+SELECT id, session_id, repository_id, COALESCE(snapshot_id, ''), number, status, created_at, updated_at
 FROM rounds`
 
 const operationQuery = `
@@ -1051,7 +1052,7 @@ func scanRound(row scanner) (Round, error) {
 	var round Round
 	var createdAtRaw, updatedAtRaw string
 	if err := row.Scan(
-		&round.ID, &round.SessionID, &round.RepositoryID, &round.Number, &round.Status,
+		&round.ID, &round.SessionID, &round.RepositoryID, &round.SnapshotID, &round.Number, &round.Status,
 		&createdAtRaw, &updatedAtRaw,
 	); err != nil {
 		return Round{}, err

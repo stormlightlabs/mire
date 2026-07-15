@@ -58,6 +58,19 @@ func RenderSessions(output io.Writer, sessions []db.Session) error {
 	return writer.Flush()
 }
 
+// RenderReviewCapture writes the stable result of the model-free
+// capture. Progress and diagnostics remain owned by the command's stderr.
+func RenderReviewCapture(output io.Writer, session db.Session, round db.Round, snapshot db.Snapshot) error {
+	if output == nil {
+		return fmt.Errorf("render review capture: output is nil")
+	}
+	_, err := fmt.Fprintf(output,
+		"Captured review\nSession: %s\nRound: %s\nSnapshot: %s\nRange: %s\nBase: %s\nTarget: %s\n",
+		session.ID, round.ID, snapshot.ID, snapshot.RequestedComparison,
+		snapshot.EffectiveBaseOID, snapshot.TargetOID)
+	return err
+}
+
 // Success styles a successful result message.
 func Success(message string) string {
 	return makeStyle(colorGreen, true).Render(message)

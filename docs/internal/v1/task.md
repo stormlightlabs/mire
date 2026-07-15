@@ -1,6 +1,6 @@
 ---
 title: "MIRE V1 implementation tasks"
-status: "ready"
+status: "in progress"
 updated: "2026-07-14"
 source: "plan.md"
 ---
@@ -13,20 +13,23 @@ Work the frontier: any ticket whose blockers are complete.
 
 ## Dependency frontier
 
-The initial frontier contains one ticket:
+Completed prerequisites: V1-01, V1-02, and V1-03.
 
-- **V1-01 — Establish private review state and session lifecycle.**
+The current frontier contains two tickets:
 
-When V1-01 is complete, V1-02 and V1-03 can proceed in parallel. Later tickets
-may proceed as soon as their declared blockers are complete; a milestone need not
-finish before work starts on an unblocked ticket in the next milestone.
+- **V1-04 — Preserve three-dot merge-base semantics.**
+- **V1-05 — Capture the complete working tree without tearing.**
+
+Later tickets may proceed as soon as their declared blockers are complete; a
+milestone need not finish before work starts on an unblocked ticket in the next
+milestone.
 
 ## Milestone 1: Durable private sessions
 
 **Exit criterion:** Private repository/session state survives restart, the CLI can
 list and delete existing sessions, and interrupted or competing operations leave
-durable, truthful state. User-visible session creation arrives with snapshot
-capture in Milestone 2.
+durable, truthful state. V1-03 now provides user-visible session creation with
+snapshot capture in Milestone 2.
 
 ### V1-01 — Establish private review state and session lifecycle
 
@@ -71,7 +74,7 @@ framework, or repository-local state.
 session cannot run two state-changing or model operations at once and an
 interrupted process is reported as abandoned rather than still running.
 
-**Blocked by:** V1-01
+**Blocked by:** V1-01 (complete)
 
 **Acceptance criteria:**
 
@@ -112,33 +115,40 @@ comparison once, copy every required byte into MIRE's private content-addressed
 store, persist an immutable manifest and review round, and perform no model call
 yet.
 
-**Blocked by:** V1-01
+**Blocked by:** V1-01 (complete)
 
 **Acceptance criteria:**
 
-- [ ] Symbolic revisions resolve once to object IDs; invalid or ambiguous
+- [x] Symbolic revisions resolve once to object IDs; invalid or ambiguous
       revisions fail before a round is created.
-- [ ] The snapshot records the requested expression, effective base and target
+- [x] The snapshot records the requested expression, effective base and target
       OIDs, Git object format, capture time, repository ID, and policy hash.
-- [ ] `mire review` creates the user-visible session and first round only when the
+- [x] `mire review` creates the user-visible session and first round only when the
       snapshot transaction succeeds; failed capture leaves neither usable record.
-- [ ] Complete base and target tree manifests include every tracked path, not only
+- [x] Complete base and target tree manifests include every tracked path, not only
       changed paths, while representing deletions, renames, binary files,
       executable modes, symlink targets, and submodule Git links without following
       symlinks.
-- [ ] Every byte referenced by either complete tree is written and digest-verified
+- [x] Every byte referenced by either complete tree is written and digest-verified
       in the private object store before the manifest transaction commits.
-- [ ] Snapshot reads use the stored manifest and objects rather than the live
+- [x] Snapshot reads use the stored manifest and objects rather than the live
       worktree or Git object database.
-- [ ] A failed object write leaves no committed snapshot or apparently usable
+- [x] A failed object write leaves no committed snapshot or apparently usable
       round.
 
 **Verification:**
 
 - `go test ./...`
-- Capture fixture repositories containing each supported file kind plus unchanged
-  context, remove or make the source objects unavailable, and confirm both full
-  trees, an unchanged file, and the stored diff remain readable.
+- `go test -race ./...`
+- `go vet ./...`
+- `go build ./cmd/mire`
+- Fixture repositories cover complete unchanged trees, regular and binary files,
+  executable modes, symlink targets, deletions, exact renames, invalid and
+  ambiguous revisions, failed object writes, transaction rollback, and reads
+  after source `.git` removal.
+
+**Status:** Complete. The initial capture path is model-free; `--session` append
+behavior remains part of V1-07.
 
 **Notes:** Git object IDs are provenance, never the only durable copy. Normalize
 and validate repository-relative paths before object-store access.
@@ -149,7 +159,7 @@ and validate repository-relative paths before object-store access.
 from the resolved merge base to the target while preserving the user's original
 comparison and the exact objects that determined it.
 
-**Blocked by:** V1-03
+**Blocked by:** V1-03 (complete)
 
 **Acceptance criteria:**
 
@@ -175,7 +185,7 @@ comparison and the exact objects that determined it.
 and final worktree layers, including nonignored untracked files, so overlapping
 staged and unstaged edits remain intelligible after the live repository changes.
 
-**Blocked by:** V1-03
+**Blocked by:** V1-03 (complete)
 
 **Acceptance criteria:**
 
@@ -937,13 +947,11 @@ alias these commands but must not contain hidden build or release logic.
 
 ## Final frontier
 
-Start with **V1-01 — Establish private review state and session lifecycle**. Give it one
-fresh implementation context and complete its tests before opening the two next
-frontier branches:
+V1-01, V1-02, and V1-03 are complete. The current frontier is:
 
-- **V1-02 — Recover interrupted and competing operations truthfully.**
-- **V1-03 — Capture a durable two-dot review snapshot.**
+- **V1-04 — Preserve three-dot merge-base semantics.**
+- **V1-05 — Capture the complete working tree without tearing.**
 
-After that split, work any ticket whose listed blockers are complete. Prefer one
-ticket per fresh agent context, and do not add ordering edges merely to keep
-milestone work sequential.
+Continue with any ticket whose listed blockers are complete. Prefer one ticket per
+fresh agent context, and do not add ordering edges merely to keep milestone work
+sequential.

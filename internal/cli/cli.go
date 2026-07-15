@@ -88,6 +88,7 @@ func NewRootCommand(config Config) *cobra.Command {
 	root.AddCommand(newReviewCommand(state))
 	root.AddCommand(newShowCommand(state))
 	root.AddCommand(newSessionsCommand(state))
+	root.AddCommand(newWebCommand(state))
 	return root
 }
 

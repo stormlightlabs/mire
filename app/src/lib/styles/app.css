@@ -1,0 +1,79 @@
+@import '@fontsource-variable/overpass';
+@import '@fontsource-variable/martian-mono';
+
+:root {
+	font-family: 'Overpass Variable', 'Overpass', sans-serif;
+	font-synthesis: none;
+	color: #ebfafa;
+	background: #090a12;
+	-webkit-font-smoothing: antialiased;
+	--void: #090a12;
+	--panel: #10121e;
+	--panel-raised: #151727;
+	--panel-hover: #1a1c2e;
+	--line: #292b43;
+	--line-bright: #3b3e5c;
+	--ink: #ebfafa;
+	--muted: #8c8fac;
+	--faint: #5d607e;
+	--lavender: #a48cf2;
+	--pink: #f16c9e;
+	--blue: #6cb6ff;
+	--green: #7bd88f;
+	--mono: 'Martian Mono Variable', 'Martian Mono', monospace;
+	--shadow: 0 20px 60px rgb(0 0 0 / 22%), 0 2px 8px rgb(0 0 0 / 28%);
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	min-width: 320px;
+	min-height: 100%;
+	margin: 0;
+}
+
+body {
+	min-height: 100vh;
+	color: var(--ink);
+	background: var(--void);
+	background-image:
+		radial-gradient(circle at 85% 12%, rgb(164 140 242 / 9%), transparent 29rem),
+		linear-gradient(120deg, transparent 0 53%, rgb(108 182 255 / 2%) 53% 53.15%, transparent 53.15%);
+	text-rendering: optimizeLegibility;
+}
+
+button {
+	font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible {
+	outline: 2px solid #f9c859;
+	outline-offset: 3px;
+}
+
+p,
+h1,
+h2,
+h3 {
+	margin: 0;
+}
+
+h1,
+h2,
+h3 {
+	text-wrap: balance;
+}
+
+p {
+	text-wrap: pretty;
+}
+
+code {
+	font-family: var(--mono);
+}

@@ -1,6 +1,86 @@
 # MIRE
 
-Model Independent Review Environment
+> Model Independent Review Environment
+
+MIRE is a local, model-independent code-review workbench.
+
+## First-time setup
+
+The Go server embeds the SvelteKit production output so you need to build the web
+app before compiling the Go binary:
+
+```sh
+pnpm --dir app install --frozen-lockfile
+pnpm --dir app build
+go build ./cmd/mire
+```
+
+## Usage
+
+Run MIRE from the Git repository you want to review. The capture commands only
+read the repository and store review state in MIRE's private application state.
+
+Capture a committed comparison:
+
+```sh
+mire review --range main..HEAD
+mire review --range origin/main...HEAD
+```
+
+The two-dot form compares the requested base and target directly.
+
+The three-dot form compares the target with the resolved merge base.
+
+Capture the current working tree, including staged, unstaged, and nonignored untracked
+files:
+
+```sh
+mire review --worktree
+```
+
+Each capture creates a session and round.
+
+Append another capture to an existing session with its session ID:
+
+```sh
+mire review --session <SESSION> --range main..HEAD
+mire review --session <SESSION> --worktree
+```
+
+List or delete persisted sessions:
+
+```sh
+mire sessions list
+mire sessions delete <SESSION>
+```
+
+Inspect the current repository's review history and live divergence:
+
+```sh
+mire show
+mire show <SESSION>
+```
+
+Start the authenticated local web workbench:
+
+```sh
+mire web
+mire web <SESSION>
+```
+
+MIRE binds to loopback on an available port, prints a one-time launch URL, and
+serves the embedded app in the foreground. Open that URL in a browser and stop
+the server with `Ctrl-C`. To request a specific loopback port, pass
+`--addr 127.0.0.1:<PORT>`.
+
+Use `MIRE_STATE_DIR` to point isolated development or test runs at a private
+state directory:
+
+```sh
+MIRE_STATE_DIR=/tmp/mire-state mire sessions list
+```
+
+For command details, run `mire <command> --help`.
 
 ```mermaid
 flowchart LR
@@ -22,3 +102,7 @@ flowchart LR
 1. <https://google.github.io/eng-practices/review/reviewer/looking-for.html>
 2. <https://developers.googleblog.com/conductor-update-introducing-automated-reviews/>
 3. <https://www.greptile.com/what-is-ai-code-review>
+
+## License
+
+[APACHE 2.0](LICENSE)

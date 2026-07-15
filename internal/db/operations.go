@@ -78,14 +78,15 @@ const (
 
 // Round is the durable unit of one captured review attempt.
 type Round struct {
-	ID           string
-	SessionID    string
-	RepositoryID string
-	SnapshotID   string
-	Number       int
-	Status       RoundStatus
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                 string
+	SessionID          string
+	RepositoryID       string
+	SnapshotID         string
+	PredecessorRoundID string
+	Number             int
+	Status             RoundStatus
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // Operation is the durable state and lease metadata for long-running work.
@@ -202,6 +203,12 @@ func (store *RepositoryStore) CreateRound(ctx context.Context, sessionID string)
 	if err != nil {
 		return Round{}, err
 	}
+	var predecessorRoundID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(current_round_id, '') FROM sessions WHERE id = ?`, sessionID,
+	).Scan(&predecessorRoundID); err != nil {
+		return Round{}, fmt.Errorf("read current round: %w", err)
+	}
 	var number int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COALESCE(MAX(number), 0) + 1 FROM rounds WHERE session_id = ?`, sessionID,
@@ -213,18 +220,20 @@ func (store *RepositoryStore) CreateRound(ctx context.Context, sessionID string)
 		return Round{}, fmt.Errorf("create round ID: %w", err)
 	}
 	round := Round{
-		ID:           roundID,
-		SessionID:    sessionID,
-		RepositoryID: repositoryID,
-		Number:       number,
-		Status:       RoundStatusPending,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:                 roundID,
+		SessionID:          sessionID,
+		RepositoryID:       repositoryID,
+		PredecessorRoundID: predecessorRoundID,
+		Number:             number,
+		Status:             RoundStatusPending,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO rounds (id, session_id, repository_id, number, status, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		round.ID, round.SessionID, round.RepositoryID, round.Number, round.Status,
+	INSERT INTO rounds (id, session_id, repository_id, predecessor_round_id, number, status, created_at, updated_at)
+	VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
+		round.ID, round.SessionID, round.RepositoryID, round.PredecessorRoundID,
+		round.Number, round.Status,
 		timestampString(round.CreatedAt), timestampString(round.UpdatedAt),
 	); err != nil {
 		return Round{}, fmt.Errorf("insert round: %w", err)
@@ -272,6 +281,38 @@ func (store *RepositoryStore) GetRound(ctx context.Context, roundID string) (Rou
 		return Round{}, fmt.Errorf("get round %q: %w", roundID, err)
 	}
 	return round, nil
+}
+
+// ListRounds returns the complete immutable round history for a session in
+// ascending round-number order.
+func (store *RepositoryStore) ListRounds(ctx context.Context, sessionID string) ([]Round, error) {
+	if err := store.validate(); err != nil {
+		return nil, err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("list rounds: session ID is empty")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := store.database.QueryContext(ctx, roundQuery+` WHERE session_id = ? ORDER BY number ASC`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list rounds: %w", err)
+	}
+	defer rows.Close()
+	rounds := make([]Round, 0)
+	for rows.Next() {
+		round, err := scanRound(rows)
+		if err != nil {
+			return nil, fmt.Errorf("list rounds: %w", err)
+		}
+		rounds = append(rounds, round)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list rounds: %w", err)
+	}
+	return rounds, nil
 }
 
 // CreateOperation queues one operation. The partial unique index and this
@@ -983,6 +1024,16 @@ WHERE id = ? AND session_id = ? AND repository_id = ?
 		return fmt.Errorf("check round %q status: %w", operation.RoundID, err)
 	}
 	if updated == 1 {
+		if status == RoundStatusIncomplete || status == RoundStatusCancelled {
+			if _, err := tx.ExecContext(ctx, `
+UPDATE sessions
+SET current_round_id = (
+    SELECT NULLIF(predecessor_round_id, '') FROM rounds WHERE id = ?
+)
+WHERE id = ? AND current_round_id = ?`, operation.RoundID, operation.SessionID, operation.RoundID); err != nil {
+				return fmt.Errorf("restore prior current round after %s: %w", status, err)
+			}
+		}
 		if err := insertActivityTx(ctx, tx, Activity{
 			SessionID:    operation.SessionID,
 			RepositoryID: operation.RepositoryID,
@@ -1029,7 +1080,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 }
 
 const roundQuery = `
-SELECT id, session_id, repository_id, COALESCE(snapshot_id, ''), number, status, created_at, updated_at
+SELECT id, session_id, repository_id, COALESCE(snapshot_id, ''),
+       COALESCE(predecessor_round_id, ''), number, status, created_at, updated_at
 FROM rounds`
 
 const operationQuery = `
@@ -1052,7 +1104,8 @@ func scanRound(row scanner) (Round, error) {
 	var round Round
 	var createdAtRaw, updatedAtRaw string
 	if err := row.Scan(
-		&round.ID, &round.SessionID, &round.RepositoryID, &round.SnapshotID, &round.Number, &round.Status,
+		&round.ID, &round.SessionID, &round.RepositoryID, &round.SnapshotID,
+		&round.PredecessorRoundID, &round.Number, &round.Status,
 		&createdAtRaw, &updatedAtRaw,
 	); err != nil {
 		return Round{}, err

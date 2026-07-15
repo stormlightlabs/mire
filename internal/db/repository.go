@@ -16,6 +16,9 @@ var (
 	ErrSessionNotFound = errors.New("session not found")
 	// ErrRepositoryNotFound is returned when a repository ID is not persisted.
 	ErrRepositoryNotFound = errors.New("repository not found")
+	// ErrSessionRepositoryMismatch is returned when a session is used from a
+	// different repository than the one that owns it.
+	ErrSessionRepositoryMismatch = errors.New("session belongs to another repository")
 	// ErrInvalidRepositoryIdentity is returned when the identity is incomplete.
 	ErrInvalidRepositoryIdentity = errors.New("invalid repository identity")
 )

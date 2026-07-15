@@ -276,6 +276,79 @@ func TestReviewInvalidRangeCreatesNoDatabaseRecord(t *testing.T) {
 	}
 }
 
+func TestReviewSessionAppendsWorktreeRoundAndShowReportsHistory(t *testing.T) {
+	t.Parallel()
+
+	repositoryPath := t.TempDir()
+	repository := initReviewRepository(t, repositoryPath)
+	worktree, err := repository.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	writeReviewFile(t, repositoryPath, "file.txt", "base\n")
+	addReviewFile(t, worktree, "file.txt")
+	base := commitReview(t, worktree, "base", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
+	writeReviewFile(t, repositoryPath, "file.txt", "target\n")
+	addReviewFile(t, worktree, "file.txt")
+	target := commitReview(t, worktree, "target", time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC))
+
+	stateDir := filepath.Join(t.TempDir(), "state")
+	var firstOutput bytes.Buffer
+	first := NewRootCommand(Config{Stdout: &firstOutput, Stderr: &bytes.Buffer{}, StateDir: stateDir, WorkingDir: repositoryPath})
+	first.SetArgs([]string{"review", "--range", base.String() + ".." + target.String()})
+	if err := first.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("initial review error = %v", err)
+	}
+	var sessionID string
+	for _, line := range strings.Split(firstOutput.String(), "\n") {
+		if strings.HasPrefix(line, "Session: ") {
+			sessionID = strings.TrimSpace(strings.TrimPrefix(line, "Session: "))
+		}
+	}
+	if sessionID == "" {
+		t.Fatalf("initial output = %q, missing session ID", firstOutput.String())
+	}
+
+	writeReviewFile(t, repositoryPath, "file.txt", "working tree\n")
+	writeReviewFile(t, repositoryPath, "new.txt", "new\n")
+	var appendOutput bytes.Buffer
+	appendCommand := NewRootCommand(Config{Stdout: &appendOutput, Stderr: &bytes.Buffer{}, StateDir: stateDir, WorkingDir: repositoryPath})
+	appendCommand.SetArgs([]string{"review", "--session", sessionID, "--worktree"})
+	if err := appendCommand.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("append review error = %v", err)
+	}
+	if !strings.Contains(appendOutput.String(), "Round:") || !strings.Contains(appendOutput.String(), "Kind: worktree") {
+		t.Fatalf("append output = %q", appendOutput.String())
+	}
+
+	store, err := db.OpenStore(context.Background(), stateDir)
+	if err != nil {
+		t.Fatalf("OpenStore() error = %v", err)
+	}
+	defer store.Close()
+	session, err := store.GetSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("GetSession() error = %v", err)
+	}
+	rounds, err := store.ListRounds(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("ListRounds() error = %v", err)
+	}
+	if len(rounds) != 2 || rounds[1].PredecessorRoundID != rounds[0].ID || session.CurrentRoundID != rounds[1].ID {
+		t.Fatalf("session history = %#v, session = %#v", rounds, session)
+	}
+
+	var showOutput bytes.Buffer
+	show := NewRootCommand(Config{Stdout: &showOutput, Stderr: &bytes.Buffer{}, StateDir: stateDir, WorkingDir: repositoryPath})
+	show.SetArgs([]string{"show", sessionID})
+	if err := show.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("show error = %v", err)
+	}
+	if strings.Count(showOutput.String(), "Divergence:") != 2 || !strings.Contains(showOutput.String(), "Round 2") {
+		t.Fatalf("show output = %q", showOutput.String())
+	}
+}
+
 func initReviewRepository(t *testing.T, path string) *git.Repository {
 	t.Helper()
 	repository, err := git.PlainInit(path, false)

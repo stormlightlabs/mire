@@ -6,12 +6,21 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/stormlightlabs/mire/internal/db"
 	"github.com/stormlightlabs/mire/internal/snapshot"
 )
+
+// RoundReport combines immutable round data with a read-only live divergence
+// observation for terminal rendering.
+type RoundReport struct {
+	Round      db.Round
+	Snapshot   db.Snapshot
+	Divergence snapshot.DivergenceReport
+}
 
 // Eldritch.nvim-inspired colors.
 const (
@@ -84,6 +93,55 @@ func RenderReviewCapture(output io.Writer, session db.Session, round db.Round, p
 		session.ID, round.ID, persistedSnapshot.ID, persistedSnapshot.RequestedComparison,
 		persistedSnapshot.EffectiveBaseOID, persistedSnapshot.TargetOID)
 	return err
+}
+
+// RenderReviewHistory writes a deterministic session history and divergence
+// report. It does not infer findings or mutate persisted state.
+func RenderReviewHistory(output io.Writer, session db.Session, reports []RoundReport) error {
+	if output == nil {
+		return fmt.Errorf("render review history: output is nil")
+	}
+	if session.ID == "" {
+		_, err := fmt.Fprintln(output, Muted("No sessions found."))
+		return err
+	}
+	if _, err := fmt.Fprintf(output, "Session: %s\nTitle: %s\nRepository: %s\n", session.ID, session.Title, session.RepositoryIdentity); err != nil {
+		return err
+	}
+	for _, report := range reports {
+		if _, err := fmt.Fprintf(output, "\nRound %d: %s\nStatus: %s\n", report.Round.Number, report.Round.ID, report.Round.Status); err != nil {
+			return err
+		}
+		if report.Round.PredecessorRoundID != "" {
+			if _, err := fmt.Fprintf(output, "Predecessor: %s\n", report.Round.PredecessorRoundID); err != nil {
+				return err
+			}
+		}
+		if report.Snapshot.ID != "" {
+			if _, err := fmt.Fprintf(output, "Snapshot: %s\nKind: %s\n", report.Snapshot.ID, report.Snapshot.Kind); err != nil {
+				return err
+			}
+		}
+		if _, err := fmt.Fprintf(output, "Divergence: %s\n", report.Divergence.Status); err != nil {
+			return err
+		}
+		if report.Divergence.Message != "" {
+			if _, err := fmt.Fprintf(output, "Detail: %s\n", report.Divergence.Message); err != nil {
+				return err
+			}
+		}
+		if len(report.Divergence.AffectedRefs) > 0 {
+			if _, err := fmt.Fprintf(output, "Refs: %s\n", strings.Join(report.Divergence.AffectedRefs, ", ")); err != nil {
+				return err
+			}
+		}
+		if len(report.Divergence.AffectedPaths) > 0 {
+			if _, err := fmt.Fprintf(output, "Paths: %s\n", strings.Join(report.Divergence.AffectedPaths, ", ")); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // Success styles a successful result message.

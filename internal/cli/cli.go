@@ -86,6 +86,7 @@ func NewRootCommand(config Config) *cobra.Command {
 	root.SetOut(config.Stdout)
 	root.SetErr(config.Stderr)
 	root.AddCommand(newReviewCommand(state))
+	root.AddCommand(newShowCommand(state))
 	root.AddCommand(newSessionsCommand(state))
 	return root
 }

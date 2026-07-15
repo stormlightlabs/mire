@@ -13,12 +13,11 @@ Work the frontier: any ticket whose blockers are complete.
 
 ## Dependency frontier
 
-Completed prerequisites: V1-01, V1-02, V1-03, V1-04, and V1-05.
+Completed prerequisites: V1-01, V1-02, V1-03, V1-04, V1-05, V1-06, and V1-07.
 
 The current frontier contains one ticket:
 
-- **V1-06 — Reject raced, oversized, or unsafe captures.**
-- **V1-07 — Append review rounds and report live divergence.**
+- **V1-08 — Assemble review intent and the frozen change model.**
 
 Later tickets may proceed as soon as their declared blockers are complete; a
 milestone need not finish before work starts on an unblocked ticket in the next
@@ -262,15 +261,15 @@ diverged from any frozen round without changing that round.
 
 **Acceptance criteria:**
 
-- [ ] `mire review --session <id>` accepts either range mode or worktree mode and
+- [x] `mire review --session <id>` accepts either range mode or worktree mode and
       appends a monotonically numbered immutable round.
-- [ ] Appending to a session for another repository is rejected.
-- [ ] Each round records its snapshot and optional predecessor; a new capture
+- [x] Appending to a session for another repository is rejected.
+- [x] Each round records its snapshot and optional predecessor; a new capture
       never mutates prior round data.
-- [ ] Divergence distinguishes unchanged, changed, unavailable, and unsupported
+- [x] Divergence distinguishes unchanged, changed, unavailable, and unsupported
       comparisons and identifies affected paths or refs when possible.
-- [ ] Restart preserves the current round and complete prior history.
-- [ ] A failed or cancelled new round does not replace the prior current round
+- [x] Restart preserves the current round and complete prior history.
+- [x] A failed or cancelled new round does not replace the prior current round
       with an apparently complete result.
 
 **Verification:**
@@ -278,6 +277,10 @@ diverged from any frozen round without changing that round.
 - `go test ./...`
 - Create range and worktree rounds in a temporary repository, modify branches and
   files between them, restart MIRE, and inspect round history and divergence.
+
+**Status:** Complete. Existing sessions accept immutable range or working-tree
+captures, preserve predecessor-linked history, and report typed live divergence
+without mutating frozen snapshots.
 
 ## Milestone 3: Evidence-led review and model roles
 

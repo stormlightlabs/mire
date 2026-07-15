@@ -46,6 +46,11 @@ var migrations = []Migration{
 		Name:    "working-tree snapshot layers",
 		SQL:     embeddedMigration("sql/005_worktree_snapshots.sql"),
 	},
+	{
+		Version: 6,
+		Name:    "round predecessor history",
+		SQL:     embeddedMigration("sql/006_round_predecessors.sql"),
+	},
 }
 
 func embeddedMigration(name string) string {

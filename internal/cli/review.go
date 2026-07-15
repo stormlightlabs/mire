@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/stormlightlabs/mire/internal/db"
 	"github.com/stormlightlabs/mire/internal/echo"
 	"github.com/stormlightlabs/mire/internal/gitrepo"
 	"github.com/stormlightlabs/mire/internal/snapshot"
@@ -20,14 +21,12 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			requestedComparison = strings.TrimSpace(requestedComparison)
+			sessionID = strings.TrimSpace(sessionID)
 			if requestedComparison != "" && worktree {
 				return fmt.Errorf("review: --range and --worktree are mutually exclusive")
 			}
 			if requestedComparison == "" && !worktree {
 				return fmt.Errorf("review: --range or --worktree is required")
-			}
-			if strings.TrimSpace(sessionID) != "" {
-				return fmt.Errorf("review: --session is not available for initial snapshot capture")
 			}
 			identity, err := state.currentRepository(command.Context())
 			if err != nil {
@@ -54,11 +53,18 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 				return fmt.Errorf("review: initialize private state: %w", err)
 			}
 			defer closeStore()
-			title := "Review " + requestedComparison
-			if worktree {
-				title = "Review working tree"
+			var session db.Session
+			var round db.Round
+			var persistedSnapshot db.Snapshot
+			if sessionID == "" {
+				title := "Review " + requestedComparison
+				if worktree {
+					title = "Review working tree"
+				}
+				session, round, persistedSnapshot, err = store.CreateCapturedSession(command.Context(), identity, title, capture)
+			} else {
+				session, round, persistedSnapshot, err = store.AppendCapturedRound(command.Context(), sessionID, identity, capture)
 			}
-			session, round, persistedSnapshot, err := store.CreateCapturedSession(command.Context(), identity, title, capture)
 			if err != nil {
 				return fmt.Errorf("review: persist captured snapshot: %w", err)
 			}

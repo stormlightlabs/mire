@@ -123,76 +123,9 @@ INSERT INTO sessions (id, repository_id, title, created_at)
 VALUES (?, ?, ?, ?)`, sessionID, repository.ID, title, timestampString(now)); err != nil {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert captured session: %w", err)
 	}
-	persistedSnapshot := Snapshot{
-		ID:                   snapshotID,
-		RepositoryID:         repository.ID,
-		Kind:                 captureKind(capture),
-		RequestedComparison:  capture.RequestedComparison,
-		BaseOID:              capture.BaseOID,
-		EffectiveBaseOID:     capture.EffectiveBaseOID,
-		TargetOID:            capture.TargetOID,
-		MergeBaseOID:         capture.MergeBaseOID,
-		IndexOID:             capture.IndexOID,
-		ObjectFormat:         capture.ObjectFormat,
-		ContextPolicyHash:    capture.ContextPolicyHash,
-		IgnorePolicy:         capture.IgnorePolicy,
-		BaseManifestDigest:   capture.BaseManifestDigest,
-		TargetManifestDigest: capture.TargetManifestDigest,
-		ManifestDigest:       capture.ManifestDigest,
-		Complete:             true,
-		CreatedAt:            now,
-	}
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO snapshots (
-    id, repository_id, kind, requested_comparison, base_oid, effective_base_oid,
-    target_oid, merge_base_oid, index_oid, object_format, context_policy_hash, ignore_policy,
-    base_manifest_digest, target_manifest_digest, manifest_digest, complete, created_at
-)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
-		persistedSnapshot.ID, persistedSnapshot.RepositoryID, persistedSnapshot.Kind,
-		persistedSnapshot.RequestedComparison, persistedSnapshot.BaseOID,
-		persistedSnapshot.EffectiveBaseOID, persistedSnapshot.TargetOID,
-		persistedSnapshot.MergeBaseOID, persistedSnapshot.IndexOID, persistedSnapshot.ObjectFormat,
-		persistedSnapshot.ContextPolicyHash, persistedSnapshot.IgnorePolicy, persistedSnapshot.BaseManifestDigest,
-		persistedSnapshot.TargetManifestDigest, persistedSnapshot.ManifestDigest,
-		timestampString(persistedSnapshot.CreatedAt)); err != nil {
-		return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert snapshot: %w", err)
-	}
-	if captureKind(capture) == snapshot.ComparisonWorktree {
-		for _, layer := range []struct {
-			name    string
-			entries []snapshot.Entry
-		}{
-			{name: snapshot.TreeSideHead, entries: capture.HeadEntries},
-			{name: snapshot.TreeSideIndex, entries: capture.IndexEntries},
-			{name: snapshot.TreeSideWorktree, entries: capture.WorktreeEntries},
-		} {
-			if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, layer.name, layer.entries); err != nil {
-				return Session{}, Round{}, Snapshot{}, err
-			}
-		}
-	} else {
-		if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideBase, capture.BaseEntries); err != nil {
-			return Session{}, Round{}, Snapshot{}, err
-		}
-		if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideTarget, capture.TargetEntries); err != nil {
-			return Session{}, Round{}, Snapshot{}, err
-		}
-	}
-	for _, layer := range capture.ManifestLayers() {
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO snapshot_layers (snapshot_id, layer, identity, manifest_digest)
-VALUES (?, ?, ?, ?)`, snapshotID, layer.Name, layer.Identity, layer.ManifestDigest); err != nil {
-			return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert snapshot layer %q: %w", layer.Name, err)
-		}
-	}
-	for _, change := range capture.Changes {
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO snapshot_changes (snapshot_id, status, base_path, target_path, base_digest, target_digest)
-VALUES (?, ?, ?, ?, ?, ?)`, snapshotID, change.Status, change.BasePath, change.TargetPath,
-			change.BaseDigest, change.TargetDigest); err != nil {
-			return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert snapshot change: %w", err)
-		}
+	persistedSnapshot, err := persistSnapshotTx(ctx, tx, repository.ID, snapshotID, capture)
+	if err != nil {
+		return Session{}, Round{}, Snapshot{}, err
 	}
 	round := Round{
 		ID: roundID, SessionID: sessionID, RepositoryID: repository.ID, SnapshotID: snapshotID,
@@ -226,6 +159,165 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, round.ID, round.SessionID, round.RepositoryID,
 // CreateSessionWithSnapshot is a descriptive alias for CreateCapturedSession.
 func (store *RepositoryStore) CreateSessionWithSnapshot(ctx context.Context, identity RepositoryIdentity, title string, capture snapshot.Capture) (Session, Round, Snapshot, error) {
 	return store.CreateCapturedSession(ctx, identity, title, capture)
+}
+
+// AppendCapturedRound appends one immutable capture to an existing session.
+// The session and capture repository identities must match, and the new round
+// becomes current only when the complete snapshot transaction commits.
+func (store *RepositoryStore) AppendCapturedRound(ctx context.Context, sessionID string, identity RepositoryIdentity, capture snapshot.Capture) (Session, Round, Snapshot, error) {
+	if err := store.validate(); err != nil {
+		return Session{}, Round{}, Snapshot{}, err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf("append captured round: session ID is empty")
+	}
+	identity, err := normalizeIdentity(identity)
+	if err != nil {
+		return Session{}, Round{}, Snapshot{}, err
+	}
+	capture, err = normalizeCapture(capture)
+	if err != nil {
+		return Session{}, Round{}, Snapshot{}, err
+	}
+	if err := validateCapture(capture); err != nil {
+		return Session{}, Round{}, Snapshot{}, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	now := capture.CapturedAt.UTC()
+	tx, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf("begin append round transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	session, err := scanSession(tx.QueryRowContext(ctx, sessionQuery+` WHERE s.id = ?`, sessionID))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Session{}, Round{}, Snapshot{}, fmt.Errorf("%w: %q", ErrSessionNotFound, sessionID)
+		}
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf("read append session %q: %w", sessionID, err)
+	}
+	if session.RepositoryIdentity != identity.CanonicalIdentity {
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf("%w: session %q is for %q, current repository is %q", ErrSessionRepositoryMismatch, sessionID, session.RepositoryIdentity, identity.CanonicalIdentity)
+	}
+
+	snapshotID, err := store.newID()
+	if err != nil {
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf("create appended snapshot ID: %w", err)
+	}
+	persistedSnapshot, err := persistSnapshotTx(ctx, tx, session.RepositoryID, snapshotID, capture)
+	if err != nil {
+		return Session{}, Round{}, Snapshot{}, err
+	}
+	var predecessorRoundID string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(current_round_id, '') FROM sessions WHERE id = ?`, sessionID,
+	).Scan(&predecessorRoundID); err != nil {
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf("read append predecessor: %w", err)
+	}
+	var number int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(number), 0) + 1 FROM rounds WHERE session_id = ?`, sessionID,
+	).Scan(&number); err != nil {
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf("choose appended round number: %w", err)
+	}
+	roundID, err := store.newID()
+	if err != nil {
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf("create appended round ID: %w", err)
+	}
+	round := Round{
+		ID: roundID, SessionID: sessionID, RepositoryID: session.RepositoryID,
+		SnapshotID: snapshotID, PredecessorRoundID: predecessorRoundID,
+		Number: number, Status: RoundStatusPending, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO rounds (id, session_id, repository_id, snapshot_id, predecessor_round_id, number, status, created_at, updated_at)
+VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
+		round.ID, round.SessionID, round.RepositoryID, round.SnapshotID, round.PredecessorRoundID,
+		round.Number, round.Status, timestampString(round.CreatedAt), timestampString(round.UpdatedAt)); err != nil {
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert appended round: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET current_round_id = ? WHERE id = ?`, round.ID, sessionID); err != nil {
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf("set appended current round: %w", err)
+	}
+	if err := insertActivityTx(ctx, tx, Activity{
+		SessionID: sessionID, RepositoryID: session.RepositoryID, RoundID: round.ID,
+		Kind: "round.created", Status: string(round.Status), Message: "Round created.", CreatedAt: now,
+	}); err != nil {
+		return Session{}, Round{}, Snapshot{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf("commit appended round: %w", err)
+	}
+	session.CurrentRoundID = round.ID
+	return session, round, persistedSnapshot, nil
+}
+
+func persistSnapshotTx(ctx context.Context, tx *sql.Tx, repositoryID, snapshotID string, capture snapshot.Capture) (Snapshot, error) {
+	persisted := Snapshot{
+		ID: snapshotID, RepositoryID: repositoryID, Kind: captureKind(capture),
+		RequestedComparison: capture.RequestedComparison, BaseOID: capture.BaseOID,
+		EffectiveBaseOID: capture.EffectiveBaseOID, TargetOID: capture.TargetOID,
+		MergeBaseOID: capture.MergeBaseOID, IndexOID: capture.IndexOID,
+		ObjectFormat: capture.ObjectFormat, ContextPolicyHash: capture.ContextPolicyHash,
+		IgnorePolicy: capture.IgnorePolicy, BaseManifestDigest: capture.BaseManifestDigest,
+		TargetManifestDigest: capture.TargetManifestDigest, ManifestDigest: capture.ManifestDigest,
+		Complete: true, CreatedAt: capture.CapturedAt.UTC(),
+	}
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO snapshots (
+    id, repository_id, kind, requested_comparison, base_oid, effective_base_oid,
+    target_oid, merge_base_oid, index_oid, object_format, context_policy_hash, ignore_policy,
+    base_manifest_digest, target_manifest_digest, manifest_digest, complete, created_at
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+		persisted.ID, persisted.RepositoryID, persisted.Kind, persisted.RequestedComparison,
+		persisted.BaseOID, persisted.EffectiveBaseOID, persisted.TargetOID, persisted.MergeBaseOID,
+		persisted.IndexOID, persisted.ObjectFormat, persisted.ContextPolicyHash, persisted.IgnorePolicy,
+		persisted.BaseManifestDigest, persisted.TargetManifestDigest, persisted.ManifestDigest,
+		timestampString(persisted.CreatedAt)); err != nil {
+		return Snapshot{}, fmt.Errorf("insert snapshot: %w", err)
+	}
+	if captureKind(capture) == snapshot.ComparisonWorktree {
+		for _, layer := range []struct {
+			name    string
+			entries []snapshot.Entry
+		}{
+			{name: snapshot.TreeSideHead, entries: capture.HeadEntries},
+			{name: snapshot.TreeSideIndex, entries: capture.IndexEntries},
+			{name: snapshot.TreeSideWorktree, entries: capture.WorktreeEntries},
+		} {
+			if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, layer.name, layer.entries); err != nil {
+				return Snapshot{}, err
+			}
+		}
+	} else {
+		if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideBase, capture.BaseEntries); err != nil {
+			return Snapshot{}, err
+		}
+		if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideTarget, capture.TargetEntries); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	for _, layer := range capture.ManifestLayers() {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO snapshot_layers (snapshot_id, layer, identity, manifest_digest)
+VALUES (?, ?, ?, ?)`, snapshotID, layer.Name, layer.Identity, layer.ManifestDigest); err != nil {
+			return Snapshot{}, fmt.Errorf("insert snapshot layer %q: %w", layer.Name, err)
+		}
+	}
+	for _, change := range capture.Changes {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO snapshot_changes (snapshot_id, status, base_path, target_path, base_digest, target_digest)
+VALUES (?, ?, ?, ?, ?, ?)`, snapshotID, change.Status, change.BasePath, change.TargetPath,
+			change.BaseDigest, change.TargetDigest); err != nil {
+			return Snapshot{}, fmt.Errorf("insert snapshot change: %w", err)
+		}
+	}
+	return persisted, nil
 }
 
 // GetSnapshot returns immutable snapshot metadata.

@@ -13,6 +13,7 @@ import (
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/filemode"
 	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/stormlightlabs/mire/internal/db"
 	"github.com/stormlightlabs/mire/internal/snapshot"
 )
 
@@ -514,6 +515,73 @@ func TestCaptureWorktreeRetriesAfterAConcurrentChange(t *testing.T) {
 	entry := findEntry(captured.WorktreeEntries, "file.txt")
 	if got := string(readObject(t, objectStore, entry.ContentDigest)); got != "after" {
 		t.Fatalf("captured content = %q, want retried version", got)
+	}
+}
+
+func TestCheckDivergenceReportsChangedPathsAndUnavailableRefs(t *testing.T) {
+	t.Parallel()
+
+	repositoryPath := t.TempDir()
+	repository := initRepository(t, repositoryPath)
+	worktree, err := repository.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	writeFile(t, repositoryPath, "base.txt", "base\n", 0o644)
+	addFiles(t, worktree, "base.txt")
+	base := commit(t, repository, worktree, "base", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
+	if err := repository.Storer.SetReference(plumbing.NewHashReference(plumbing.NewBranchReferenceName("review-base"), base)); err != nil {
+		t.Fatalf("set review-base: %v", err)
+	}
+	writeFile(t, repositoryPath, "target.txt", "before\n", 0o644)
+	addFiles(t, worktree, "target.txt")
+	commit(t, repository, worktree, "target", time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC))
+
+	stateDir := t.TempDir()
+	objectStore, err := snapshot.OpenObjectStore(stateDir)
+	if err != nil {
+		t.Fatalf("OpenObjectStore() error = %v", err)
+	}
+	storeDatabase, err := db.OpenState(context.Background(), stateDir)
+	if err != nil {
+		t.Fatalf("OpenState() error = %v", err)
+	}
+	store := db.NewRepositoryStore(storeDatabase)
+	t.Cleanup(func() { _ = store.Close() })
+	identity := db.RepositoryIdentity{CanonicalIdentity: repositoryPath, DisplayName: "fixture", DiscoveredGitDir: filepath.Join(repositoryPath, ".git")}
+	capture, err := CaptureRange(context.Background(), repositoryPath, "review-base..HEAD", objectStore)
+	if err != nil {
+		t.Fatalf("CaptureRange() error = %v", err)
+	}
+	_, _, frozen, err := store.CreateCapturedSession(context.Background(), identity, "Review", capture)
+	if err != nil {
+		t.Fatalf("CreateCapturedSession() error = %v", err)
+	}
+	report, err := CheckDivergence(context.Background(), repositoryPath, store, frozen, objectStore)
+	if err != nil || report.Status != snapshot.DivergenceUnchanged {
+		t.Fatalf("unchanged divergence = %#v, error = %v", report, err)
+	}
+
+	writeFile(t, repositoryPath, "target.txt", "after\n", 0o644)
+	addFiles(t, worktree, "target.txt")
+	commit(t, repository, worktree, "target moved", time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC))
+	report, err = CheckDivergence(context.Background(), repositoryPath, store, frozen, objectStore)
+	if err != nil || report.Status != snapshot.DivergenceChanged {
+		t.Fatalf("changed divergence = %#v, error = %v", report, err)
+	}
+	if len(report.AffectedPaths) != 1 || report.AffectedPaths[0] != "target.txt" {
+		t.Fatalf("changed paths = %#v, want target.txt", report.AffectedPaths)
+	}
+	if len(report.AffectedRefs) != 1 || report.AffectedRefs[0] != "target" {
+		t.Fatalf("changed refs = %#v, want target", report.AffectedRefs)
+	}
+
+	if err := repository.Storer.RemoveReference(plumbing.NewBranchReferenceName("review-base")); err != nil {
+		t.Fatalf("remove review-base: %v", err)
+	}
+	report, err = CheckDivergence(context.Background(), repositoryPath, store, frozen, objectStore)
+	if err != nil || report.Status != snapshot.DivergenceUnavailable {
+		t.Fatalf("unavailable divergence = %#v, error = %v", report, err)
 	}
 }
 

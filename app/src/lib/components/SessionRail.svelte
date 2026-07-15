@@ -1,0 +1,241 @@
+<script lang="ts">
+	import type { LoadState, Session } from '$lib/workbench/types';
+
+	let {
+		sessions,
+		selectedSessionId,
+		loadState,
+		onSelect
+	}: { sessions: Session[]; selectedSessionId?: string; loadState: LoadState; onSelect: (session: Session) => void } =
+		$props();
+
+	function formatDate(value: string) {
+		return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(
+			new Date(value)
+		);
+	}
+</script>
+
+<aside class="session-rail" aria-label="Review sessions">
+	<div class="rail-heading">
+		<div>
+			<p class="eyebrow">WORKSPACE</p>
+			<h1>Sessions</h1>
+		</div>
+		<span class="count-badge">{loadState === 'loading' ? '—' : sessions.length}</span>
+	</div>
+
+	{#if loadState === 'ready' && sessions.length}
+		<nav class="session-list" aria-label="Available sessions">
+			{#each sessions as session, index (session.id)}
+				<button
+					class="session-card"
+					class:session-card--active={selectedSessionId === session.id}
+					onclick={() => onSelect(session)}>
+					<span class="session-card__index">{String(index + 1).padStart(2, '0')}</span>
+					<span class="session-card__body">
+						<strong>{session.title}</strong>
+						<small>{session.repository_name} <span>·</span> {formatDate(session.created_at)}</small>
+					</span>
+					<span class="session-card__arrow" aria-hidden="true">↗</span>
+				</button>
+			{/each}
+		</nav>
+	{:else}
+		<div class="rail-empty">
+			<p>{loadState === 'loading' ? 'Reading private state…' : 'Start a review from the CLI to see it here.'}</p>
+		</div>
+	{/if}
+
+	<div class="rail-footer"><span class="rail-footer__line"></span><span>REPOSITORY STATE IS READ-ONLY</span></div>
+</aside>
+
+<style>
+	.session-rail {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		overflow-x: hidden;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		scrollbar-gutter: stable;
+		padding: 42px 22px 24px;
+		border-right: 1px solid var(--line);
+		background: var(--panel);
+	}
+
+	.rail-heading {
+		display: flex;
+		align-items: end;
+		justify-content: space-between;
+		margin-bottom: 28px;
+		padding: 0 8px;
+	}
+
+	.rail-heading h1 {
+		margin-top: 8px;
+		font-size: 19px;
+		font-weight: 580;
+		letter-spacing: -0.03em;
+	}
+
+	.eyebrow {
+		color: var(--lavender);
+		font: 650 9px/1.4 var(--mono);
+		letter-spacing: 0.16em;
+	}
+
+	.count-badge {
+		display: grid;
+		min-width: 28px;
+		height: 22px;
+		padding: 0 6px;
+		place-items: center;
+		border: 1px solid var(--line-bright);
+		border-radius: 5px;
+		color: var(--muted);
+		font: 10px var(--mono);
+	}
+
+	.session-list {
+		display: grid;
+		gap: 8px;
+	}
+
+	.session-card {
+		display: grid;
+		grid-template-columns: 25px minmax(0, 1fr) 18px;
+		align-items: center;
+		min-height: 68px;
+		gap: 7px;
+		padding: 11px 8px;
+		border: 1px solid transparent;
+		border-radius: 7px;
+		color: var(--ink);
+		background: transparent;
+		text-align: left;
+		cursor: pointer;
+		transition:
+			background 160ms ease-out,
+			border-color 160ms ease-out,
+			transform 160ms ease-out;
+	}
+
+	.session-card:hover {
+		background: var(--panel-hover);
+		border-color: var(--line);
+		transform: translateX(2px);
+	}
+
+	.session-card:active {
+		transform: scale(0.98);
+	}
+
+	.session-card--active {
+		border-color: rgb(164 140 242 / 58%);
+		background: rgb(164 140 242 / 10%);
+		box-shadow:
+			inset 3px 0 var(--lavender),
+			0 8px 24px rgb(0 0 0 / 12%);
+	}
+
+	.session-card__index {
+		align-self: start;
+		padding-top: 2px;
+		color: var(--faint);
+		font: 10px var(--mono);
+	}
+
+	.session-card__body {
+		display: grid;
+		min-width: 0;
+		gap: 6px;
+	}
+
+	.session-card__body strong {
+		overflow: hidden;
+		font-size: 12px;
+		font-weight: 620;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.session-card__body small {
+		overflow: hidden;
+		color: var(--muted);
+		font-size: 10px;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.session-card__body small span {
+		color: var(--faint);
+	}
+
+	.session-card__arrow {
+		color: var(--faint);
+		font-size: 15px;
+		opacity: 0;
+		transition:
+			opacity 160ms,
+			color 160ms;
+	}
+
+	.session-card:hover .session-card__arrow,
+	.session-card--active .session-card__arrow {
+		color: var(--lavender);
+		opacity: 1;
+	}
+
+	.rail-empty {
+		display: grid;
+		place-items: center;
+		gap: 12px;
+		min-height: 180px;
+		padding: 20px;
+		border: 1px dashed var(--line);
+		border-radius: 8px;
+		color: var(--muted);
+		text-align: center;
+	}
+
+	.rail-empty p {
+		max-width: 170px;
+		font-size: 12px;
+		line-height: 1.5;
+	}
+
+	.rail-footer {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		margin-top: auto;
+		padding: 16px 8px 0;
+		color: var(--faint);
+		font: 8px var(--mono);
+		letter-spacing: 0.08em;
+	}
+
+	.rail-footer__line {
+		width: 22px;
+		height: 1px;
+		background: var(--pink);
+	}
+
+	@media (max-width: 800px) {
+		.session-rail {
+			max-height: min(280px, 42dvh);
+			padding: 25px 18px 16px;
+			border-right: 0;
+			border-bottom: 1px solid var(--line);
+		}
+
+		.session-list {
+			grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
+		}
+
+		.rail-footer {
+			display: none;
+		}
+	}
+</style>

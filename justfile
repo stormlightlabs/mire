@@ -21,4 +21,7 @@ vet:
 build:
     go build -o /tmp/mire ./cmd/mire
 
+web:
+    pnpm --dir app dev
+
 verify: fmt test race vet build

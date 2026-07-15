@@ -41,9 +41,6 @@ body {
 	min-height: 100vh;
 	color: var(--ink);
 	background: var(--void);
-	background-image:
-		radial-gradient(circle at 85% 12%, rgb(164 140 242 / 9%), transparent 29rem),
-		linear-gradient(120deg, transparent 0 53%, rgb(108 182 255 / 2%) 53% 53.15%, transparent 53.15%);
 	text-rendering: optimizeLegibility;
 }
 

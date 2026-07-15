@@ -37,255 +37,13 @@ snapshot capture in Milestone 2.
 
 ### V1-01 — Establish private review state and session lifecycle
 
-**What to build:** Establish the private repository/session store and let users
-list and delete review sessions from the CLI. Store application state in the
-operating system's private per-user state directory, outside the repository, and
-preserve the repository identity needed for later multi-repository support.
-`mire review` will create user-visible sessions when snapshot capture arrives in
-V1-03; do not add an empty-session creation command.
-
-**Blocked by:** None - can start immediately
-
-**Acceptance criteria:**
-
-- [x] `mire sessions list` initializes private state when needed and lists only
-      persisted session metadata.
-- [x] The application service can transactionally create a session for the
-      current repository, show it after process restart, and delete it explicitly;
-      the CLI exposes list and delete but not empty-session creation.
-- [x] Session and repository records use stable IDs and every session is keyed by
-      `repository_id`.
-- [x] SQLite enables foreign keys, WAL, a busy timeout, transactional forward
-      migrations, and restrictive state-directory and database permissions.
-- [x] Deleting an unknown session and running outside a Git repository return
-      clear errors without changing Git or project files.
-- [x] CLI stdout remains suitable for the requested result while diagnostics go
-      to stderr.
-
-**Verification:**
-
-- `go test ./...`
-- In a temporary Git repository, create a session through the application-service
-  fixture, restart the command, list it, delete it through the CLI, and confirm no
-  file or Git metadata changed in the target repository.
-
-**Notes:** Handwrite migrations and SQL. Do not introduce an ORM, event-sourcing
-framework, or repository-local state.
-
-### V1-02 — Recover interrupted and competing operations truthfully
-
-**What to build:** Represent long-running review work as durable operations so a
-session cannot run two state-changing or model operations at once and an
-interrupted process is reported as abandoned rather than still running.
-
-**Blocked by:** V1-01 (complete)
-
-**Acceptance criteria:**
-
-- [x] Operations implement `queued`, `running`, `complete`, `failed`,
-      `cancelled`, and `abandoned` states with validated transitions.
-- [x] A transactional lease and unique active-operation constraint permit only
-      one state-changing or model operation per session across processes.
-- [x] A random process-instance owner renews a bounded heartbeat; acquisition or
-      startup marks an expired operation abandoned and its round incomplete.
-- [x] Cancellation is durable and idempotent, and completed state is never
-      inferred from transient progress output.
-- [x] Durable activity entries are committed atomically with the state changes
-      they describe and receive monotonically increasing IDs.
-- [x] Concurrent read-only session queries remain available while an operation
-      runs.
-
-**Verification:**
-
-- `go test -race ./...`
-- Exercise two processes against one temporary state directory and confirm the
-  second mutation is rejected, then terminate the lease owner and confirm a later
-  acquisition records abandonment.
-
-**Notes:** This is an enabling prefactor for CLI, HTTP, and SSE work. Keep the
-operation model transport-neutral; streamed token deltas are not durable state.
+Establishes the private repository/session store and let users list and delete
+review sessions from the CLI.
 
 ## Milestone 2: Immutable Git snapshots
 
-**Exit criterion:** Committed two-dot and three-dot comparisons and complete
-working-tree states are captured atomically into application-owned storage. All
-later reads survive source Git-object deletion, and races or resource-limit
-violations fail explicitly before review begins.
-
-### V1-03 — Capture a durable two-dot review snapshot
-
-**What to build:** Let `mire review --range <base>..<head>` resolve a committed
-comparison once, copy every required byte into MIRE's private content-addressed
-store, persist an immutable manifest and review round, and perform no model call
-yet.
-
-**Blocked by:** V1-01 (complete)
-
-**Acceptance criteria:**
-
-- [x] Symbolic revisions resolve once to object IDs; invalid or ambiguous
-      revisions fail before a round is created.
-- [x] The snapshot records the requested expression, effective base and target
-      OIDs, Git object format, capture time, repository ID, and policy hash.
-- [x] `mire review` creates the user-visible session and first round only when the
-      snapshot transaction succeeds; failed capture leaves neither usable record.
-- [x] Complete base and target tree manifests include every tracked path, not only
-      changed paths, while representing deletions, renames, binary files,
-      executable modes, symlink targets, and submodule Git links without following
-      symlinks.
-- [x] Every byte referenced by either complete tree is written and digest-verified
-      in the private object store before the manifest transaction commits.
-- [x] Snapshot reads use the stored manifest and objects rather than the live
-      worktree or Git object database.
-- [x] A failed object write leaves no committed snapshot or apparently usable
-      round.
-
-**Verification:**
-
-- `go test ./...`
-- `go test -race ./...`
-- `go vet ./...`
-- `go build ./cmd/mire`
-- Fixture repositories cover complete unchanged trees, regular and binary files,
-  executable modes, symlink targets, deletions, exact renames, invalid and
-  ambiguous revisions, failed object writes, transaction rollback, and reads
-  after source `.git` removal.
-
-**Status:** Complete. The initial capture path is model-free; `--session` append
-behavior remains part of V1-07.
-
-**Notes:** Git object IDs are provenance, never the only durable copy. Normalize
-and validate repository-relative paths before object-store access.
-
-### V1-04 — Preserve three-dot merge-base semantics
-
-**What to build:** Let `mire review --range <base>...<head>` capture the change
-from the resolved merge base to the target while preserving the user's original
-comparison and the exact objects that determined it.
-
-**Blocked by:** V1-03 (complete)
-
-**Acceptance criteria:**
-
-- [x] Three-dot input resolves and stores the base OID, target OID, and effective
-      merge-base OID exactly once.
-- [x] The captured diff matches Git's merge-base comparison for diverged fixture
-      histories.
-- [x] Missing, multiple, or invalid merge-base situations produce explicit
-      diagnostics before model work.
-- [x] Later movement of branches or tags cannot change the stored round.
-- [x] Two-dot behavior remains unchanged and the requested comparison kind is
-      distinguishable in storage and exports.
-
-**Verification:**
-
-- `go test ./...`
-- Compare MIRE's manifest and diff with Git output in temporary linear, diverged,
-  renamed-branch, and invalid-history fixtures.
-
-**Status:** Complete. Three-dot capture rejects missing or ambiguous merge bases
-and stores the requested comparison plus resolved provenance immutably.
-
-### V1-05 — Capture the complete working tree without tearing
-
-**What to build:** Let `mire review --worktree` freeze the current `HEAD`, index,
-and final worktree layers, including nonignored untracked files, so overlapping
-staged and unstaged edits remain intelligible after the live repository changes.
-
-**Blocked by:** V1-03 (complete)
-
-**Acceptance criteria:**
-
-- [x] Capture preserves distinct `HEAD`, index, and final-worktree identities and
-      content for paths changed in more than one layer.
-- [x] Nonignored untracked files are included; ignored files are excluded and the
-      policy is recorded.
-- [x] Deletions, renames, binary files, executable bits, spaces, Unicode paths,
-      and symlink targets are represented without following symlinks.
-- [x] Clean submodules are opaque Git links; dirty submodule state fails with
-      guidance to review that repository separately.
-- [x] Every stored manifest is complete and all subsequent reads come from its
-      private objects.
-- [x] Capturing and later reading the snapshot causes no target-repository or Git
-      metadata writes.
-
-**Verification:**
-
-- `go test ./...`
-- Run the working-tree fixture matrix from the V1 plan, mutate the live files
-  after capture, and confirm the snapshot still presents the original three
-  layers.
-
-**Status:** Complete. Working-tree captures preserve the three immutable layers,
-ignore policy, and opaque submodule boundaries in private storage.
-
-### V1-06 — Reject raced, oversized, or unsafe captures
-
-**What to build:** Protect committed and working-tree capture from concurrent
-changes, path escapes, partial object writes, and explicit resource-ceiling
-violations, retrying only when a coherent capture is still possible.
-
-**Blocked by:** V1-04, V1-05
-
-**Acceptance criteria:**
-
-- [x] Working-tree capture reads identities and inventory before copying, then
-      rechecks identities and file metadata/content before committing.
-- [x] Concurrent changes cause a bounded retry or a torn-snapshot diagnostic;
-      they never produce a mixed manifest.
-- [x] Explicit ceilings cover at least file count, individual object size, and
-      aggregate captured bytes, and explain which configured limit was exceeded.
-- [x] Limit failures occur before a review round or model call and never silently
-      truncate the snapshot.
-- [x] Absolute paths, traversal, special devices, and object-store escapes are
-      rejected at the boundary.
-- [x] Orphaned temporary content from failed capture is safely recoverable or
-      collectible without deleting referenced objects.
-
-**Verification:**
-
-- `go test -race ./...`
-- Use controlled concurrent writers and limit-boundary fixtures to prove that
-  each result is either one coherent version or an explicit failure.
-
-**Status:** Complete. Capture planning enforces bounded file and byte budgets,
-object publication remains atomic, and changing working trees retry only when a
-coherent recapture is possible.
-
-**Notes:** Numeric defaults are configuration decisions to set from measured
-fixtures before release; the contract is explicit failure, not a particular
-initial number.
-
-### V1-07 — Append review rounds and report live divergence
-
-**What to build:** Let a user append a newly captured snapshot as another round
-of the same repository-scoped session and see whether the live repository has
-diverged from any frozen round without changing that round.
-
-**Blocked by:** V1-02, V1-04, V1-05
-
-**Acceptance criteria:**
-
-- [x] `mire review --session <id>` accepts either range mode or worktree mode and
-      appends a monotonically numbered immutable round.
-- [x] Appending to a session for another repository is rejected.
-- [x] Each round records its snapshot and optional predecessor; a new capture
-      never mutates prior round data.
-- [x] Divergence distinguishes unchanged, changed, unavailable, and unsupported
-      comparisons and identifies affected paths or refs when possible.
-- [x] Restart preserves the current round and complete prior history.
-- [x] A failed or cancelled new round does not replace the prior current round
-      with an apparently complete result.
-
-**Verification:**
-
-- `go test ./...`
-- Create range and worktree rounds in a temporary repository, modify branches and
-  files between them, restart MIRE, and inspect round history and divergence.
-
-**Status:** Complete. Existing sessions accept immutable range or working-tree
-captures, preserve predecessor-linked history, and report typed live divergence
-without mutating frozen snapshots.
+Committed two-dot and three-dot comparisons and complete working-tree states are
+captured atomically into application-owned storage.
 
 ## Milestone 3: Evidence-led review and model roles
 
@@ -738,25 +496,25 @@ including mandatory-context chat, across refresh and reconnect.
 application and versioned JSON/SSE API from one foreground Go process, using the
 same application service as the CLI.
 
-**Blocked by:** V1-02, V1-07
+**Blocked by:** V1-02 (complete), V1-07 (complete)
 
 **Acceptance criteria:**
 
-- [ ] The server binds only to loopback on an available or requested port and
+- [x] The server binds only to loopback on an available or requested port and
       shuts down cleanly on interruption; there is no daemon or remote-bind mode.
-- [ ] A high-entropy launch capability establishes an HttpOnly, SameSite cookie
+- [x] A high-entropy launch capability establishes an HttpOnly, SameSite cookie
       through a one-time URL and redirects to a clean URL.
-- [ ] Unexpected Host and Origin values, CORS requests, unauthenticated API/SSE,
+- [x] Unexpected Host and Origin values, CORS requests, unauthenticated API/SSE,
       non-JSON mutations, and invalid paths are rejected.
-- [ ] `/api/v1` exposes validated bootstrap, session, round, operation,
+- [x] `/api/v1` exposes validated bootstrap, session, round, operation,
       cancellation, activity, and divergence resources; later tickets extend the
       API for review data and actions.
-- [ ] Long mutations return `202` operations, creation uses idempotency keys, and
+- [x] Long mutations return `202` operations, creation uses idempotency keys, and
       revision changes reject stale expected revisions.
-- [ ] SSE emits versioned events with monotonic activity IDs, supports
+- [x] SSE emits versioned events with monotonic activity IDs, supports
       `Last-Event-ID`, and recovers durable state written by another CLI process;
       transient deltas may be lost without losing canonical results.
-- [ ] Static assets are built from `app/`, embedded in the binary, receive correct
+- [x] Static assets are built from `app/`, embedded in the binary, receive correct
       cache headers, and support client-side fallback routing without a Node
       process.
 
@@ -767,6 +525,10 @@ same application service as the CLI.
 - Run HTTP contract tests for authentication, Host/Origin, idempotency,
   concurrency, validation, SSE reconnect, cancellation, static caching, and
   fallback routing.
+
+**Status:** Complete. `mire web` now serves the authenticated loopback API and
+embedded static workbench over one foreground process, with durable operation
+activity, resumable SSE, repository isolation, and clean signal shutdown.
 
 **Notes:** The CLI invokes the application service directly; it must never call
 this HTTP API. The browser must use the API and never bypass it.
@@ -974,10 +736,24 @@ alias these commands but must not contain hidden build or release logic.
 
 ## Final frontier
 
-V1-01, V1-02, and V1-03 are complete. The current frontier is:
+V1-01 through V1-09 are complete. The current frontier is:
 
-- **V1-04 — Preserve three-dot merge-base semantics.**
-- **V1-05 — Capture the complete working tree without tearing.**
+- **V1-10 — Retain every emitted candidate and honest coverage.**
+- **V1-11 — Verify candidates against an evidence floor.**
+- **V1-12 — Preserve finding identity and explicit human decisions.**
+- **V1-13 — Keep every chat turn bound to review context.**
+- **V1-14 — Run all model roles through OpenAI-compatible endpoints.**
+- **V1-15 — Run all model roles through Anthropic.**
+- **V1-16 — Review and inspect results in a static terminal report.**
+- **V1-17 — Export one canonical ledger into all V1 formats.**
+- **V1-18 — Run fixed analyzers with bounded, auditable subprocesses.**
+- **V1-19 — Add syntax-aware lexical evidence from Setaryb.**
+- **V1-20 — Add complexity and clone evidence from Mccabre.**
+- **V1-22 — Explore diffs, slices, lanes, and evidence in the browser.**
+- **V1-23 — Triage, discuss, re-verify, and export in the browser.**
+- **V1-24 — Audit V1 authority, privacy, and failure boundaries.**
+- **V1-25 — Gate review quality with a frozen adjudicated corpus.**
+- **V1-26 — Produce and smoke-test the single native release artifact.**
 
 Continue with any ticket whose listed blockers are complete. Prefer one ticket per
 fresh agent context, and do not add ordering edges merely to keep milestone work

@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stormlightlabs/mire/internal/db"
+	"github.com/stormlightlabs/mire/internal/echo"
 	"github.com/stormlightlabs/mire/internal/server"
 )
 
@@ -55,10 +56,7 @@ func newWebCommand(state *commandContext) *cobra.Command {
 				_ = listener.Close()
 				return fmt.Errorf("web: %w", err)
 			}
-			if _, err := fmt.Fprintf(command.ErrOrStderr(), "Mire web listening at %s\n", launchURL); err != nil {
-				_ = listener.Close()
-				return err
-			}
+			echo.NewLogger(command.ErrOrStderr()).Info("Mire web listening", "url", launchURL)
 			return webServer.Serve(command.Context(), listener)
 		},
 	}

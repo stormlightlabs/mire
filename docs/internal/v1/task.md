@@ -41,18 +41,18 @@ V1-03; do not add an empty-session creation command.
 
 **Acceptance criteria:**
 
-- [ ] `mire sessions list` initializes private state when needed and lists only
+- [x] `mire sessions list` initializes private state when needed and lists only
       persisted session metadata.
-- [ ] The application service can transactionally create a session for the
+- [x] The application service can transactionally create a session for the
       current repository, show it after process restart, and delete it explicitly;
       the CLI exposes list and delete but not empty-session creation.
-- [ ] Session and repository records use stable IDs and every session is keyed by
+- [x] Session and repository records use stable IDs and every session is keyed by
       `repository_id`.
-- [ ] SQLite enables foreign keys, WAL, a busy timeout, transactional forward
+- [x] SQLite enables foreign keys, WAL, a busy timeout, transactional forward
       migrations, and restrictive state-directory and database permissions.
-- [ ] Deleting an unknown session and running outside a Git repository return
+- [x] Deleting an unknown session and running outside a Git repository return
       clear errors without changing Git or project files.
-- [ ] CLI stdout remains suitable for the requested result while diagnostics go
+- [x] CLI stdout remains suitable for the requested result while diagnostics go
       to stderr.
 
 **Verification:**

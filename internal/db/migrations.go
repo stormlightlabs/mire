@@ -51,6 +51,16 @@ var migrations = []Migration{
 		Name:    "round predecessor history",
 		SQL:     embeddedMigration("sql/006_round_predecessors.sql"),
 	},
+	{
+		Version: 7,
+		Name:    "planner runs and review plans",
+		SQL:     embeddedMigration("sql/007_planner_runs_and_plans.sql"),
+	},
+	{
+		Version: 8,
+		Name:    "repeatable planner plan digests",
+		SQL:     embeddedMigration("sql/008_remove_plan_digest_uniqueness.sql"),
+	},
 }
 
 func embeddedMigration(name string) string {

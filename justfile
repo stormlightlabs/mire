@@ -11,6 +11,10 @@ test:
 race:
     go test -race ./...
 
+cov:
+    go test -coverprofile=/tmp/mire-coverage.out ./...
+    go tool cover -func=/tmp/mire-coverage.out
+
 vet:
     go vet ./...
 

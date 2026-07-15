@@ -13,11 +13,16 @@ Work the frontier: any ticket whose blockers are complete.
 
 ## Dependency frontier
 
-Completed prerequisites: V1-01, V1-02, V1-03, V1-04, V1-05, V1-06, and V1-07.
+Completed prerequisites: V1-01, V1-02, V1-03, V1-04, V1-05, V1-06, V1-07,
+and V1-09. V1-08 is also complete.
 
-The current frontier contains one ticket:
+The current frontier contains these tickets:
 
-- **V1-08 — Assemble review intent and the frozen change model.**
+- **V1-10 — Retain every emitted candidate and honest coverage.**
+- **V1-14 — Run all model roles through OpenAI-compatible endpoints.**
+- **V1-15 — Run all model roles through Anthropic.**
+- **V1-18 — Run fixed analyzers with bounded, auditable subprocesses.**
+- **V1-21 — Serve the review API, durable progress, and embedded app securely.**
 
 Later tickets may proceed as soon as their declared blockers are complete; a
 milestone need not finish before work starts on an unblocked ticket in the next
@@ -336,17 +341,17 @@ change slices that can later drive both terminal and browser navigation.
 
 **Acceptance criteria:**
 
-- [ ] The core owns provider-neutral message, tool, structured-output, usage,
+- [x] The core owns provider-neutral message, tool, structured-output, usage,
       status, retry, timeout, cancellation, and provenance contracts.
-- [ ] A deterministic fixture model can complete planner runs without network or
+- [x] A deterministic fixture model can complete planner runs without network or
       credentials.
-- [ ] Logical slices reference exact snapshot hunks and explain their grouping
+- [x] Logical slices reference exact snapshot hunks and explain their grouping
       and risk cues; a file-oriented view remains derivable.
-- [ ] The plan records required context, applicable and skipped passes, ordering,
+- [x] The plan records required context, applicable and skipped passes, ordering,
       and known coverage limitations without claiming universal optimality.
-- [ ] Malformed structured output follows a bounded repair/retry policy and ends
+- [x] Malformed structured output follows a bounded repair/retry policy and ends
       as a visible failed run when still invalid.
-- [ ] Run records include adapter/protocol and prompt-template versions, model
+- [x] Run records include adapter/protocol and prompt-template versions, model
       selection, parameters, input manifest, digests, usage when supplied, finish
       reason, redactions, status, and termination cause.
 
@@ -355,6 +360,10 @@ change slices that can later drive both terminal and browser navigation.
 - `go test ./...`
 - Run fixture planner responses for valid, malformed, repaired, timed-out,
   cancelled, and budget-exhausted cases and inspect persisted plan/run records.
+
+**Status:** Complete. `internal/review` defines the provider-neutral planner
+boundary and deterministic fixture model; planner runs and immutable plans are
+persisted through the planner private-state migrations.
 
 **Notes:** Provider DTOs must stay outside the review domain. Define only the
 small model interface consumed by the orchestrator.

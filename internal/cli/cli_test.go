@@ -46,7 +46,7 @@ func TestSessionsCommandsPersistListAndDeleteMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open fixture store: %v", err)
 	}
-	session, err := store.CreateSession(context.Background(), identity, "V1 lifecycle")
+	session, err := store.CreateSession(context.Background(), identity, "lifecycle")
 	if err != nil {
 		t.Fatalf("create fixture session: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestSessionsCommandsPersistListAndDeleteMetadata(t *testing.T) {
 	if err := listCommand.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("persisted sessions list: %v", err)
 	}
-	for _, expected := range []string{session.ID, "V1 lifecycle", "mire"} {
+	for _, expected := range []string{session.ID, "lifecycle", "mire"} {
 		if !strings.Contains(listOutput.String(), expected) {
 			t.Fatalf("persisted stdout = %q, missing %q", listOutput.String(), expected)
 		}

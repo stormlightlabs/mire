@@ -19,7 +19,7 @@ const (
 	// temporary state directory without putting state in a reviewed repository.
 	StateDirectoryEnv = "MIRE_STATE_DIR"
 
-	// DatabaseFilename is the single global database used by the V1 store.
+	// DatabaseFilename is the single global database used by the store.
 	DatabaseFilename = "mire.sqlite3"
 
 	busyTimeout = 5000
@@ -136,7 +136,12 @@ func OpenStore(ctx context.Context, stateDir string) (*RepositoryStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewRepositoryStore(database), nil
+	store := NewRepositoryStore(database)
+	if _, err := store.RecoverExpiredOperations(ctx); err != nil {
+		_ = store.Close()
+		return nil, fmt.Errorf("recover expired operations: %w", err)
+	}
+	return store, nil
 }
 
 func ensurePrivateDirectory(path string) error {
@@ -201,5 +206,6 @@ func sqliteDSN(path string) string {
 		"_pragma=busy_timeout(" + fmt.Sprint(busyTimeout) + ")" +
 		"&_pragma=foreign_keys(1)" +
 		"&_pragma=journal_mode(WAL)" +
-		"&_pragma=synchronous(NORMAL)"
+		"&_pragma=synchronous(NORMAL)" +
+		"&_txlock=immediate"
 }

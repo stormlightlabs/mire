@@ -75,17 +75,17 @@ interrupted process is reported as abandoned rather than still running.
 
 **Acceptance criteria:**
 
-- [ ] Operations implement `queued`, `running`, `complete`, `failed`,
+- [x] Operations implement `queued`, `running`, `complete`, `failed`,
       `cancelled`, and `abandoned` states with validated transitions.
-- [ ] A transactional lease and unique active-operation constraint permit only
+- [x] A transactional lease and unique active-operation constraint permit only
       one state-changing or model operation per session across processes.
-- [ ] A random process-instance owner renews a bounded heartbeat; acquisition or
+- [x] A random process-instance owner renews a bounded heartbeat; acquisition or
       startup marks an expired operation abandoned and its round incomplete.
-- [ ] Cancellation is durable and idempotent, and completed state is never
+- [x] Cancellation is durable and idempotent, and completed state is never
       inferred from transient progress output.
-- [ ] Durable activity entries are committed atomically with the state changes
+- [x] Durable activity entries are committed atomically with the state changes
       they describe and receive monotonically increasing IDs.
-- [ ] Concurrent read-only session queries remain available while an operation
+- [x] Concurrent read-only session queries remain available while an operation
       runs.
 
 **Verification:**

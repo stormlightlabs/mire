@@ -60,17 +60,24 @@ type StoreOption func(*RepositoryStore)
 // RepositoryStore is the application-facing repository and session service.
 // Session creation persists the repository and session in one transaction.
 type RepositoryStore struct {
-	database *DB
-	now      func() time.Time
-	newID    IDGenerator
+	database      *DB
+	now           func() time.Time
+	newID         IDGenerator
+	processID     string
+	processIDErr  error
+	leaseDuration time.Duration
 }
 
 // NewRepositoryStore creates a repository/session service over database.
 func NewRepositoryStore(database *DB, options ...StoreOption) *RepositoryStore {
+	processID, processIDErr := NewID()
 	store := &RepositoryStore{
-		database: database,
-		now:      time.Now,
-		newID:    NewID,
+		database:      database,
+		now:           time.Now,
+		newID:         NewID,
+		processID:     processID,
+		processIDErr:  processIDErr,
+		leaseDuration: DefaultOperationLeaseDuration,
 	}
 	for _, option := range options {
 		if option != nil {
@@ -78,6 +85,36 @@ func NewRepositoryStore(database *DB, options ...StoreOption) *RepositoryStore {
 		}
 	}
 	return store
+}
+
+// WithProcessInstanceID overrides the random process-instance owner ID. It is
+// intended for deterministic tests and does not affect persisted entity IDs.
+func WithProcessInstanceID(processID string) StoreOption {
+	return func(store *RepositoryStore) {
+		processID = strings.TrimSpace(processID)
+		if processID != "" {
+			store.processID = processID
+			store.processIDErr = nil
+		}
+	}
+}
+
+// WithProcessID is a short alias for WithProcessInstanceID.
+func WithProcessID(processID string) StoreOption {
+	return WithProcessInstanceID(processID)
+}
+
+// WithOperationLeaseDuration sets the bounded duration of an acquired
+// operation lease and each subsequent heartbeat.
+func WithOperationLeaseDuration(duration time.Duration) StoreOption {
+	return func(store *RepositoryStore) {
+		store.leaseDuration = duration
+	}
+}
+
+// WithLeaseDuration is an alias for WithOperationLeaseDuration.
+func WithLeaseDuration(duration time.Duration) StoreOption {
+	return WithOperationLeaseDuration(duration)
 }
 
 // WithClock injects the timestamp source used by a RepositoryStore.

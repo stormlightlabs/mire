@@ -2,9 +2,16 @@ package db
 
 import (
 	"context"
+	"embed"
 	"fmt"
 	"time"
 )
+
+// migrationFiles contains the immutable forward migrations shipped with the
+// binary. Keep the version prefix in each filename aligned with migrations.
+//
+//go:embed sql/*.sql
+var migrationFiles embed.FS
 
 // Migration is one forward-only schema change.
 type Migration struct {
@@ -17,28 +24,21 @@ var migrations = []Migration{
 	{
 		Version: 1,
 		Name:    "repositories and sessions",
-		SQL: `
-CREATE TABLE repositories (
-    id TEXT PRIMARY KEY NOT NULL,
-    canonical_identity TEXT NOT NULL UNIQUE,
-    display_name TEXT NOT NULL,
-    discovered_git_dir TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-
-CREATE TABLE sessions (
-    id TEXT PRIMARY KEY NOT NULL,
-    repository_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    current_round_id TEXT,
-    FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
-);
-
-CREATE INDEX sessions_repository_created_at_idx
-    ON sessions (repository_id, created_at, id);
-`,
+		SQL:     embeddedMigration("sql/001_repositories_and_sessions.sql"),
 	},
+	{
+		Version: 2,
+		Name:    "rounds operations and activity",
+		SQL:     embeddedMigration("sql/002_rounds_operations_and_activity.sql"),
+	},
+}
+
+func embeddedMigration(name string) string {
+	sql, err := migrationFiles.ReadFile(name)
+	if err != nil {
+		panic(fmt.Sprintf("read embedded migration %q: %v", name, err))
+	}
+	return string(sql)
 }
 
 // LatestMigrationVersion returns the highest schema version known to this

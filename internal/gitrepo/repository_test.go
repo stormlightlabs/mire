@@ -423,6 +423,100 @@ func TestCaptureRangeRejectsAmbiguousBranchAndTag(t *testing.T) {
 	}
 }
 
+func TestCaptureRangeRejectsConfiguredResourceLimitsBeforeCopying(t *testing.T) {
+	t.Parallel()
+
+	repositoryPath := t.TempDir()
+	repository := initRepository(t, repositoryPath)
+	worktree, err := repository.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	writeFile(t, repositoryPath, "base.txt", "base", 0o644)
+	addFiles(t, worktree, "base.txt")
+	base := commit(t, repository, worktree, "base", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
+	writeFile(t, repositoryPath, "base.txt", "target-content", 0o644)
+	writeFile(t, repositoryPath, "new.txt", "new", 0o644)
+	addFiles(t, worktree, "base.txt", "new.txt")
+	target := commit(t, repository, worktree, "target", time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC))
+
+	tests := []struct {
+		name     string
+		limits   CaptureLimits
+		resource string
+	}{
+		{name: "file count", limits: CaptureLimits{MaxFileCount: 1, MaxObjectBytes: 1024, MaxCapturedBytes: 1024}, resource: "file count"},
+		{name: "object size", limits: CaptureLimits{MaxFileCount: 10, MaxObjectBytes: 4, MaxCapturedBytes: 1024}, resource: "individual object bytes"},
+		{name: "aggregate bytes", limits: CaptureLimits{MaxFileCount: 10, MaxObjectBytes: 1024, MaxCapturedBytes: 10}, resource: "aggregate captured bytes"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			stateDir := t.TempDir()
+			objectStore, err := snapshot.OpenObjectStore(stateDir)
+			if err != nil {
+				t.Fatalf("OpenObjectStore() error = %v", err)
+			}
+			_, err = CaptureRangeWithOptions(context.Background(), repositoryPath, base.String()+".."+target.String(), objectStore, CaptureOptions{Limits: test.limits})
+			var limitErr *CaptureLimitError
+			if !errors.As(err, &limitErr) || limitErr.Resource != test.resource {
+				t.Fatalf("CaptureRange() error = %v, want %q limit", err, test.resource)
+			}
+			if !errors.Is(err, ErrCaptureLimit) {
+				t.Fatalf("CaptureRange() error = %v, want ErrCaptureLimit", err)
+			}
+			entries, err := os.ReadDir(filepath.Join(stateDir, "objects", "sha256"))
+			if err != nil {
+				t.Fatalf("ReadDir() error = %v", err)
+			}
+			if len(entries) != 0 {
+				t.Fatalf("resource planning created object shards = %v", entries)
+			}
+		})
+	}
+}
+
+func TestCaptureWorktreeRetriesAfterAConcurrentChange(t *testing.T) {
+	t.Parallel()
+
+	repositoryPath := t.TempDir()
+	repository := initRepository(t, repositoryPath)
+	worktree, err := repository.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	writeFile(t, repositoryPath, "file.txt", "before", 0o644)
+	addFiles(t, worktree, "file.txt")
+	commit(t, repository, worktree, "base", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
+
+	var clockCalls int
+	objectStore, err := snapshot.OpenObjectStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenObjectStore() error = %v", err)
+	}
+	captured, err := CaptureWorktreeWithOptions(context.Background(), repositoryPath, objectStore, CaptureOptions{
+		MaxAttempts: 2,
+		Clock: func() time.Time {
+			clockCalls++
+			if clockCalls == 1 {
+				writeFile(t, repositoryPath, "file.txt", "after", 0o644)
+			}
+			return time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
+		},
+	})
+	if err != nil {
+		t.Fatalf("CaptureWorktree() error = %v", err)
+	}
+	if clockCalls != 2 {
+		t.Fatalf("capture attempts = %d, want 2", clockCalls)
+	}
+	entry := findEntry(captured.WorktreeEntries, "file.txt")
+	if got := string(readObject(t, objectStore, entry.ContentDigest)); got != "after" {
+		t.Fatalf("captured content = %q, want retried version", got)
+	}
+}
+
 func initRepository(t *testing.T, path string) *git.Repository {
 	t.Helper()
 	repository, err := git.PlainInit(path, false)

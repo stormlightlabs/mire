@@ -115,8 +115,8 @@ func (store *ObjectStore) Put(ctx context.Context, reader io.Reader) (Object, er
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return Object{}, fmt.Errorf("create snapshot object directory: %w", err)
 	}
-	if err := os.Chmod(filepath.Dir(target), 0o700); err != nil {
-		return Object{}, fmt.Errorf("restrict snapshot object directory: %w", err)
+	if err := ensurePrivateDirectory(filepath.Dir(target)); err != nil {
+		return Object{}, err
 	}
 	if info, statErr := os.Lstat(target); statErr == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
@@ -152,6 +152,11 @@ func (store *ObjectStore) Open(digest string) (*os.File, error) {
 	target, err := store.pathForDigest(digest)
 	if err != nil {
 		return nil, err
+	}
+	for _, directory := range []string{filepath.Dir(store.root), store.root, filepath.Dir(target)} {
+		if err := inspectPrivateDirectory(directory); err != nil {
+			return nil, err
+		}
 	}
 	info, err := os.Lstat(target)
 	if err != nil {
@@ -215,6 +220,20 @@ func ensurePrivateDirectory(path string) error {
 	}
 	if err := os.Chmod(path, 0o700); err != nil {
 		return fmt.Errorf("restrict private snapshot directory: %w", err)
+	}
+	return nil
+}
+
+func inspectPrivateDirectory(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect private snapshot directory: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("snapshot object store: %s is not a directory", path)
 	}
 	return nil
 }

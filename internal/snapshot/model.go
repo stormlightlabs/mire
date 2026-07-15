@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -223,7 +224,12 @@ func validateEntries(side string, entries []Entry) error {
 // ValidateRepositoryPath validates a Git tree path before it can cross into
 // any filesystem or object-store boundary.
 func ValidateRepositoryPath(value string) error {
-	if value == "" || value == "." || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") {
+	if value == "" || value == "." || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") || strings.ContainsRune(value, '\x00') {
+		return fmt.Errorf("invalid repository path %q", value)
+	}
+	filesystemPath := filepath.FromSlash(value)
+	windowsDrivePath := len(value) >= 3 && ((value[0] >= 'a' && value[0] <= 'z') || (value[0] >= 'A' && value[0] <= 'Z')) && value[1] == ':' && value[2] == '/'
+	if filepath.IsAbs(filesystemPath) || filepath.VolumeName(filesystemPath) != "" || windowsDrivePath {
 		return fmt.Errorf("invalid repository path %q", value)
 	}
 	parts := strings.Split(value, "/")

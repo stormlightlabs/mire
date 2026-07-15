@@ -225,17 +225,17 @@ violations, retrying only when a coherent capture is still possible.
 
 **Acceptance criteria:**
 
-- [ ] Working-tree capture reads identities and inventory before copying, then
+- [x] Working-tree capture reads identities and inventory before copying, then
       rechecks identities and file metadata/content before committing.
-- [ ] Concurrent changes cause a bounded retry or a torn-snapshot diagnostic;
+- [x] Concurrent changes cause a bounded retry or a torn-snapshot diagnostic;
       they never produce a mixed manifest.
-- [ ] Explicit ceilings cover at least file count, individual object size, and
+- [x] Explicit ceilings cover at least file count, individual object size, and
       aggregate captured bytes, and explain which configured limit was exceeded.
-- [ ] Limit failures occur before a review round or model call and never silently
+- [x] Limit failures occur before a review round or model call and never silently
       truncate the snapshot.
-- [ ] Absolute paths, traversal, special devices, and object-store escapes are
+- [x] Absolute paths, traversal, special devices, and object-store escapes are
       rejected at the boundary.
-- [ ] Orphaned temporary content from failed capture is safely recoverable or
+- [x] Orphaned temporary content from failed capture is safely recoverable or
       collectible without deleting referenced objects.
 
 **Verification:**
@@ -243,6 +243,10 @@ violations, retrying only when a coherent capture is still possible.
 - `go test -race ./...`
 - Use controlled concurrent writers and limit-boundary fixtures to prove that
   each result is either one coherent version or an explicit failure.
+
+**Status:** Complete. Capture planning enforces bounded file and byte budgets,
+object publication remains atomic, and changing working trees retry only when a
+coherent recapture is possible.
 
 **Notes:** Numeric defaults are configuration decisions to set from measured
 fixtures before release; the contract is explicit failure, not a particular

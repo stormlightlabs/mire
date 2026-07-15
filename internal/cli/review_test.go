@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -158,6 +159,98 @@ func TestReviewThreeDotPersistsRequestedAndEffectiveBaseProvenance(t *testing.T)
 		persisted.EffectiveBaseOID != base.String() || persisted.MergeBaseOID != base.String() ||
 		persisted.TargetOID != target.String() {
 		t.Fatalf("persisted provenance = %#v", persisted)
+	}
+}
+
+func TestReviewWorktreePersistsAllThreeLayersAndIgnoredPolicy(t *testing.T) {
+	t.Parallel()
+
+	repositoryPath := t.TempDir()
+	repository := initReviewRepository(t, repositoryPath)
+	worktree, err := repository.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	writeReviewFile(t, repositoryPath, "shared.txt", "head\n")
+	writeReviewFile(t, repositoryPath, ".gitignore", "ignored.txt\n")
+	addReviewFile(t, worktree, "shared.txt")
+	addReviewFile(t, worktree, ".gitignore")
+	commitReview(t, worktree, "base", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
+	writeReviewFile(t, repositoryPath, "shared.txt", "index\n")
+	addReviewFile(t, worktree, "shared.txt")
+	writeReviewFile(t, repositoryPath, "shared.txt", "final\n")
+	writeReviewFile(t, repositoryPath, "new.txt", "untracked\n")
+	writeReviewFile(t, repositoryPath, "ignored.txt", "ignored\n")
+
+	stateDir := filepath.Join(t.TempDir(), "state")
+	var output, diagnostics bytes.Buffer
+	command := NewRootCommand(Config{
+		Stdout: &output, Stderr: &diagnostics, StateDir: stateDir, WorkingDir: repositoryPath,
+	})
+	command.SetArgs([]string{"review", "--worktree"})
+	if err := command.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("worktree review command error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Kind: worktree") || !strings.Contains(output.String(), "Index:") {
+		t.Fatalf("stdout = %q", output.String())
+	}
+	if diagnostics.Len() != 0 {
+		t.Fatalf("stderr = %q", diagnostics.String())
+	}
+
+	store, err := db.OpenStore(context.Background(), stateDir)
+	if err != nil {
+		t.Fatalf("OpenStore() error = %v", err)
+	}
+	defer store.Close()
+	sessions, err := store.ListSessions(context.Background())
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions = %#v, error = %v", sessions, err)
+	}
+	round, err := store.GetRound(context.Background(), sessions[0].CurrentRoundID)
+	if err != nil {
+		t.Fatalf("GetRound() error = %v", err)
+	}
+	persisted, err := store.GetSnapshot(context.Background(), round.SnapshotID)
+	if err != nil {
+		t.Fatalf("GetSnapshot() error = %v", err)
+	}
+	if persisted.Kind != snapshot.ComparisonWorktree || persisted.BaseOID == "" || persisted.IndexOID == "" || persisted.TargetOID == "" || persisted.IgnorePolicy == "" {
+		t.Fatalf("worktree snapshot = %#v", persisted)
+	}
+	if len(persisted.Layers) != 3 {
+		t.Fatalf("snapshot layers = %#v", persisted.Layers)
+	}
+	headEntries, err := store.ListSnapshotEntries(context.Background(), persisted.ID, snapshot.TreeSideHead)
+	if err != nil {
+		t.Fatalf("ListSnapshotEntries(head) error = %v", err)
+	}
+	indexEntries, err := store.ListSnapshotEntries(context.Background(), persisted.ID, snapshot.TreeSideIndex)
+	if err != nil {
+		t.Fatalf("ListSnapshotEntries(index) error = %v", err)
+	}
+	worktreeEntries, err := store.ListSnapshotEntries(context.Background(), persisted.ID, snapshot.TreeSideWorktree)
+	if err != nil {
+		t.Fatalf("ListSnapshotEntries(worktree) error = %v", err)
+	}
+	if findReviewEntry(headEntries, "new.txt").Path != "" || findReviewEntry(indexEntries, "new.txt").Path != "" {
+		t.Fatalf("untracked file leaked into prior layers: head=%#v index=%#v", headEntries, indexEntries)
+	}
+	if findReviewEntry(worktreeEntries, "new.txt").Path == "" || findReviewEntry(worktreeEntries, "ignored.txt").Path != "" {
+		t.Fatalf("final worktree entries = %#v", worktreeEntries)
+	}
+	objectStore, err := snapshot.OpenObjectStore(stateDir)
+	if err != nil {
+		t.Fatalf("OpenObjectStore() error = %v", err)
+	}
+	finalObject, err := objectStore.Open(findReviewEntry(worktreeEntries, "shared.txt").ContentDigest)
+	if err != nil {
+		t.Fatalf("open final shared object: %v", err)
+	}
+	finalContent, err := io.ReadAll(finalObject)
+	_ = finalObject.Close()
+	if err != nil || string(finalContent) != "final\n" {
+		t.Fatalf("final shared object = %q, error = %v", finalContent, err)
 	}
 }
 

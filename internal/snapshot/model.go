@@ -15,9 +15,15 @@ import (
 const (
 	ComparisonTwoDot   = "two_dot"
 	ComparisonThreeDot = "three_dot"
+	ComparisonWorktree = "worktree"
 
-	TreeSideBase   = "base"
-	TreeSideTarget = "target"
+	WorktreeComparison = "HEAD..WORKTREE"
+
+	TreeSideBase     = "base"
+	TreeSideTarget   = "target"
+	TreeSideHead     = "head"
+	TreeSideIndex    = "index"
+	TreeSideWorktree = "worktree"
 
 	EntryKindFile      = "file"
 	EntryKindSymlink   = "symlink"
@@ -31,8 +37,9 @@ const (
 )
 
 // Entry is one file-like entry in a complete committed tree manifest.
-// ContentDigest identifies bytes in MIRE's private object store. GitOID is
-// retained as provenance and is never used as the durable content copy.
+// ContentDigest identifies bytes in MIRE's private object store.
+//
+// GitOID is retained as provenance and is never used as the durable content copy.
 type Entry struct {
 	Path          string `json:"path"`
 	Kind          string `json:"kind"`
@@ -53,24 +60,42 @@ type Change struct {
 	TargetDigest string `json:"target_digest,omitempty"`
 }
 
-// Capture is the in-memory result of a successful Git capture. It is safe to
-// persist only after every non-submodule entry has a verified ContentDigest.
+// Layer identifies one immutable view captured for a review snapshot.
+type Layer struct {
+	Name           string `json:"name"`
+	Identity       string `json:"identity"`
+	ManifestDigest string `json:"manifest_digest"`
+}
+
+// Capture is the in-memory result of a successful Git capture.
+//
+// It is safe to persist only after every non-submodule entry has a verified ContentDigest.
 type Capture struct {
-	ComparisonKind       string
-	RequestedComparison  string
-	BaseOID              string
-	EffectiveBaseOID     string
-	TargetOID            string
-	MergeBaseOID         string
-	ObjectFormat         string
-	ContextPolicyHash    string
-	CapturedAt           time.Time
-	BaseEntries          []Entry
-	TargetEntries        []Entry
-	Changes              []Change
-	BaseManifestDigest   string
-	TargetManifestDigest string
-	ManifestDigest       string
+	ComparisonKind         string
+	RequestedComparison    string
+	BaseOID                string
+	EffectiveBaseOID       string
+	TargetOID              string
+	MergeBaseOID           string
+	IndexOID               string
+	WorktreeOID            string
+	ObjectFormat           string
+	ContextPolicyHash      string
+	IgnorePolicy           string
+	CapturedAt             time.Time
+	BaseEntries            []Entry
+	TargetEntries          []Entry
+	HeadEntries            []Entry
+	IndexEntries           []Entry
+	WorktreeEntries        []Entry
+	Changes                []Change
+	BaseManifestDigest     string
+	TargetManifestDigest   string
+	HeadManifestDigest     string
+	IndexManifestDigest    string
+	WorktreeManifestDigest string
+	ManifestDigest         string
+	Layers                 []Layer
 }
 
 // DefaultContextPolicyHash is the recorded hash for the built-in capture policy.
@@ -109,6 +134,9 @@ func (capture Capture) Validate() error {
 	if strings.TrimSpace(capture.ContextPolicyHash) == "" {
 		return fmt.Errorf("snapshot capture: context policy hash is empty")
 	}
+	if comparisonKind == ComparisonWorktree && strings.TrimSpace(capture.IndexOID) == "" {
+		return fmt.Errorf("snapshot capture: working-tree index identity is empty")
+	}
 	if capture.CapturedAt.IsZero() {
 		return fmt.Errorf("snapshot capture: capture time is zero")
 	}
@@ -119,19 +147,37 @@ func (capture Capture) Validate() error {
 			return err
 		}
 	}
+	if comparisonKind == ComparisonWorktree {
+		for side, entries := range map[string][]Entry{
+			TreeSideHead: capture.HeadEntries, TreeSideIndex: capture.IndexEntries,
+			TreeSideWorktree: capture.WorktreeEntries,
+		} {
+			if err := validateEntries(side, entries); err != nil {
+				return err
+			}
+		}
+		if capture.HeadManifestDigest == "" || capture.IndexManifestDigest == "" || capture.WorktreeManifestDigest == "" {
+			return fmt.Errorf("snapshot capture: working-tree layer manifest digests are incomplete")
+		}
+		if capture.WorktreeOID != "" && capture.WorktreeOID != capture.WorktreeManifestDigest {
+			return fmt.Errorf("snapshot capture: working-tree identity does not match its manifest")
+		}
+	}
 	if capture.BaseManifestDigest == "" || capture.TargetManifestDigest == "" || capture.ManifestDigest == "" {
 		return fmt.Errorf("snapshot capture: manifest digests are incomplete")
 	}
 	return nil
 }
 
-// ComparisonKindForComparison identifies the committed comparison syntax in a
-// requested range. It rejects malformed or unsupported expressions before any
-// repository object is read.
+// ComparisonKindForComparison identifies the committed comparison syntax in a requested range.
+// It rejects malformed or unsupported expressions before any repository object is read.
 func ComparisonKindForComparison(requestedComparison string) (string, error) {
 	requestedComparison = strings.TrimSpace(requestedComparison)
 	if requestedComparison == "" {
 		return "", fmt.Errorf("snapshot capture: requested comparison is empty")
+	}
+	if strings.EqualFold(requestedComparison, WorktreeComparison) {
+		return ComparisonWorktree, nil
 	}
 	if strings.Contains(requestedComparison, "...") {
 		if strings.Count(requestedComparison, "...") != 1 || strings.Count(requestedComparison, "..") != 1 {
@@ -219,17 +265,24 @@ func OverallManifestDigest(capture Capture) (string, error) {
 		baseOID = capture.EffectiveBaseOID
 	}
 	type manifest struct {
-		ComparisonKind       string   `json:"comparison_kind"`
-		RequestedComparison  string   `json:"requested_comparison"`
-		BaseOID              string   `json:"base_oid"`
-		EffectiveBaseOID     string   `json:"effective_base_oid"`
-		TargetOID            string   `json:"target_oid"`
-		MergeBaseOID         string   `json:"merge_base_oid"`
-		ObjectFormat         string   `json:"object_format"`
-		ContextPolicyHash    string   `json:"context_policy_hash"`
-		BaseManifestDigest   string   `json:"base_manifest_digest"`
-		TargetManifestDigest string   `json:"target_manifest_digest"`
-		Changes              []Change `json:"changes"`
+		ComparisonKind         string   `json:"comparison_kind"`
+		RequestedComparison    string   `json:"requested_comparison"`
+		BaseOID                string   `json:"base_oid"`
+		EffectiveBaseOID       string   `json:"effective_base_oid"`
+		TargetOID              string   `json:"target_oid"`
+		MergeBaseOID           string   `json:"merge_base_oid"`
+		IndexOID               string   `json:"index_oid"`
+		WorktreeOID            string   `json:"worktree_oid"`
+		ObjectFormat           string   `json:"object_format"`
+		ContextPolicyHash      string   `json:"context_policy_hash"`
+		IgnorePolicy           string   `json:"ignore_policy"`
+		BaseManifestDigest     string   `json:"base_manifest_digest"`
+		TargetManifestDigest   string   `json:"target_manifest_digest"`
+		HeadManifestDigest     string   `json:"head_manifest_digest"`
+		IndexManifestDigest    string   `json:"index_manifest_digest"`
+		WorktreeManifestDigest string   `json:"worktree_manifest_digest"`
+		Changes                []Change `json:"changes"`
+		Layers                 []Layer  `json:"layers"`
 	}
 	changes := append([]Change(nil), capture.Changes...)
 	sort.Slice(changes, func(i, j int) bool {
@@ -238,24 +291,50 @@ func OverallManifestDigest(capture Capture) (string, error) {
 		}
 		return changes[i].TargetPath < changes[j].TargetPath
 	})
+	layers := append([]Layer(nil), capture.Layers...)
+	if len(layers) == 0 {
+		layers = capture.ManifestLayers()
+	}
 	encoded, err := json.Marshal(manifest{
-		ComparisonKind:       comparisonKind,
-		RequestedComparison:  capture.RequestedComparison,
-		BaseOID:              baseOID,
-		EffectiveBaseOID:     capture.EffectiveBaseOID,
-		TargetOID:            capture.TargetOID,
-		MergeBaseOID:         capture.MergeBaseOID,
-		ObjectFormat:         capture.ObjectFormat,
-		ContextPolicyHash:    capture.ContextPolicyHash,
-		BaseManifestDigest:   capture.BaseManifestDigest,
-		TargetManifestDigest: capture.TargetManifestDigest,
-		Changes:              changes,
+		ComparisonKind:         comparisonKind,
+		RequestedComparison:    capture.RequestedComparison,
+		BaseOID:                baseOID,
+		EffectiveBaseOID:       capture.EffectiveBaseOID,
+		TargetOID:              capture.TargetOID,
+		MergeBaseOID:           capture.MergeBaseOID,
+		IndexOID:               capture.IndexOID,
+		WorktreeOID:            capture.WorktreeOID,
+		ObjectFormat:           capture.ObjectFormat,
+		ContextPolicyHash:      capture.ContextPolicyHash,
+		IgnorePolicy:           capture.IgnorePolicy,
+		BaseManifestDigest:     capture.BaseManifestDigest,
+		TargetManifestDigest:   capture.TargetManifestDigest,
+		HeadManifestDigest:     capture.HeadManifestDigest,
+		IndexManifestDigest:    capture.IndexManifestDigest,
+		WorktreeManifestDigest: capture.WorktreeManifestDigest,
+		Changes:                changes,
+		Layers:                 layers,
 	})
 	if err != nil {
 		return "", fmt.Errorf("encode snapshot manifest: %w", err)
 	}
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+// ManifestLayers returns the immutable layer metadata represented by capture.
+func (capture Capture) ManifestLayers() []Layer {
+	if capture.ComparisonKind == ComparisonWorktree || strings.EqualFold(capture.RequestedComparison, WorktreeComparison) {
+		return []Layer{
+			{Name: TreeSideHead, Identity: capture.BaseOID, ManifestDigest: capture.HeadManifestDigest},
+			{Name: TreeSideIndex, Identity: capture.IndexOID, ManifestDigest: capture.IndexManifestDigest},
+			{Name: TreeSideWorktree, Identity: capture.WorktreeOID, ManifestDigest: capture.WorktreeManifestDigest},
+		}
+	}
+	return []Layer{
+		{Name: TreeSideBase, Identity: capture.EffectiveBaseOID, ManifestDigest: capture.BaseManifestDigest},
+		{Name: TreeSideTarget, Identity: capture.TargetOID, ManifestDigest: capture.TargetManifestDigest},
+	}
 }
 
 // BuildChanges creates deterministic change records and recognizes exact

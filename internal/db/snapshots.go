@@ -26,13 +26,24 @@ type Snapshot struct {
 	EffectiveBaseOID     string
 	TargetOID            string
 	MergeBaseOID         string
+	IndexOID             string
 	ObjectFormat         string
 	ContextPolicyHash    string
+	IgnorePolicy         string
 	BaseManifestDigest   string
 	TargetManifestDigest string
 	ManifestDigest       string
 	Complete             bool
 	CreatedAt            time.Time
+	Layers               []SnapshotLayer
+}
+
+// SnapshotLayer is one persisted immutable layer of a snapshot.
+type SnapshotLayer struct {
+	SnapshotID     string
+	Layer          string
+	Identity       string
+	ManifestDigest string
 }
 
 // SnapshotEntry is one persisted complete-tree manifest entry.
@@ -121,8 +132,10 @@ VALUES (?, ?, ?, ?)`, sessionID, repository.ID, title, timestampString(now)); er
 		EffectiveBaseOID:     capture.EffectiveBaseOID,
 		TargetOID:            capture.TargetOID,
 		MergeBaseOID:         capture.MergeBaseOID,
+		IndexOID:             capture.IndexOID,
 		ObjectFormat:         capture.ObjectFormat,
 		ContextPolicyHash:    capture.ContextPolicyHash,
+		IgnorePolicy:         capture.IgnorePolicy,
 		BaseManifestDigest:   capture.BaseManifestDigest,
 		TargetManifestDigest: capture.TargetManifestDigest,
 		ManifestDigest:       capture.ManifestDigest,
@@ -132,24 +145,46 @@ VALUES (?, ?, ?, ?)`, sessionID, repository.ID, title, timestampString(now)); er
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO snapshots (
     id, repository_id, kind, requested_comparison, base_oid, effective_base_oid,
-    target_oid, merge_base_oid, object_format, context_policy_hash,
+    target_oid, merge_base_oid, index_oid, object_format, context_policy_hash, ignore_policy,
     base_manifest_digest, target_manifest_digest, manifest_digest, complete, created_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
 		persistedSnapshot.ID, persistedSnapshot.RepositoryID, persistedSnapshot.Kind,
 		persistedSnapshot.RequestedComparison, persistedSnapshot.BaseOID,
 		persistedSnapshot.EffectiveBaseOID, persistedSnapshot.TargetOID,
-		persistedSnapshot.MergeBaseOID, persistedSnapshot.ObjectFormat,
-		persistedSnapshot.ContextPolicyHash, persistedSnapshot.BaseManifestDigest,
+		persistedSnapshot.MergeBaseOID, persistedSnapshot.IndexOID, persistedSnapshot.ObjectFormat,
+		persistedSnapshot.ContextPolicyHash, persistedSnapshot.IgnorePolicy, persistedSnapshot.BaseManifestDigest,
 		persistedSnapshot.TargetManifestDigest, persistedSnapshot.ManifestDigest,
 		timestampString(persistedSnapshot.CreatedAt)); err != nil {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert snapshot: %w", err)
 	}
-	if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideBase, capture.BaseEntries); err != nil {
-		return Session{}, Round{}, Snapshot{}, err
+	if captureKind(capture) == snapshot.ComparisonWorktree {
+		for _, layer := range []struct {
+			name    string
+			entries []snapshot.Entry
+		}{
+			{name: snapshot.TreeSideHead, entries: capture.HeadEntries},
+			{name: snapshot.TreeSideIndex, entries: capture.IndexEntries},
+			{name: snapshot.TreeSideWorktree, entries: capture.WorktreeEntries},
+		} {
+			if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, layer.name, layer.entries); err != nil {
+				return Session{}, Round{}, Snapshot{}, err
+			}
+		}
+	} else {
+		if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideBase, capture.BaseEntries); err != nil {
+			return Session{}, Round{}, Snapshot{}, err
+		}
+		if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideTarget, capture.TargetEntries); err != nil {
+			return Session{}, Round{}, Snapshot{}, err
+		}
 	}
-	if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideTarget, capture.TargetEntries); err != nil {
-		return Session{}, Round{}, Snapshot{}, err
+	for _, layer := range capture.ManifestLayers() {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO snapshot_layers (snapshot_id, layer, identity, manifest_digest)
+VALUES (?, ?, ?, ?)`, snapshotID, layer.Name, layer.Identity, layer.ManifestDigest); err != nil {
+			return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert snapshot layer %q: %w", layer.Name, err)
+		}
 	}
 	for _, change := range capture.Changes {
 		if _, err := tx.ExecContext(ctx, `
@@ -207,7 +242,7 @@ func (store *RepositoryStore) GetSnapshot(ctx context.Context, snapshotID string
 	}
 	row := store.database.QueryRowContext(ctx, `
 SELECT id, repository_id, kind, requested_comparison, base_oid, effective_base_oid,
-       target_oid, merge_base_oid, object_format, context_policy_hash,
+       target_oid, merge_base_oid, index_oid, object_format, context_policy_hash, ignore_policy,
        base_manifest_digest, target_manifest_digest, manifest_digest, complete, created_at
 FROM snapshots WHERE id = ?`, snapshotID)
 	result, err := scanSnapshot(row)
@@ -217,7 +252,45 @@ FROM snapshots WHERE id = ?`, snapshotID)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("get snapshot %q: %w", snapshotID, err)
 	}
+	result.Layers, err = store.ListSnapshotLayers(ctx, snapshotID)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	return result, nil
+}
+
+// ListSnapshotLayers reads immutable layer identities and manifest digests in
+// deterministic layer order.
+func (store *RepositoryStore) ListSnapshotLayers(ctx context.Context, snapshotID string) ([]SnapshotLayer, error) {
+	if err := store.validate(); err != nil {
+		return nil, err
+	}
+	snapshotID = strings.TrimSpace(snapshotID)
+	if snapshotID == "" {
+		return nil, fmt.Errorf("list snapshot layers: snapshot ID is empty")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := store.database.QueryContext(ctx, `
+SELECT snapshot_id, layer, identity, manifest_digest
+FROM snapshot_layers WHERE snapshot_id = ? ORDER BY layer ASC`, snapshotID)
+	if err != nil {
+		return nil, fmt.Errorf("list snapshot layers: %w", err)
+	}
+	defer rows.Close()
+	layers := make([]SnapshotLayer, 0)
+	for rows.Next() {
+		var layer SnapshotLayer
+		if err := rows.Scan(&layer.SnapshotID, &layer.Layer, &layer.Identity, &layer.ManifestDigest); err != nil {
+			return nil, fmt.Errorf("list snapshot layers: %w", err)
+		}
+		layers = append(layers, layer)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list snapshot layers: %w", err)
+	}
+	return layers, nil
 }
 
 // ListSnapshotEntries reads a stored complete tree manifest in path order.
@@ -230,7 +303,8 @@ func (store *RepositoryStore) ListSnapshotEntries(ctx context.Context, snapshotI
 	if snapshotID == "" || treeSide == "" {
 		return nil, fmt.Errorf("list snapshot entries: snapshot ID and tree side are required")
 	}
-	if treeSide != snapshot.TreeSideBase && treeSide != snapshot.TreeSideTarget {
+	if treeSide != snapshot.TreeSideBase && treeSide != snapshot.TreeSideTarget &&
+		treeSide != snapshot.TreeSideHead && treeSide != snapshot.TreeSideIndex && treeSide != snapshot.TreeSideWorktree {
 		return nil, fmt.Errorf("list snapshot entries: unsupported tree side %q", treeSide)
 	}
 	if ctx == nil {
@@ -314,6 +388,9 @@ func normalizeCapture(capture snapshot.Capture) (snapshot.Capture, error) {
 	if capture.BaseOID == "" {
 		capture.BaseOID = capture.EffectiveBaseOID
 	}
+	if len(capture.Layers) == 0 {
+		capture.Layers = capture.ManifestLayers()
+	}
 	return capture, nil
 }
 
@@ -364,8 +441,8 @@ func scanSnapshot(row scanner) (Snapshot, error) {
 	var complete int
 	var createdAtRaw string
 	if err := row.Scan(&result.ID, &result.RepositoryID, &result.Kind, &result.RequestedComparison,
-		&result.BaseOID, &result.EffectiveBaseOID, &result.TargetOID, &result.MergeBaseOID,
-		&result.ObjectFormat, &result.ContextPolicyHash,
+		&result.BaseOID, &result.EffectiveBaseOID, &result.TargetOID, &result.MergeBaseOID, &result.IndexOID,
+		&result.ObjectFormat, &result.ContextPolicyHash, &result.IgnorePolicy,
 		&result.BaseManifestDigest, &result.TargetManifestDigest, &result.ManifestDigest,
 		&complete, &createdAtRaw); err != nil {
 		return Snapshot{}, err

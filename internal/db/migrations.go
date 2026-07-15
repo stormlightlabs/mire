@@ -41,6 +41,11 @@ var migrations = []Migration{
 		Name:    "three-dot snapshot provenance",
 		SQL:     embeddedMigration("sql/004_three_dot_snapshots.sql"),
 	},
+	{
+		Version: 5,
+		Name:    "working-tree snapshot layers",
+		SQL:     embeddedMigration("sql/005_worktree_snapshots.sql"),
+	},
 }
 
 func embeddedMigration(name string) string {

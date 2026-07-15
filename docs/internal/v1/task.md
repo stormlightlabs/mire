@@ -13,11 +13,12 @@ Work the frontier: any ticket whose blockers are complete.
 
 ## Dependency frontier
 
-Completed prerequisites: V1-01, V1-02, V1-03, and V1-04.
+Completed prerequisites: V1-01, V1-02, V1-03, V1-04, and V1-05.
 
 The current frontier contains one ticket:
 
-- **V1-05 — Capture the complete working tree without tearing.**
+- **V1-06 — Reject raced, oversized, or unsafe captures.**
+- **V1-07 — Append review rounds and report live divergence.**
 
 Later tickets may proceed as soon as their declared blockers are complete; a
 milestone need not finish before work starts on an unblocked ticket in the next
@@ -191,17 +192,17 @@ staged and unstaged edits remain intelligible after the live repository changes.
 
 **Acceptance criteria:**
 
-- [ ] Capture preserves distinct `HEAD`, index, and final-worktree identities and
+- [x] Capture preserves distinct `HEAD`, index, and final-worktree identities and
       content for paths changed in more than one layer.
-- [ ] Nonignored untracked files are included; ignored files are excluded and the
+- [x] Nonignored untracked files are included; ignored files are excluded and the
       policy is recorded.
-- [ ] Deletions, renames, binary files, executable bits, spaces, Unicode paths,
+- [x] Deletions, renames, binary files, executable bits, spaces, Unicode paths,
       and symlink targets are represented without following symlinks.
-- [ ] Clean submodules are opaque Git links; dirty submodule state fails with
+- [x] Clean submodules are opaque Git links; dirty submodule state fails with
       guidance to review that repository separately.
-- [ ] Every stored manifest is complete and all subsequent reads come from its
+- [x] Every stored manifest is complete and all subsequent reads come from its
       private objects.
-- [ ] Capturing and later reading the snapshot causes no target-repository or Git
+- [x] Capturing and later reading the snapshot causes no target-repository or Git
       metadata writes.
 
 **Verification:**
@@ -210,6 +211,9 @@ staged and unstaged edits remain intelligible after the live repository changes.
 - Run the working-tree fixture matrix from the V1 plan, mutate the live files
   after capture, and confirm the snapshot still presents the original three
   layers.
+
+**Status:** Complete. Working-tree captures preserve the three immutable layers,
+ignore policy, and opaque submodule boundaries in private storage.
 
 ### V1-06 — Reject raced, oversized, or unsafe captures
 

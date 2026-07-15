@@ -4,6 +4,8 @@ package gitrepo
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +19,7 @@ import (
 	git "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/filemode"
+	"github.com/go-git/go-git/v6/plumbing/format/index"
 	"github.com/go-git/go-git/v6/plumbing/object"
 	"github.com/go-git/go-git/v6/plumbing/storer"
 	"github.com/stormlightlabs/mire/internal/db"
@@ -35,6 +38,11 @@ var (
 	// ErrMultipleMergeBases is returned when Git's best common ancestor set is
 	// not unique.
 	ErrMultipleMergeBases = errors.New("multiple merge bases")
+	// ErrTornWorktree is returned when the repository changes during capture.
+	ErrTornWorktree = errors.New("working tree changed during capture")
+	// ErrDirtySubmodule is returned when a submodule contains state that cannot
+	// be represented as an opaque Git link in the containing snapshot.
+	ErrDirtySubmodule = errors.New("dirty submodule")
 )
 
 // Repository is an opened read-only view of a local worktree.
@@ -122,8 +130,9 @@ func Discover(ctx context.Context, directory string) (db.RepositoryIdentity, err
 
 // CaptureOptions controls deterministic capture metadata.
 type CaptureOptions struct {
-	Clock      func() time.Time
-	PolicyHash string
+	Clock       func() time.Time
+	PolicyHash  string
+	MaxAttempts int
 }
 
 // CaptureRange opens directory, resolves a committed range exactly once, and
@@ -219,6 +228,542 @@ func CaptureRangeWithOptions(ctx context.Context, directory, requestedComparison
 		return snapshot.Capture{}, err
 	}
 	return capture, nil
+}
+
+// CaptureWorktree captures HEAD, the index, and the final working tree into
+// MIRE-owned objects without changing the target repository.
+func CaptureWorktree(ctx context.Context, directory string, objectStore *snapshot.ObjectStore) (snapshot.Capture, error) {
+	return CaptureWorktreeWithOptions(ctx, directory, objectStore, CaptureOptions{})
+}
+
+// CaptureWorktreeWithOptions is CaptureWorktree with injectable capture
+// metadata and a bounded retry count for a changing working tree.
+func CaptureWorktreeWithOptions(ctx context.Context, directory string, objectStore *snapshot.ObjectStore, options CaptureOptions) (snapshot.Capture, error) {
+	if objectStore == nil {
+		return snapshot.Capture{}, fmt.Errorf("capture Git worktree: object store is nil")
+	}
+	repository, err := Open(ctx, directory)
+	if err != nil {
+		return snapshot.Capture{}, err
+	}
+	defer repository.Git.Close()
+	objectFormat, err := gitObjectFormat(repository.Git)
+	if err != nil {
+		return snapshot.Capture{}, err
+	}
+	clock := options.Clock
+	if clock == nil {
+		clock = time.Now
+	}
+	policyHash := strings.TrimSpace(options.PolicyHash)
+	if policyHash == "" {
+		policyHash = snapshot.DefaultContextPolicyHash()
+	}
+	attempts := options.MaxAttempts
+	if attempts == 0 {
+		attempts = 3
+	}
+	if attempts < 1 {
+		return snapshot.Capture{}, fmt.Errorf("capture Git worktree: max attempts must be positive")
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		captured, err := captureWorktreeAttempt(ctx, repository, objectStore, objectFormat, policyHash, clock)
+		if err != nil {
+			return snapshot.Capture{}, fmt.Errorf("capture Git worktree: %w", err)
+		}
+		if err := verifyWorktreeStable(ctx, repository, captured); err == nil {
+			return captured, nil
+		} else {
+			lastErr = err
+		}
+	}
+	return snapshot.Capture{}, fmt.Errorf("%w after %d attempts: %v", ErrTornWorktree, attempts, lastErr)
+}
+
+const worktreeIgnorePolicy = "Git ignore rules exclude ignored untracked paths; tracked paths remain captured."
+
+func captureWorktreeAttempt(ctx context.Context, repository *Repository, objectStore *snapshot.ObjectStore, objectFormat, policyHash string, clock func() time.Time) (snapshot.Capture, error) {
+	head, err := repository.Git.Head()
+	if err != nil {
+		return snapshot.Capture{}, fmt.Errorf("read HEAD: %w", err)
+	}
+	headOID := head.Hash()
+	if headOID.IsZero() {
+		return snapshot.Capture{}, fmt.Errorf("read HEAD: object ID is empty")
+	}
+	indexIdentity, err := readIndexIdentity(repository.Git)
+	if err != nil {
+		return snapshot.Capture{}, err
+	}
+	worktree, err := repository.Git.Worktree()
+	if err != nil {
+		return snapshot.Capture{}, fmt.Errorf("open Git worktree: %w", err)
+	}
+	status, err := worktree.StatusWithOptions(git.StatusOptions{Strategy: git.Preload})
+	if err != nil {
+		return snapshot.Capture{}, fmt.Errorf("read Git worktree status: %w", err)
+	}
+	indexFile, err := repository.Git.Storer.Index()
+	if err != nil {
+		return snapshot.Capture{}, fmt.Errorf("read Git index: %w", err)
+	}
+	headEntries, err := captureTree(ctx, repository.Git, headOID, objectStore)
+	if err != nil {
+		return snapshot.Capture{}, fmt.Errorf("capture HEAD tree %s: %w", headOID, err)
+	}
+	indexEntries, err := captureIndex(ctx, repository.Git, indexFile, objectStore)
+	if err != nil {
+		return snapshot.Capture{}, fmt.Errorf("capture index: %w", err)
+	}
+	paths, err := worktreeInventory(headEntries, indexFile, status)
+	if err != nil {
+		return snapshot.Capture{}, err
+	}
+	worktreeEntries, err := captureWorktreeEntries(ctx, repository.Root, headEntries, indexEntries, paths, objectStore)
+	if err != nil {
+		return snapshot.Capture{}, fmt.Errorf("capture final worktree: %w", err)
+	}
+	headManifestDigest, err := snapshot.ManifestDigest(headEntries)
+	if err != nil {
+		return snapshot.Capture{}, err
+	}
+	indexManifestDigest, err := snapshot.ManifestDigest(indexEntries)
+	if err != nil {
+		return snapshot.Capture{}, err
+	}
+	worktreeManifestDigest, err := snapshot.ManifestDigest(worktreeEntries)
+	if err != nil {
+		return snapshot.Capture{}, err
+	}
+	capturedAt := clock().UTC()
+	if capturedAt.IsZero() {
+		return snapshot.Capture{}, fmt.Errorf("capture Git worktree: clock returned zero time")
+	}
+	capture := snapshot.Capture{
+		ComparisonKind:         snapshot.ComparisonWorktree,
+		RequestedComparison:    snapshot.WorktreeComparison,
+		BaseOID:                headOID.String(),
+		EffectiveBaseOID:       headOID.String(),
+		TargetOID:              worktreeManifestDigest,
+		IndexOID:               indexIdentity,
+		WorktreeOID:            worktreeManifestDigest,
+		ObjectFormat:           objectFormat,
+		ContextPolicyHash:      policyHash,
+		IgnorePolicy:           worktreeIgnorePolicy,
+		CapturedAt:             capturedAt,
+		BaseEntries:            headEntries,
+		TargetEntries:          worktreeEntries,
+		HeadEntries:            headEntries,
+		IndexEntries:           indexEntries,
+		WorktreeEntries:        worktreeEntries,
+		BaseManifestDigest:     headManifestDigest,
+		TargetManifestDigest:   worktreeManifestDigest,
+		HeadManifestDigest:     headManifestDigest,
+		IndexManifestDigest:    indexManifestDigest,
+		WorktreeManifestDigest: worktreeManifestDigest,
+		Changes:                snapshot.BuildChanges(headEntries, worktreeEntries),
+	}
+	capture.Layers = capture.ManifestLayers()
+	capture.ManifestDigest, err = snapshot.OverallManifestDigest(capture)
+	if err != nil {
+		return snapshot.Capture{}, err
+	}
+	if err := capture.Validate(); err != nil {
+		return snapshot.Capture{}, err
+	}
+	return capture, nil
+}
+
+func readIndexIdentity(repository *git.Repository) (string, error) {
+	filesystemStorer, ok := repository.Storer.(storer.FilesystemStorer)
+	if !ok {
+		return "", fmt.Errorf("read Git index: storage has no filesystem identity")
+	}
+	file, err := filesystemStorer.Filesystem().Open("index")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return digestBytes(nil), nil
+		}
+		return "", fmt.Errorf("open Git index: %w", err)
+	}
+	content, readErr := io.ReadAll(file)
+	closeErr := file.Close()
+	if readErr != nil {
+		return "", fmt.Errorf("read Git index: %w", readErr)
+	}
+	if closeErr != nil {
+		return "", fmt.Errorf("close Git index: %w", closeErr)
+	}
+	return digestBytes(content), nil
+}
+
+func digestBytes(content []byte) string {
+	digest := sha256.Sum256(content)
+	return hex.EncodeToString(digest[:])
+}
+
+func captureIndex(ctx context.Context, repository *git.Repository, gitIndex *index.Index, objectStore *snapshot.ObjectStore) ([]snapshot.Entry, error) {
+	if gitIndex == nil {
+		return nil, fmt.Errorf("Git index is nil")
+	}
+	entries := make([]snapshot.Entry, 0, len(gitIndex.Entries))
+	seen := make(map[string]struct{}, len(gitIndex.Entries))
+	for _, indexEntry := range gitIndex.Entries {
+		if indexEntry == nil {
+			return nil, fmt.Errorf("Git index contains a nil entry")
+		}
+		if indexEntry.Stage != 0 {
+			return nil, fmt.Errorf("Git index contains unresolved merge entries; resolve the index before reviewing")
+		}
+		if indexEntry.IntentToAdd {
+			return nil, fmt.Errorf("Git index contains intent-to-add entry %q; stage the file before reviewing", indexEntry.Name)
+		}
+		entryPath := filepath.ToSlash(indexEntry.Name)
+		if err := snapshot.ValidateRepositoryPath(entryPath); err != nil {
+			return nil, fmt.Errorf("index entry %q: %w", indexEntry.Name, err)
+		}
+		if _, ok := seen[entryPath]; ok {
+			return nil, fmt.Errorf("Git index contains duplicate entry %q", entryPath)
+		}
+		seen[entryPath] = struct{}{}
+		if indexEntry.Mode == filemode.Submodule {
+			entries = append(entries, snapshot.Entry{
+				Path: entryPath, Kind: snapshot.EntryKindSubmodule, Mode: uint32(indexEntry.Mode), GitOID: indexEntry.Hash.String(),
+			})
+			continue
+		}
+		if indexEntry.Hash.IsZero() {
+			return nil, fmt.Errorf("Git index entry %q has no Git object", entryPath)
+		}
+		blob, err := repository.BlobObject(indexEntry.Hash)
+		if err != nil {
+			return nil, fmt.Errorf("read index blob %q: %w", entryPath, err)
+		}
+		reader, err := blob.Reader()
+		if err != nil {
+			return nil, fmt.Errorf("open index blob %q: %w", entryPath, err)
+		}
+		stored, storeErr := objectStore.Put(ctx, reader)
+		closeErr := reader.Close()
+		if storeErr != nil {
+			return nil, fmt.Errorf("store index blob %q: %w", entryPath, storeErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close index blob %q: %w", entryPath, closeErr)
+		}
+		entry := snapshot.Entry{
+			Path: entryPath, Kind: snapshot.EntryKindFile, Mode: uint32(indexEntry.Mode), Size: stored.Size,
+			ContentDigest: stored.Digest, GitOID: indexEntry.Hash.String(),
+		}
+		if indexEntry.Mode == filemode.Symlink {
+			content, err := readStoredObject(objectStore, stored.Digest)
+			if err != nil {
+				return nil, fmt.Errorf("read index symlink target %q: %w", entryPath, err)
+			}
+			entry.Kind = snapshot.EntryKindSymlink
+			entry.SymlinkTarget = string(content)
+		}
+		entries = append(entries, entry)
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return entries, nil
+}
+
+func worktreeInventory(headEntries []snapshot.Entry, gitIndex *index.Index, status git.Status) ([]string, error) {
+	paths := make(map[string]struct{}, len(headEntries)+len(gitIndex.Entries)+len(status))
+	for _, entry := range headEntries {
+		paths[entry.Path] = struct{}{}
+	}
+	for _, entry := range gitIndex.Entries {
+		if entry == nil {
+			return nil, fmt.Errorf("Git index contains a nil entry")
+		}
+		entryPath := filepath.ToSlash(entry.Name)
+		if err := snapshot.ValidateRepositoryPath(entryPath); err != nil {
+			return nil, fmt.Errorf("index entry %q: %w", entry.Name, err)
+		}
+		paths[entryPath] = struct{}{}
+	}
+	for name, fileStatus := range status {
+		if fileStatus == nil || fileStatus.Worktree != git.Untracked || fileStatus.Staging != git.Untracked {
+			continue
+		}
+		name = filepath.ToSlash(name)
+		if err := snapshot.ValidateRepositoryPath(name); err != nil {
+			return nil, fmt.Errorf("untracked path %q: %w", name, err)
+		}
+		paths[name] = struct{}{}
+	}
+	result := make([]string, 0, len(paths))
+	for name := range paths {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func captureWorktreeEntries(ctx context.Context, root string, headEntries, indexEntries []snapshot.Entry, paths []string, objectStore *snapshot.ObjectStore) ([]snapshot.Entry, error) {
+	expected := make(map[string]snapshot.Entry, len(headEntries)+len(indexEntries))
+	for _, entry := range headEntries {
+		expected[entry.Path] = entry
+	}
+	for _, entry := range indexEntries {
+		expected[entry.Path] = entry
+	}
+	entries := make([]snapshot.Entry, 0, len(paths))
+	for _, entryPath := range paths {
+		fullPath, err := safeWorktreePath(root, entryPath)
+		if err != nil {
+			return nil, err
+		}
+		info, err := os.Lstat(fullPath)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("inspect %q: %w", entryPath, err)
+		}
+		prior, hasPrior := expected[entryPath]
+		if info.IsDir() {
+			if !hasPrior || prior.Kind != snapshot.EntryKindSubmodule {
+				return nil, fmt.Errorf("working-tree path %q is a directory; only clean submodules may be captured as directories", entryPath)
+			}
+			if err := verifySubmodule(root, entryPath, prior.GitOID); err != nil {
+				return nil, err
+			}
+			entries = append(entries, snapshot.Entry{Path: entryPath, Kind: snapshot.EntryKindSubmodule, Mode: uint32(filemode.Submodule), GitOID: prior.GitOID})
+			continue
+		}
+		mode, err := filemode.NewFromOSFileMode(info.Mode())
+		if err != nil {
+			return nil, fmt.Errorf("working-tree path %q: unsupported file type: %w", entryPath, err)
+		}
+		if mode == filemode.Symlink {
+			target, err := os.Readlink(fullPath)
+			if err != nil {
+				return nil, fmt.Errorf("read symlink %q: %w", entryPath, err)
+			}
+			stored, err := objectStore.Put(ctx, strings.NewReader(target))
+			if err != nil {
+				return nil, fmt.Errorf("store symlink %q: %w", entryPath, err)
+			}
+			entry := snapshot.Entry{Path: entryPath, Kind: snapshot.EntryKindSymlink, Mode: uint32(mode), Size: stored.Size, ContentDigest: stored.Digest, SymlinkTarget: target}
+			if hasPrior && sameWorktreeContent(prior, entry) {
+				entry.GitOID = prior.GitOID
+			}
+			entries = append(entries, entry)
+			continue
+		}
+		if prior.Kind == snapshot.EntryKindSubmodule {
+			return nil, fmt.Errorf("%w: %q is not a Git directory", ErrDirtySubmodule, entryPath)
+		}
+		file, err := os.Open(fullPath)
+		if err != nil {
+			return nil, fmt.Errorf("open working-tree file %q: %w", entryPath, err)
+		}
+		stored, storeErr := objectStore.Put(ctx, file)
+		closeErr := file.Close()
+		if storeErr != nil {
+			return nil, fmt.Errorf("store working-tree file %q: %w", entryPath, storeErr)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close working-tree file %q: %w", entryPath, closeErr)
+		}
+		entry := snapshot.Entry{Path: entryPath, Kind: snapshot.EntryKindFile, Mode: uint32(mode), Size: stored.Size, ContentDigest: stored.Digest}
+		if hasPrior && sameWorktreeContent(prior, entry) {
+			entry.GitOID = prior.GitOID
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func sameWorktreeContent(left, right snapshot.Entry) bool {
+	return left.Kind == right.Kind && left.Mode == right.Mode && left.Size == right.Size &&
+		left.ContentDigest != "" && left.ContentDigest == right.ContentDigest && left.SymlinkTarget == right.SymlinkTarget
+}
+
+func verifyWorktreeStable(ctx context.Context, repository *Repository, capture snapshot.Capture) error {
+	head, err := repository.Git.Head()
+	if err != nil {
+		return fmt.Errorf("re-read HEAD: %w", err)
+	}
+	if head.Hash().String() != capture.BaseOID {
+		return fmt.Errorf("%w: HEAD changed from %s to %s", ErrTornWorktree, capture.BaseOID, head.Hash())
+	}
+	indexIdentity, err := readIndexIdentity(repository.Git)
+	if err != nil {
+		return err
+	}
+	if indexIdentity != capture.IndexOID {
+		return fmt.Errorf("%w: index changed", ErrTornWorktree)
+	}
+	worktree, err := repository.Git.Worktree()
+	if err != nil {
+		return fmt.Errorf("re-open Git worktree: %w", err)
+	}
+	status, err := worktree.StatusWithOptions(git.StatusOptions{Strategy: git.Preload})
+	if err != nil {
+		return fmt.Errorf("re-read Git worktree status: %w", err)
+	}
+	currentIndex, err := repository.Git.Storer.Index()
+	if err != nil {
+		return fmt.Errorf("re-read Git index: %w", err)
+	}
+	paths, err := worktreeInventory(capture.HeadEntries, currentIndex, status)
+	if err != nil {
+		return err
+	}
+	currentPresent := make(map[string]struct{}, len(paths))
+	for _, entryPath := range paths {
+		fullPath, err := safeWorktreePath(repository.Root, entryPath)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Lstat(fullPath); err == nil {
+			currentPresent[entryPath] = struct{}{}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("re-inspect %q: %w", entryPath, err)
+		}
+	}
+	capturedPresent := make(map[string]struct{}, len(capture.WorktreeEntries))
+	for _, entry := range capture.WorktreeEntries {
+		capturedPresent[entry.Path] = struct{}{}
+	}
+	if !samePathSet(currentPresent, capturedPresent) {
+		return fmt.Errorf("%w: working-tree inventory changed", ErrTornWorktree)
+	}
+	for _, entry := range capture.WorktreeEntries {
+		if err := verifyWorktreeEntry(ctx, repository.Root, entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func samePathSet(left, right map[string]struct{}) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for path := range left {
+		if _, ok := right[path]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func verifyWorktreeEntry(ctx context.Context, root string, entry snapshot.Entry) error {
+	fullPath, err := safeWorktreePath(root, entry.Path)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(fullPath)
+	if err != nil {
+		return fmt.Errorf("%w: path %q changed: %v", ErrTornWorktree, entry.Path, err)
+	}
+	if entry.Kind == snapshot.EntryKindSubmodule {
+		if err := verifySubmodule(root, entry.Path, entry.GitOID); err != nil {
+			return err
+		}
+		return nil
+	}
+	mode, err := filemode.NewFromOSFileMode(info.Mode())
+	if err != nil || uint32(mode) != entry.Mode {
+		return fmt.Errorf("%w: mode for %q changed", ErrTornWorktree, entry.Path)
+	}
+	if mode == filemode.Symlink {
+		target, err := os.Readlink(fullPath)
+		if err != nil {
+			return fmt.Errorf("%w: symlink %q changed: %v", ErrTornWorktree, entry.Path, err)
+		}
+		if target != entry.SymlinkTarget || digestBytes([]byte(target)) != entry.ContentDigest {
+			return fmt.Errorf("%w: symlink %q content changed", ErrTornWorktree, entry.Path)
+		}
+		return nil
+	}
+	file, err := os.Open(fullPath)
+	if err != nil {
+		return fmt.Errorf("%w: open %q for verification: %v", ErrTornWorktree, entry.Path, err)
+	}
+	defer file.Close()
+	hasher := sha256.New()
+	size, err := io.Copy(hasher, file)
+	if err != nil {
+		return fmt.Errorf("%w: read %q for verification: %v", ErrTornWorktree, entry.Path, err)
+	}
+	if size != entry.Size || hex.EncodeToString(hasher.Sum(nil)) != entry.ContentDigest {
+		return fmt.Errorf("%w: content for %q changed", ErrTornWorktree, entry.Path)
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
+func verifySubmodule(root, entryPath, expectedOID string) error {
+	fullPath, err := safeWorktreePath(root, entryPath)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(fullPath)
+	if err != nil {
+		return fmt.Errorf("%w: inspect %q: %v", ErrDirtySubmodule, entryPath, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%w: %q is not a directory; review that repository separately", ErrDirtySubmodule, entryPath)
+	}
+	nested, err := git.PlainOpen(fullPath)
+	if err != nil {
+		contents, readErr := os.ReadDir(fullPath)
+		if readErr == nil && len(contents) == 0 {
+			return nil
+		}
+		return fmt.Errorf("%w: %q is not initialized cleanly; review that repository separately", ErrDirtySubmodule, entryPath)
+	}
+	defer nested.Close()
+	nestedWorktree, err := nested.Worktree()
+	if err != nil {
+		return fmt.Errorf("%w: open %q worktree: %v", ErrDirtySubmodule, entryPath, err)
+	}
+	nestedStatus, err := nestedWorktree.StatusWithOptions(git.StatusOptions{Strategy: git.Preload})
+	if err != nil {
+		return fmt.Errorf("%w: read %q status: %v", ErrDirtySubmodule, entryPath, err)
+	}
+	if !nestedStatus.IsClean() {
+		return fmt.Errorf("%w: %q has uncommitted changes; review that repository separately", ErrDirtySubmodule, entryPath)
+	}
+	nestedHead, err := nested.Head()
+	if err != nil || nestedHead.Hash().String() != expectedOID {
+		return fmt.Errorf("%w: %q HEAD does not match the recorded Git link; review that repository separately", ErrDirtySubmodule, entryPath)
+	}
+	return nil
+}
+
+func safeWorktreePath(root, entryPath string) (string, error) {
+	if err := snapshot.ValidateRepositoryPath(entryPath); err != nil {
+		return "", err
+	}
+	parts := strings.Split(entryPath, "/")
+	current := root
+	for index, part := range parts {
+		current = filepath.Join(current, filepath.FromSlash(part))
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return filepath.Join(root, filepath.FromSlash(entryPath)), nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("inspect repository path %q: %w", entryPath, err)
+		}
+		if index < len(parts)-1 && info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("repository path %q traverses a symlink", entryPath)
+		}
+	}
+	return current, nil
 }
 
 func parseComparisonRange(expression string) (string, string, string, error) {

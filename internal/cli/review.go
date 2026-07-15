@@ -7,19 +7,24 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stormlightlabs/mire/internal/echo"
 	"github.com/stormlightlabs/mire/internal/gitrepo"
+	"github.com/stormlightlabs/mire/internal/snapshot"
 )
 
 func newReviewCommand(state *commandContext) *cobra.Command {
 	var requestedComparison string
 	var sessionID string
+	var worktree bool
 	command := &cobra.Command{
 		Use:   "review",
-		Short: "Capture a committed Git range for review",
+		Short: "Capture a Git range or working tree for review",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			requestedComparison = strings.TrimSpace(requestedComparison)
-			if requestedComparison == "" {
-				return fmt.Errorf("review: --range is required")
+			if requestedComparison != "" && worktree {
+				return fmt.Errorf("review: --range and --worktree are mutually exclusive")
+			}
+			if requestedComparison == "" && !worktree {
+				return fmt.Errorf("review: --range or --worktree is required")
 			}
 			if strings.TrimSpace(sessionID) != "" {
 				return fmt.Errorf("review: --session is not available for initial snapshot capture")
@@ -32,8 +37,16 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("review: initialize private object store: %w", err)
 			}
-			capture, err := gitrepo.CaptureRange(command.Context(), identity.CanonicalIdentity, requestedComparison, objectStore)
+			var capture snapshot.Capture
+			if worktree {
+				capture, err = gitrepo.CaptureWorktree(command.Context(), identity.CanonicalIdentity, objectStore)
+			} else {
+				capture, err = gitrepo.CaptureRange(command.Context(), identity.CanonicalIdentity, requestedComparison, objectStore)
+			}
 			if err != nil {
+				if worktree {
+					return fmt.Errorf("review: capture worktree: %w", err)
+				}
 				return fmt.Errorf("review: capture %q: %w", requestedComparison, err)
 			}
 			store, closeStore, err := state.openStore(command.Context())
@@ -42,6 +55,9 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 			}
 			defer closeStore()
 			title := "Review " + requestedComparison
+			if worktree {
+				title = "Review working tree"
+			}
 			session, round, persistedSnapshot, err := store.CreateCapturedSession(command.Context(), identity, title, capture)
 			if err != nil {
 				return fmt.Errorf("review: persist captured snapshot: %w", err)
@@ -50,6 +66,7 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 		},
 	}
 	command.Flags().StringVar(&requestedComparison, "range", "", "committed comparison in the form <base>..<head> or <base>...<head>")
+	command.Flags().BoolVar(&worktree, "worktree", false, "capture HEAD, the index, and the final working tree")
 	command.Flags().StringVar(&sessionID, "session", "", "append to an existing session")
 	return command
 }

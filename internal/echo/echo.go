@@ -65,6 +65,13 @@ func RenderReviewCapture(output io.Writer, session db.Session, round db.Round, p
 	if output == nil {
 		return fmt.Errorf("render review capture: output is nil")
 	}
+	if persistedSnapshot.Kind == snapshot.ComparisonWorktree {
+		_, err := fmt.Fprintf(output,
+			"Captured review\nSession: %s\nRound: %s\nSnapshot: %s\nKind: %s\nComparison: %s\nHEAD: %s\nIndex: %s\nWorktree: %s\n",
+			session.ID, round.ID, persistedSnapshot.ID, persistedSnapshot.Kind, persistedSnapshot.RequestedComparison,
+			persistedSnapshot.BaseOID, persistedSnapshot.IndexOID, persistedSnapshot.TargetOID)
+		return err
+	}
 	if persistedSnapshot.Kind == snapshot.ComparisonThreeDot {
 		_, err := fmt.Fprintf(output,
 			"Captured review\nSession: %s\nRound: %s\nSnapshot: %s\nKind: %s\nRange: %s\nBase: %s\nEffective base: %s\nTarget: %s\nMerge base: %s\n",

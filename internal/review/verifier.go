@@ -40,7 +40,7 @@ const (
 	VerificationBlocked VerificationState = "blocked"
 )
 
-// Valid reports whether the state is part of the V1 verification contract.
+// Valid reports whether the state is valid.
 func (state VerificationState) Valid() bool {
 	switch state {
 	case VerificationNotRun, VerificationSupported, VerificationInconclusive,
@@ -82,7 +82,7 @@ const (
 	EvidenceContextualizes EvidenceRelation = "contextualizes"
 )
 
-// Valid reports whether the relation is supported by the V1 ledger.
+// Valid reports whether the relation is supported.
 func (relation EvidenceRelation) Valid() bool {
 	switch relation {
 	case EvidenceSupports, EvidenceContradicts, EvidenceContextualizes:
@@ -308,6 +308,19 @@ func VerifyCandidate(ctx context.Context, change ChangeModel, candidate Candidat
 	}
 	candidate.Candidate = normalizedCandidate
 	options = options.normalize()
+	if metadataProvider, ok := model.(ModelMetadataProvider); ok {
+		metadata := metadataProvider.Metadata()
+		if options.Adapter == "unknown" && metadata.Adapter != "" {
+			options.Adapter = metadata.Adapter
+		}
+		if options.Protocol == "provider-neutral" && metadata.Protocol != "" {
+			options.Protocol = metadata.Protocol
+		}
+		if options.Model == "" {
+			options.Model = metadata.Model
+		}
+		options.Redactions = uniqueStrings(append(options.Redactions, metadata.Redactions...))
+	}
 
 	runID, err := newRunID()
 	if err != nil {

@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	// ReviewCandidateSchemaVersion is the version of the structured reviewer
-	// response accepted by the V1 candidate ledger.
+	// ReviewCandidateSchemaVersion is the version of the structured reviewer response
 	ReviewCandidateSchemaVersion = "mire/v1/review-candidates"
 
 	// ReviewPassSchemaVersion is the version of the durable pass projection.
@@ -299,6 +298,19 @@ func RunReviewPasses(ctx context.Context, change ChangeModel, model Model, optio
 		return ReviewResult{}, errors.New("run review passes: change model digest is required")
 	}
 	options = options.normalize()
+	if metadataProvider, ok := model.(ModelMetadataProvider); ok {
+		metadata := metadataProvider.Metadata()
+		if options.Adapter == "unknown" && metadata.Adapter != "" {
+			options.Adapter = metadata.Adapter
+		}
+		if options.Protocol == "provider-neutral" && metadata.Protocol != "" {
+			options.Protocol = metadata.Protocol
+		}
+		if options.Model == "" {
+			options.Model = metadata.Model
+		}
+		options.Redactions = uniqueStrings(append(options.Redactions, metadata.Redactions...))
+	}
 	passes := options.Passes
 	if len(passes) == 0 {
 		passes = plannedPasses(change)

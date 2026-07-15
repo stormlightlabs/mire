@@ -129,7 +129,7 @@ func (c Candidate) fingerprint() (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
-// CandidateEnvelope is the only structured reviewer payload accepted by V1.
+// CandidateEnvelope is the only structured reviewer payload accepted.
 type CandidateEnvelope struct {
 	SchemaVersion string      `json:"schema_version"`
 	Candidates    []Candidate `json:"candidates"`

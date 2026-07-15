@@ -565,6 +565,19 @@ func RunChat(ctx context.Context, request ChatTurnRequest, model Model, options 
 		return ChatTurnResult{}, errors.New("run chat: message body is empty")
 	}
 	options = normalizeChatOptions(options)
+	if metadataProvider, ok := model.(ModelMetadataProvider); ok {
+		metadata := metadataProvider.Metadata()
+		if options.Adapter == "unknown" && metadata.Adapter != "" {
+			options.Adapter = metadata.Adapter
+		}
+		if options.Protocol == "provider-neutral" && metadata.Protocol != "" {
+			options.Protocol = metadata.Protocol
+		}
+		if options.Model == "" {
+			options.Model = metadata.Model
+		}
+		options.Redactions = uniqueStrings(append(options.Redactions, metadata.Redactions...))
+	}
 	binding, err := options.Store.ValidateChatBinding(ctx, ChatBinding{SessionID: request.SessionID, RoundID: request.RoundID, SnapshotID: request.SnapshotID, Context: request.Context})
 	if err != nil {
 		return ChatTurnResult{}, fmt.Errorf("run chat: validate context: %w", err)

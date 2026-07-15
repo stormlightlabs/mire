@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	// FindingSchemaVersion identifies the immutable V1 finding ledger schema.
+	// FindingSchemaVersion identifies the immutable ledger schema.
 	FindingSchemaVersion = "mire/v1/finding-revision"
 
 	// FindingPresentationSchemaVersion identifies versioned publishable wording.

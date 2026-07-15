@@ -80,11 +80,6 @@ and allowed repository guidance under the settled policy precedence.
 - Run table-driven precedence and path-scope fixtures, including conflicting and
   target-modified policy, and compare canonical change-model output.
 
-**Status:** Complete. `internal/review` assembles a canonical, digest-recorded
-change model from immutable snapshot inputs, verifies captured object and
-manifest digests, and records policy precedence, conflicts, target evidence,
-and no-base exceptions.
-
 ### V1-09 — Produce a review plan and explainable logical slices
 
 **What to build:** Run a provider-neutral planner over the change model and
@@ -115,13 +110,6 @@ change slices that can later drive both terminal and browser navigation.
 - Run fixture planner responses for valid, malformed, repaired, timed-out,
   cancelled, and budget-exhausted cases and inspect persisted plan/run records.
 
-**Status:** Complete. `internal/review` defines the provider-neutral planner
-boundary and deterministic fixture model; planner runs and immutable plans are
-persisted through the planner private-state migrations.
-
-**Notes:** Provider DTOs must stay outside the review domain. Define only the
-small model interface consumed by the orchestrator.
-
 ### V1-10 — Retain every emitted candidate and honest coverage
 
 **What to build:** Run applicable specialized review passes with bounded,
@@ -151,11 +139,6 @@ without turning incompleteness into “no findings.”
 - `go test ./...`
 - Use fixture passes that emit duplicates, weak candidates, zero candidates,
   malformed output, failures, and truncation; confirm retention and coverage.
-
-**Status:** Complete. `internal/review` runs all planned specialized passes with
-bounded snapshot-only retrieval, retains every valid candidate emission, and
-records durable pass outcomes, diagnostics, exclusions, and honest coverage in
-`internal/db`.
 
 ### V1-11 — Verify candidates against an evidence floor
 
@@ -188,11 +171,6 @@ finding.
 - `go test ./...`
 - Table-test every evidence-floor boundary and prove no contradictory writable
   lane state can be stored.
-
-**Status:** Complete. `internal/review` validates immutable verifier states,
-normalizes snapshot-bound adversarial evidence, and derives lanes from the
-non-disableable evidence floor. `internal/db` persists verifier provenance and
-immutable evidence records through the candidate verification migration.
 
 ### V1-12 — Preserve finding identity and explicit human decisions
 
@@ -250,11 +228,6 @@ every turn to reference an exact finding revision or validated diff selection.
       than overwriting the previous result.
 - [x] Timeline, failures, cancellation, and usage survive restart.
 
-**Status:** Complete. `internal/review` defines the context-bound chat contract
-and bounded structured runner; `internal/db` persists immutable messages, run
-inputs, outputs, failures, usage, and exact snapshot hunk bindings through the
-chat migration.
-
 **Verification:**
 
 - `go test ./...`
@@ -271,19 +244,19 @@ contract and explicit capability differences.
 
 **Acceptance criteria:**
 
-- [ ] Role configuration supports one shared model or separate aliases, base URL,
+- [x] Role configuration supports one shared model or separate aliases, base URL,
       requested model, timeouts, retry and budget limits, and a credential
       reference.
-- [ ] Streaming and nonstreaming responses, structured output, usage, finish
+- [x] Streaming and nonstreaming responses, structured output, usage, finish
       reasons, provider errors, rate limits, malformed frames, and cancellation
       map into provider-neutral records.
-- [ ] Capability detection reports partial compatibility rather than assuming
+- [x] Capability detection reports partial compatibility rather than assuming
       every endpoint supports every OpenAI feature.
-- [ ] Bounded retries respect cancellation and retryable status guidance; partial
+- [x] Bounded retries respect cancellation and retryable status guidance; partial
       output never becomes a completed structured result.
-- [ ] Authorization values and launch secrets never enter logs, the database,
+- [x] Authorization values and launch secrets never enter logs, the database,
       browser payloads, or exports.
-- [ ] Default tests use a local HTTP fixture and require no live credentials.
+- [x] Default tests use local HTTP fixtures and require no live credentials.
 
 **Verification:**
 
@@ -302,19 +275,19 @@ the OpenAI-compatible adapter.
 
 **Acceptance criteria:**
 
-- [ ] Role configuration supports a native Anthropic endpoint, model, credential
+- [x] Role configuration supports a native Anthropic endpoint, model, credential
       reference, timeouts, retries, and budgets without leaking provider types
       into the domain.
-- [ ] Native streaming events, tool/structured output, usage, stop reasons,
+- [x] Native streaming events, tool/structured output, usage, stop reasons,
       overload/rate-limit responses, malformed frames, and cancellation map into
       common run records.
-- [ ] Structured-output validation and bounded repair behavior match the domain
+- [x] Structured-output validation and bounded repair behavior match the domain
       guarantees used by other providers.
-- [ ] Secrets and raw authorization data are redacted from all durable and
+- [x] Secrets and raw authorization data are redacted from all durable and
       exported records.
-- [ ] Planner, reviewer, verifier, and chat can all use Anthropic or participate
+- [x] Planner, reviewer, verifier, and chat can all use Anthropic or participate
       in cross-provider routing.
-- [ ] Default tests use local HTTP fixtures and require no live credentials.
+- [x] Default tests use local HTTP fixtures and require no live credentials.
 
 **Verification:**
 
@@ -536,13 +509,6 @@ same application service as the CLI.
 - Run HTTP contract tests for authentication, Host/Origin, idempotency,
   concurrency, validation, SSE reconnect, cancellation, static caching, and
   fallback routing.
-
-**Status:** Complete. `mire web` now serves the authenticated loopback API and
-embedded static workbench over one foreground process, with durable operation
-activity, resumable SSE, repository isolation, and clean signal shutdown.
-
-**Notes:** The CLI invokes the application service directly; it must never call
-this HTTP API. The browser must use the API and never bypass it.
 
 ### V1-22 — Explore diffs, slices, lanes, and evidence in the browser
 

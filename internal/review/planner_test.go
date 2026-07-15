@@ -40,6 +40,23 @@ func TestRunPlannerFixtureProducesExplainablePlan(t *testing.T) {
 	}
 }
 
+func TestRunPlannerUsesOptionalModelMetadataForProvenance(t *testing.T) {
+	t.Parallel()
+
+	change := plannerFixtureChange()
+	model := metadataFixtureModel{
+		Model: NewFixtureModel(change),
+		Value: ModelMetadata{Adapter: "fixture-adapter", Protocol: "fixture-protocol/v1", Model: "fixture-model", Redactions: []string{"credential"}},
+	}
+	result, err := RunPlanner(context.Background(), change, model, PlannerOptions{})
+	if err != nil {
+		t.Fatalf("RunPlanner() error = %v", err)
+	}
+	if result.Run.Provenance.Adapter != "fixture-adapter" || result.Run.Provenance.Protocol != "fixture-protocol/v1" || result.Run.Provenance.Model != "fixture-model" || len(result.Run.Provenance.Redactions) != 1 {
+		t.Fatalf("provenance = %#v", result.Run.Provenance)
+	}
+}
+
 func TestRunPlannerRepairsMalformedStructuredOutputWithinBound(t *testing.T) {
 	t.Parallel()
 
@@ -115,4 +132,17 @@ func plannerFixtureChange() ChangeModel {
 		Files:    []FileChange{{Status: "modified", TargetPath: "src/a.go", Hunks: []Hunk{{ID: "src/a.go#hunk", Available: true}}}},
 		Surfaces: []AffectedSurface{{Kind: SurfaceContracts, Evidence: []SurfaceEvidence{{Kind: SurfaceContracts, Path: "src/a.go", HunkIDs: []string{"src/a.go#hunk"}}}}},
 	}
+}
+
+type metadataFixtureModel struct {
+	Model Model
+	Value ModelMetadata
+}
+
+func (model metadataFixtureModel) Complete(ctx context.Context, request ModelRequest) (ModelResponse, error) {
+	return model.Model.Complete(ctx, request)
+}
+
+func (model metadataFixtureModel) Metadata() ModelMetadata {
+	return model.Value
 }

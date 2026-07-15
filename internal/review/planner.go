@@ -86,6 +86,21 @@ type Model interface {
 	Complete(context.Context, ModelRequest) (ModelResponse, error)
 }
 
+// ModelMetadata is optional adapter provenance supplied by a configured model
+// transport. It contains no credential values.
+type ModelMetadata struct {
+	Adapter    string   `json:"adapter"`
+	Protocol   string   `json:"protocol"`
+	Model      string   `json:"model,omitempty"`
+	Redactions []string `json:"redactions,omitempty"`
+}
+
+// ModelMetadataProvider lets a transport fill provider and protocol
+// provenance when the caller has not explicitly supplied it.
+type ModelMetadataProvider interface {
+	Metadata() ModelMetadata
+}
+
 // RunStatus is the durable status of model work.
 type RunStatus string
 
@@ -320,6 +335,19 @@ func RunPlanner(ctx context.Context, change ChangeModel, model Model, options Pl
 		return PlannerResult{}, fmt.Errorf("run planner: create run ID: %w", err)
 	}
 	options = normalizePlannerOptions(options)
+	if metadataProvider, ok := model.(ModelMetadataProvider); ok {
+		metadata := metadataProvider.Metadata()
+		if options.Adapter == "unknown" && metadata.Adapter != "" {
+			options.Adapter = metadata.Adapter
+		}
+		if options.Protocol == "provider-neutral" && metadata.Protocol != "" {
+			options.Protocol = metadata.Protocol
+		}
+		if options.Model == "" {
+			options.Model = metadata.Model
+		}
+		options.Redactions = uniqueStrings(append(options.Redactions, metadata.Redactions...))
+	}
 	now := options.Now().UTC()
 	input, err := plannerRequest(change, options)
 	if err != nil {

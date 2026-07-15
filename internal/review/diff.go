@@ -179,7 +179,8 @@ func groupHunks(path string, ops []diffLine) []Hunk {
 }
 
 func makeHunk(path, kind string, oldStart, oldLines, newStart, newLines int, lines []string, binary, available bool) Hunk {
-	digest := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%d\x00%d\x00%t\x00%s", path, kind, oldStart, oldLines, newStart, newLines, binary, strings.Join(lines, ""))))
+	payload := fmt.Appendf(nil, "%s\x00%s\x00%d\x00%d\x00%d\x00%d\x00%t\x00%s", path, kind, oldStart, oldLines, newStart, newLines, binary, strings.Join(lines, ""))
+	digest := sha256.Sum256(payload)
 	hexDigest := hex.EncodeToString(digest[:])
 	return Hunk{ID: path + "#" + hexDigest[:16], Kind: kind, OldStart: oldStart, OldLines: oldLines, NewStart: newStart, NewLines: newLines, Lines: lines, Binary: binary, Available: available, Digest: hexDigest}
 }

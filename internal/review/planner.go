@@ -157,14 +157,15 @@ type RunRecord struct {
 	RoundID     string        `json:"round_id"`
 	SnapshotID  string        `json:"snapshot_id"`
 	Role        ModelRole     `json:"role"`
+	PassName    string        `json:"pass_name,omitempty"`
 	Status      RunStatus     `json:"status"`
 	Attempt     int           `json:"attempt"`
 	MaxAttempts int           `json:"max_attempts"`
 	Error       string        `json:"error,omitempty"`
 	CreatedAt   time.Time     `json:"created_at"`
 	UpdatedAt   time.Time     `json:"updated_at"`
-	StartedAt   time.Time     `json:"started_at,omitempty"`
-	FinishedAt  time.Time     `json:"finished_at,omitempty"`
+	StartedAt   time.Time     `json:"started_at"`
+	FinishedAt  time.Time     `json:"finished_at"`
 	Provenance  RunProvenance `json:"provenance"`
 }
 

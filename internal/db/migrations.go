@@ -61,6 +61,11 @@ var migrations = []Migration{
 		Name:    "repeatable planner plan digests",
 		SQL:     embeddedMigration("sql/008_remove_plan_digest_uniqueness.sql"),
 	},
+	{
+		Version: 9,
+		Name:    "review passes candidates and coverage",
+		SQL:     embeddedMigration("sql/009_review_passes_and_candidates.sql"),
+	},
 }
 
 func embeddedMigration(name string) string {

@@ -1,7 +1,7 @@
 ---
 title: "MIRE V1 implementation tasks"
 status: "in progress"
-updated: "2026-07-14"
+updated: "2026-07-15"
 source: "plan.md"
 ---
 
@@ -14,11 +14,10 @@ Work the frontier: any ticket whose blockers are complete.
 ## Dependency frontier
 
 Completed prerequisites: V1-01, V1-02, V1-03, V1-04, V1-05, V1-06, V1-07,
-and V1-09. V1-08 is also complete.
+V1-08, V1-09, and V1-10.
 
 The current frontier contains these tickets:
 
-- **V1-10 — Retain every emitted candidate and honest coverage.**
 - **V1-14 — Run all model roles through OpenAI-compatible endpoints.**
 - **V1-15 — Run all model roles through Anthropic.**
 - **V1-18 — Run fixed analyzers with bounded, auditable subprocesses.**
@@ -137,17 +136,17 @@ without turning incompleteness into “no findings.”
 
 **Acceptance criteria:**
 
-- [ ] Applicable passes cover the V1 categories in the plan, with no finding
+- [x] Applicable passes cover the V1 categories in the plan, with no finding
       quota and no requirement that every pass emit a candidate.
-- [ ] Retrieval starts from changed code and records each additional artifact,
+- [x] Retrieval starts from changed code and records each additional artifact,
       relationship, requesting run, digest, exclusion, and truncation.
-- [ ] Every schema-valid plausible candidate within the declared pass budget is
+- [x] Every schema-valid plausible candidate within the declared pass budget is
       persisted before correlation or presentation filtering.
-- [ ] Unsupported prose and malformed candidate payloads become diagnostics,
+- [x] Unsupported prose and malformed candidate payloads become diagnostics,
       not fabricated findings.
-- [ ] Coverage records examined files/hunks, retrieved tests/contracts, completed
+- [x] Coverage records examined files/hunks, retrieved tests/contracts, completed
       passes, analyzer availability, exclusions, failures, and declared gaps.
-- [ ] A successful empty pass, a failed pass, and a truncated pass remain
+- [x] A successful empty pass, a failed pass, and a truncated pass remain
       semantically distinct after restart.
 
 **Verification:**
@@ -155,6 +154,11 @@ without turning incompleteness into “no findings.”
 - `go test ./...`
 - Use fixture passes that emit duplicates, weak candidates, zero candidates,
   malformed output, failures, and truncation; confirm retention and coverage.
+
+**Status:** Complete. `internal/review` runs all planned specialized passes with
+bounded snapshot-only retrieval, retains every valid candidate emission, and
+records durable pass outcomes, diagnostics, exclusions, and honest coverage in
+`internal/db`.
 
 ### V1-11 — Verify candidates against an evidence floor
 
@@ -736,9 +740,8 @@ alias these commands but must not contain hidden build or release logic.
 
 ## Final frontier
 
-V1-01 through V1-09 are complete. The current frontier is:
+V1-01 through V1-10 are complete. The current frontier is:
 
-- **V1-10 — Retain every emitted candidate and honest coverage.**
 - **V1-11 — Verify candidates against an evidence floor.**
 - **V1-12 — Preserve finding identity and explicit human decisions.**
 - **V1-13 — Keep every chat turn bound to review context.**

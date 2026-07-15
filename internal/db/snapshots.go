@@ -156,11 +156,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, round.ID, round.SessionID, round.RepositoryID,
 	}, round, persistedSnapshot, nil
 }
 
-// CreateSessionWithSnapshot is a descriptive alias for CreateCapturedSession.
-func (store *RepositoryStore) CreateSessionWithSnapshot(ctx context.Context, identity RepositoryIdentity, title string, capture snapshot.Capture) (Session, Round, Snapshot, error) {
-	return store.CreateCapturedSession(ctx, identity, title, capture)
-}
-
 // AppendCapturedRound appends one immutable capture to an existing session.
 // The session and capture repository identities must match, and the new round
 // becomes current only when the complete snapshot transaction commits.

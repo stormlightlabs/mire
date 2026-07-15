@@ -108,12 +108,6 @@ func CheckDivergence(ctx context.Context, directory string, store *db.Repository
 	return report, nil
 }
 
-// CompareDivergence is an alias for callers that prefer comparison-oriented
-// naming.
-func CompareDivergence(ctx context.Context, directory string, store *db.RepositoryStore, frozen db.Snapshot, objectStore *snapshot.ObjectStore) (snapshot.DivergenceReport, error) {
-	return CheckDivergence(ctx, directory, store, frozen, objectStore)
-}
-
 func checkWorktreeDivergence(ctx context.Context, repository *Repository, store *db.RepositoryStore, frozen db.Snapshot, objectStore *snapshot.ObjectStore) (snapshot.DivergenceReport, error) {
 	if objectStore == nil {
 		return snapshot.DivergenceReport{

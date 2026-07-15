@@ -171,19 +171,19 @@ finding.
 
 **Acceptance criteria:**
 
-- [ ] Verification states are `not_run`, `supported`, `inconclusive`, `refuted`,
+- [x] Verification states are `not_run`, `supported`, `inconclusive`, `refuted`,
       and `blocked`, with validated transitions and immutable run provenance.
-- [ ] The verifier states the suspected invariant violation, traces a concrete
+- [x] The verifier states the suspected invariant violation, traces a concrete
       path, searches for guards/tests, and records an attempted refutation and
       material contradictory evidence.
-- [ ] Evidence records relation, snapshot, anchors, summary, producing run,
+- [x] Evidence records relation, snapshot, anchors, summary, producing run,
       artifact digest, and an exact retained-output pointer when available.
-- [ ] The verified lane requires a valid claim and impact, a snapshot anchor,
+- [x] The verified lane requires a valid claim and impact, a snapshot anchor,
       independent concrete supporting evidence, and a completed qualifying
       verifier run.
-- [ ] Inconclusive and blocked items remain candidates; refuted items remain
+- [x] Inconclusive and blocked items remain candidates; refuted items remain
       auditable but hidden from the default view.
-- [ ] The evidence floor cannot be weakened by configuration and confidence is
+- [x] The evidence floor cannot be weakened by configuration and confidence is
       descriptive only.
 
 **Verification:**
@@ -191,6 +191,11 @@ finding.
 - `go test ./...`
 - Table-test every evidence-floor boundary and prove no contradictory writable
   lane state can be stored.
+
+**Status:** Complete. `internal/review` validates immutable verifier states,
+normalizes snapshot-bound adversarial evidence, and derives lanes from the
+non-disableable evidence floor. `internal/db` persists verifier provenance and
+immutable evidence records through the candidate verification migration.
 
 ### V1-12 — Preserve finding identity and explicit human decisions
 

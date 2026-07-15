@@ -22,6 +22,8 @@ var (
 	// ErrReviewCoverageNotFound indicates that no durable coverage exists for a
 	// round.
 	ErrReviewCoverageNotFound = errors.New("review coverage not found")
+	// ErrReviewCandidateNotFound indicates that a retained candidate is absent.
+	ErrReviewCandidateNotFound = errors.New("review candidate not found")
 )
 
 // CreateReviewRun persists a queued specialized reviewer run.

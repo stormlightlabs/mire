@@ -102,22 +102,12 @@ func WithProcessInstanceID(processID string) StoreOption {
 	}
 }
 
-// WithProcessID is a short alias for WithProcessInstanceID.
-func WithProcessID(processID string) StoreOption {
-	return WithProcessInstanceID(processID)
-}
-
 // WithOperationLeaseDuration sets the bounded duration of an acquired
 // operation lease and each subsequent heartbeat.
 func WithOperationLeaseDuration(duration time.Duration) StoreOption {
 	return func(store *RepositoryStore) {
 		store.leaseDuration = duration
 	}
-}
-
-// WithLeaseDuration is an alias for WithOperationLeaseDuration.
-func WithLeaseDuration(duration time.Duration) StoreOption {
-	return WithOperationLeaseDuration(duration)
 }
 
 // WithClock injects the timestamp source used by a RepositoryStore.

@@ -677,7 +677,7 @@ func NewFixtureModel(change ChangeModel) *FixtureModel {
 }
 
 // Complete implements Model without network access or credentials.
-func (model *FixtureModel) Complete(ctx context.Context, _ ModelRequest) (ModelResponse, error) {
+func (model *FixtureModel) Complete(ctx context.Context, request ModelRequest) (ModelResponse, error) {
 	if model == nil {
 		return ModelResponse{}, errors.New("fixture model is nil")
 	}
@@ -696,8 +696,22 @@ func (model *FixtureModel) Complete(ctx context.Context, _ ModelRequest) (ModelR
 		response := model.Responses[index]
 		return ModelResponse{Output: append([]byte(nil), response.Output...), FinishReason: "stop"}, response.Err
 	}
-	plan := deterministicPlan(model.ChangeModel)
-	data, err := json.Marshal(plan)
+	var value any
+	switch request.Role {
+	case ModelRolePlanner:
+		value = deterministicPlan(model.ChangeModel)
+	case ModelRoleReviewer:
+		value = CandidateEnvelope{SchemaVersion: ReviewCandidateSchemaVersion, Candidates: []Candidate{}}
+	case ModelRoleVerifier:
+		// The credential-free fixture intentionally does not promote candidates.
+		// VerifyCandidate turns the missing path into a visible blocked result.
+		value = VerificationEnvelope{SchemaVersion: VerificationSchemaVersion, State: VerificationBlocked,
+			SuspectedInvariant: "The fixture verifier did not establish an invariant.",
+			RefutationAttempt:  "The fixture verifier did not have a provider response."}
+	default:
+		return ModelResponse{}, fmt.Errorf("fixture model does not implement role %q", request.Role)
+	}
+	data, err := json.Marshal(value)
 	if err != nil {
 		return ModelResponse{}, err
 	}

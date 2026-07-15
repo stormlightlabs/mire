@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/stormlightlabs/mire/internal/shared"
 )
 
 var (
@@ -180,7 +182,7 @@ VALUES (?, ?, ?, ?)`,
 		sessionID,
 		repository.ID,
 		title,
-		timestampString(createdAt),
+		shared.TimestampString(createdAt),
 	); err != nil {
 		return Session{}, fmt.Errorf("insert session: %w", err)
 	}
@@ -430,7 +432,7 @@ ON CONFLICT (canonical_identity) DO UPDATE SET
 		identity.CanonicalIdentity,
 		identity.DisplayName,
 		identity.DiscoveredGitDir,
-		timestampString(createdAt),
+		shared.TimestampString(createdAt),
 	)
 	if err != nil {
 		return Repository{}, fmt.Errorf("persist repository identity: %w", err)
@@ -450,7 +452,7 @@ WHERE canonical_identity = ?`, identity.CanonicalIdentity).Scan(
 	); err != nil {
 		return Repository{}, fmt.Errorf("read repository identity: %w", err)
 	}
-	repository.CreatedAt, err = parseTimestamp(createdAtRaw)
+	repository.CreatedAt, err = shared.ParseTimestamp(createdAtRaw)
 	if err != nil {
 		return Repository{}, fmt.Errorf("read repository creation time: %w", err)
 	}
@@ -482,17 +484,9 @@ func scanSession(row scanner) (Session, error) {
 		return Session{}, err
 	}
 	var err error
-	session.CreatedAt, err = parseTimestamp(createdAtRaw)
+	session.CreatedAt, err = shared.ParseTimestamp(createdAtRaw)
 	if err != nil {
 		return Session{}, fmt.Errorf("parse session creation time: %w", err)
 	}
 	return session, nil
-}
-
-func parseTimestamp(value string) (time.Time, error) {
-	parsed, err := time.Parse(time.RFC3339Nano, value)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return parsed, nil
 }

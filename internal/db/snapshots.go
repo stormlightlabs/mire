@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stormlightlabs/mire/internal/shared"
 	"github.com/stormlightlabs/mire/internal/snapshot"
 )
 
@@ -120,7 +121,7 @@ func (store *RepositoryStore) CreateCapturedSession(ctx context.Context, identit
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO sessions (id, repository_id, title, created_at)
-VALUES (?, ?, ?, ?)`, sessionID, repository.ID, title, timestampString(now)); err != nil {
+VALUES (?, ?, ?, ?)`, sessionID, repository.ID, title, shared.TimestampString(now)); err != nil {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert captured session: %w", err)
 	}
 	persistedSnapshot, err := persistSnapshotTx(ctx, tx, repository.ID, snapshotID, capture)
@@ -134,7 +135,7 @@ VALUES (?, ?, ?, ?)`, sessionID, repository.ID, title, timestampString(now)); er
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO rounds (id, session_id, repository_id, snapshot_id, number, status, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, round.ID, round.SessionID, round.RepositoryID, round.SnapshotID,
-		round.Number, round.Status, timestampString(round.CreatedAt), timestampString(round.UpdatedAt)); err != nil {
+		round.Number, round.Status, shared.TimestampString(round.CreatedAt), shared.TimestampString(round.UpdatedAt)); err != nil {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert captured round: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET current_round_id = ? WHERE id = ?`, round.ID, sessionID); err != nil {
@@ -232,7 +233,7 @@ func (store *RepositoryStore) AppendCapturedRound(ctx context.Context, sessionID
 INSERT INTO rounds (id, session_id, repository_id, snapshot_id, predecessor_round_id, number, status, created_at, updated_at)
 VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
 		round.ID, round.SessionID, round.RepositoryID, round.SnapshotID, round.PredecessorRoundID,
-		round.Number, round.Status, timestampString(round.CreatedAt), timestampString(round.UpdatedAt)); err != nil {
+		round.Number, round.Status, shared.TimestampString(round.CreatedAt), shared.TimestampString(round.UpdatedAt)); err != nil {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert appended round: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET current_round_id = ? WHERE id = ?`, round.ID, sessionID); err != nil {
@@ -273,7 +274,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
 		persisted.BaseOID, persisted.EffectiveBaseOID, persisted.TargetOID, persisted.MergeBaseOID,
 		persisted.IndexOID, persisted.ObjectFormat, persisted.ContextPolicyHash, persisted.IgnorePolicy,
 		persisted.BaseManifestDigest, persisted.TargetManifestDigest, persisted.ManifestDigest,
-		timestampString(persisted.CreatedAt)); err != nil {
+		shared.TimestampString(persisted.CreatedAt)); err != nil {
 		return Snapshot{}, fmt.Errorf("insert snapshot: %w", err)
 	}
 	if captureKind(capture) == snapshot.ComparisonWorktree {
@@ -536,7 +537,7 @@ func scanSnapshot(row scanner) (Snapshot, error) {
 	}
 	result.Complete = complete == 1
 	var err error
-	result.CreatedAt, err = parseTimestamp(createdAtRaw)
+	result.CreatedAt, err = shared.ParseTimestamp(createdAtRaw)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("parse snapshot creation time: %w", err)
 	}

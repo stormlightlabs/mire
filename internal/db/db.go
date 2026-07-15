@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -191,10 +190,6 @@ func ensurePrivateDatabasePath(path string) error {
 		return fmt.Errorf("%w: database parent is not a directory", ErrInvalidStateDirectory)
 	}
 	return nil
-}
-
-func timestampString(t time.Time) string {
-	return t.UTC().Format(time.RFC3339Nano)
 }
 
 func sqliteDSN(path string) string {

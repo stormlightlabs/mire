@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stormlightlabs/mire/internal/review"
+	"github.com/stormlightlabs/mire/internal/shared"
 )
 
 var _ review.VerificationStore = (*RepositoryStore)(nil)
@@ -98,8 +99,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		run.Provenance.PromptTemplateVersion, run.Provenance.Model, parameters,
 		run.Provenance.InputManifestDigest, run.Provenance.InputDigest, run.Provenance.OutputDigest,
 		usage, run.Provenance.FinishReason, redactions, run.Provenance.TerminationCause,
-		run.RetainedOutput, timestampString(now), timestampString(run.UpdatedAt),
-		timestampString(run.StartedAt), timestampString(run.FinishedAt))
+		run.RetainedOutput, shared.TimestampString(now), shared.TimestampString(run.UpdatedAt),
+		shared.TimestampString(run.StartedAt), shared.TimestampString(run.FinishedAt))
 	if err != nil {
 		return review.VerificationRunRecord{}, fmt.Errorf("insert verification run: %w", err)
 	}
@@ -159,8 +160,8 @@ WHERE id = ?`,
 		run.Provenance.Protocol, run.Provenance.PromptTemplateVersion, run.Provenance.Model,
 		parameters, run.Provenance.InputManifestDigest, run.Provenance.InputDigest,
 		run.Provenance.OutputDigest, usage, run.Provenance.FinishReason, redactions,
-		run.Provenance.TerminationCause, run.RetainedOutput, timestampString(run.UpdatedAt),
-		timestampString(run.StartedAt), timestampString(run.FinishedAt), run.ID)
+		run.Provenance.TerminationCause, run.RetainedOutput, shared.TimestampString(run.UpdatedAt),
+		shared.TimestampString(run.StartedAt), shared.TimestampString(run.FinishedAt), run.ID)
 	if err != nil {
 		return fmt.Errorf("update verification run %q: %w", run.ID, err)
 	}
@@ -238,7 +239,7 @@ INSERT INTO verifications (
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, verification.ID, verification.SessionID,
 		verification.RoundID, verification.SnapshotID, verification.CandidateID, verification.RunID,
-		verification.State, verification.Digest, data, timestampString(created))
+		verification.State, verification.Digest, data, shared.TimestampString(created))
 	if err != nil {
 		return fmt.Errorf("insert verification %q: %w", verification.ID, err)
 	}

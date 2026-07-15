@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/stormlightlabs/mire/internal/review"
+	"github.com/stormlightlabs/mire/internal/shared"
 )
 
 var _ review.ReviewStore = (*RepositoryStore)(nil)
@@ -90,7 +91,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
 		run.Provenance.PromptTemplateVersion, run.Provenance.Model, parameters,
 		run.Provenance.InputManifestDigest, run.Provenance.InputDigest, run.Provenance.OutputDigest,
 		usage, run.Provenance.FinishReason, redactions, run.Provenance.TerminationCause,
-		timestampString(now), timestampString(run.UpdatedAt), timestampString(run.StartedAt), timestampString(run.FinishedAt))
+		shared.TimestampString(now), shared.TimestampString(run.UpdatedAt), shared.TimestampString(run.StartedAt), shared.TimestampString(run.FinishedAt))
 	if err != nil {
 		return review.RunRecord{}, fmt.Errorf("insert review run: %w", err)
 	}
@@ -129,7 +130,7 @@ WHERE id = ?`,
 		run.Provenance.Model, parameters, run.Provenance.InputManifestDigest,
 		run.Provenance.InputDigest, run.Provenance.OutputDigest, usage,
 		run.Provenance.FinishReason, redactions, run.Provenance.TerminationCause,
-		timestampString(run.UpdatedAt), timestampString(run.StartedAt), timestampString(run.FinishedAt), run.ID)
+		shared.TimestampString(run.UpdatedAt), shared.TimestampString(run.StartedAt), shared.TimestampString(run.FinishedAt), run.ID)
 	if err != nil {
 		return fmt.Errorf("update review run %q: %w", run.ID, err)
 	}
@@ -233,8 +234,8 @@ INSERT INTO review_passes (
 )
 VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
 		result.PassID, pass.SessionID, pass.RoundID, pass.SnapshotID, result.Run.ID, pass.Name,
-		pass.Status, boolInt(pass.Applicable), pass.Reason, len(result.Candidates), passJSON,
-		diagnosticsJSON, timestampString(now), timestampString(pass.StartedAt), timestampString(pass.FinishedAt)); err != nil {
+		pass.Status, shared.BoolInt(pass.Applicable), pass.Reason, len(result.Candidates), passJSON,
+		diagnosticsJSON, shared.TimestampString(now), shared.TimestampString(pass.StartedAt), shared.TimestampString(pass.FinishedAt)); err != nil {
 		return fmt.Errorf("insert review pass: %w", err)
 	}
 	for _, candidate := range result.Candidates {
@@ -252,7 +253,7 @@ INSERT INTO review_candidates (
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, candidate.ID, pass.SessionID, pass.RoundID,
 			pass.SnapshotID, result.PassID, candidate.RunID, candidate.PassName, candidate.Ordinal,
-			candidate.Fingerprint, candidateJSON, timestampString(candidate.CreatedAt)); err != nil {
+			candidate.Fingerprint, candidateJSON, shared.TimestampString(candidate.CreatedAt)); err != nil {
 			return fmt.Errorf("insert retained candidate %q: %w", candidate.ID, err)
 		}
 	}
@@ -273,8 +274,8 @@ INSERT INTO review_artifacts (
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, artifact.ID,
 			pass.SessionID, pass.RoundID, pass.SnapshotID, result.PassID, artifact.RunID,
 			artifact.PassName, artifact.Kind, artifact.Path, artifact.Relation, hunkIDs,
-			artifact.Digest, artifact.Size, artifact.Content, boolInt(artifact.Excluded),
-			artifact.ExclusionReason, boolInt(artifact.Truncated), timestampString(now)); err != nil {
+			artifact.Digest, artifact.Size, artifact.Content, shared.BoolInt(artifact.Excluded),
+			artifact.ExclusionReason, shared.BoolInt(artifact.Truncated), shared.TimestampString(now)); err != nil {
 			return fmt.Errorf("insert retrieved artifact %q: %w", artifact.ID, err)
 		}
 	}
@@ -286,7 +287,7 @@ ON CONFLICT(round_id) DO UPDATE SET session_id = excluded.session_id,
     snapshot_id = excluded.snapshot_id, coverage_digest = excluded.coverage_digest,
     coverage_json = excluded.coverage_json, updated_at = excluded.updated_at`,
 		pass.RoundID, pass.SessionID, pass.SnapshotID, coverage.Digest, coverageJSON,
-		timestampString(now), timestampString(now)); err != nil {
+		shared.TimestampString(now), shared.TimestampString(now)); err != nil {
 		return fmt.Errorf("save review coverage: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -352,6 +353,40 @@ func (store *RepositoryStore) ListReviewPasses(ctx context.Context, roundID stri
 	return passes, nil
 }
 
+// ListReviewDiagnostics returns the durable diagnostics emitted by all passes
+// in a round, ordered by pass and diagnostic identity.
+func (store *RepositoryStore) ListReviewDiagnostics(ctx context.Context, roundID string) ([]review.ReviewDiagnostic, error) {
+	if err := store.validate(); err != nil {
+		return nil, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rows, err := store.database.QueryContext(ctx, `
+SELECT diagnostics_json FROM review_passes
+WHERE round_id = ? ORDER BY name ASC, id ASC`, roundID)
+	if err != nil {
+		return nil, fmt.Errorf("list review diagnostics: %w", err)
+	}
+	defer rows.Close()
+	diagnostics := make([]review.ReviewDiagnostic, 0)
+	for rows.Next() {
+		var data string
+		if err := rows.Scan(&data); err != nil {
+			return nil, fmt.Errorf("list review diagnostics: %w", err)
+		}
+		var values []review.ReviewDiagnostic
+		if err := json.Unmarshal([]byte(data), &values); err != nil {
+			return nil, fmt.Errorf("decode review diagnostics: %w", err)
+		}
+		diagnostics = append(diagnostics, values...)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list review diagnostics: %w", err)
+	}
+	return diagnostics, nil
+}
+
 // ListReviewCandidates returns every retained candidate for a round. No
 // correlation or presentation filtering is performed by this query.
 func (store *RepositoryStore) ListReviewCandidates(ctx context.Context, roundID string) ([]review.CandidateRecord, error) {
@@ -399,13 +434,6 @@ func digestCoverage(coverage review.ReviewCoverage) review.ReviewCoverage {
 		coverage.Digest = hex.EncodeToString(digest[:])
 	}
 	return coverage
-}
-
-func boolInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
 }
 
 const reviewRunQuery = `

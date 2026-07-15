@@ -17,8 +17,9 @@ go build ./cmd/mire
 
 ## Usage
 
-Run MIRE from the Git repository you want to review. The capture commands only
-read the repository and store review state in MIRE's private application state.
+Run MIRE from the Git repository you want to review. Review commands read the
+repository, store the immutable snapshot and review ledger in MIRE's private
+application state, and never write to the reviewed repository.
 
 Capture a committed comparison:
 
@@ -26,6 +27,12 @@ Capture a committed comparison:
 mire review --range main..HEAD
 mire review --range origin/main...HEAD
 ```
+
+`mire review` prints progress and its final summary to stderr. The deterministic
+static report, unified diff, and verified findings are written to stdout. Use
+`--width` for stable narrow output and `--candidates` when auditing retained or
+refuted candidates. The built-in baseline is credential-free; no findings is
+not an approval, so inspect the coverage and incomplete-analysis sections.
 
 The two-dot form compares the requested base and target directly.
 
@@ -59,6 +66,7 @@ Inspect the current repository's review history and live divergence:
 ```sh
 mire show
 mire show <SESSION>
+mire show <SESSION> --candidates --width 80
 ```
 
 Start the authenticated local web workbench:

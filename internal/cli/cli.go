@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stormlightlabs/mire/internal/db"
 	"github.com/stormlightlabs/mire/internal/gitrepo"
+	"github.com/stormlightlabs/mire/internal/review"
 	"github.com/stormlightlabs/mire/internal/snapshot"
 )
 
@@ -27,10 +28,12 @@ var (
 type Config struct {
 	Stdout      io.Writer
 	Stderr      io.Writer
+	Progress    io.Writer
 	StateDir    string
 	WorkingDir  string
 	Store       *db.RepositoryStore
 	ObjectStore *snapshot.ObjectStore
+	Model       review.Model
 }
 
 type commandContext struct {
@@ -95,7 +98,7 @@ func NewRootCommand(config Config) *cobra.Command {
 // Execute runs the process command using [os.Args] and writes diagnostics via
 // the root command's configured [os.Stderr].
 func Execute(ctx context.Context) error {
-	return NewRootCommand(Config{}).ExecuteContext(ctx)
+	return NewRootCommand(Config{Progress: os.Stderr}).ExecuteContext(ctx)
 }
 
 // DiscoverCurrentRepository performs only read-only Git metadata queries

@@ -51,249 +51,53 @@ chat.
 
 ### V1-08 — Assemble review intent and the frozen change model
 
-**What to build:** Turn a captured snapshot into a deterministic review input
+Turns a captured snapshot into a deterministic review input
 that combines the diff, file and hunk inventory, affected surfaces, user intent,
 and allowed repository guidance under the settled policy precedence.
 
-**Blocked by:** V1-04, V1-05
-
-**Acceptance criteria:**
-
-- [x] The change model identifies files, hunks, tests, contracts,
-      configuration, dependencies, migrations, and public surfaces when the
-      snapshot provides evidence for them.
-- [x] Intent may include the user's prompt, pinned commit messages, base-snapshot
-      `AGENTS.md`/contribution/architecture guidance, and an earlier same-session
-      round.
-- [x] Built-in safety rules outrank private request/configuration, which outranks
-      base policy, base documentation, and target policy changes in that order.
-- [x] Path-specific policy only overrides general policy within its own tier;
-      same-tier conflicts are recorded and use the safer interpretation.
-- [x] Target policy changes are review evidence, not authority to review
-      themselves, except for the recorded no-base-revision case.
-- [x] All context and pinned Git metadata come from immutable snapshot inputs and
-      are digest-recorded; repository text cannot grant tools or permissions.
-
-**Verification:**
-
-- `go test ./...`
-- Run table-driven precedence and path-scope fixtures, including conflicting and
-  target-modified policy, and compare canonical change-model output.
-
 ### V1-09 — Produce a review plan and explainable logical slices
 
-**What to build:** Run a provider-neutral planner over the change model and
+Run a provider-neutral planner over the change model and
 persist risk areas, planned passes, required context, coverage limits, and logical
 change slices that can later drive both terminal and browser navigation.
 
-**Blocked by:** V1-02, V1-08
-
-**Acceptance criteria:**
-
-- [x] The core owns provider-neutral message, tool, structured-output, usage,
-      status, retry, timeout, cancellation, and provenance contracts.
-- [x] A deterministic fixture model can complete planner runs without network or
-      credentials.
-- [x] Logical slices reference exact snapshot hunks and explain their grouping
-      and risk cues; a file-oriented view remains derivable.
-- [x] The plan records required context, applicable and skipped passes, ordering,
-      and known coverage limitations without claiming universal optimality.
-- [x] Malformed structured output follows a bounded repair/retry policy and ends
-      as a visible failed run when still invalid.
-- [x] Run records include adapter/protocol and prompt-template versions, model
-      selection, parameters, input manifest, digests, usage when supplied, finish
-      reason, redactions, status, and termination cause.
-
-**Verification:**
-
-- `go test ./...`
-- Run fixture planner responses for valid, malformed, repaired, timed-out,
-  cancelled, and budget-exhausted cases and inspect persisted plan/run records.
-
 ### V1-10 — Retain every emitted candidate and honest coverage
 
-**What to build:** Run applicable specialized review passes with bounded,
+Run applicable specialized review passes with bounded,
 finding-specific snapshot retrieval, retain every well-formed candidate they
 emit, and report completed, failed, skipped, truncated, and unsupported work
 without turning incompleteness into “no findings.”
 
-**Blocked by:** V1-09
-
-**Acceptance criteria:**
-
-- [x] Applicable passes cover the V1 categories in the plan, with no finding
-      quota and no requirement that every pass emit a candidate.
-- [x] Retrieval starts from changed code and records each additional artifact,
-      relationship, requesting run, digest, exclusion, and truncation.
-- [x] Every schema-valid plausible candidate within the declared pass budget is
-      persisted before correlation or presentation filtering.
-- [x] Unsupported prose and malformed candidate payloads become diagnostics,
-      not fabricated findings.
-- [x] Coverage records examined files/hunks, retrieved tests/contracts, completed
-      passes, analyzer availability, exclusions, failures, and declared gaps.
-- [x] A successful empty pass, a failed pass, and a truncated pass remain
-      semantically distinct after restart.
-
-**Verification:**
-
-- `go test ./...`
-- Use fixture passes that emit duplicates, weak candidates, zero candidates,
-  malformed output, failures, and truncation; confirm retention and coverage.
-
 ### V1-11 — Verify candidates against an evidence floor
 
-**What to build:** Investigate each candidate adversarially, record supporting
+Investigate each candidate adversarially, record supporting
 and contradictory evidence, and derive verified, candidate, and refuted views
 without permitting model confidence or analyzer output alone to promote a
 finding.
 
-**Blocked by:** V1-10
-
-**Acceptance criteria:**
-
-- [x] Verification states are `not_run`, `supported`, `inconclusive`, `refuted`,
-      and `blocked`, with validated transitions and immutable run provenance.
-- [x] The verifier states the suspected invariant violation, traces a concrete
-      path, searches for guards/tests, and records an attempted refutation and
-      material contradictory evidence.
-- [x] Evidence records relation, snapshot, anchors, summary, producing run,
-      artifact digest, and an exact retained-output pointer when available.
-- [x] The verified lane requires a valid claim and impact, a snapshot anchor,
-      independent concrete supporting evidence, and a completed qualifying
-      verifier run.
-- [x] Inconclusive and blocked items remain candidates; refuted items remain
-      auditable but hidden from the default view.
-- [x] The evidence floor cannot be weakened by configuration and confidence is
-      descriptive only.
-
-**Verification:**
-
-- `go test ./...`
-- Table-test every evidence-floor boundary and prove no contradictory writable
-  lane state can be stored.
-
 ### V1-12 — Preserve finding identity and explicit human decisions
 
-**What to build:** Give findings stable, revision-aware identities across review
+Give findings stable, revision-aware identities across review
 rounds while letting users record dispositions and edit publishable wording
 without rewriting machine evidence or history.
 
-**Blocked by:** V1-07, V1-11
-
-**Acceptance criteria:**
-
-- [x] Finding revisions are immutable and carry claim, impact, category,
-      severity, confidence, verification, anchors, evidence, origin, and
-      relationships.
-- [x] Anchors combine snapshot side/layer, path, blob digest, line range,
-      original hunk, context and hunk digests, plus optional symbol/syntax
-      fingerprints; line numbers alone are never identity.
-- [x] Strong claim/invariant and anchor matches retain an ID across rounds;
-      ambiguous matches create linked possible successors or duplicates instead
-      of false continuity.
-- [x] Human dispositions support `open`, `accepted`, `intentional`, `dismissed`,
-      `deferred`, `resolved`, and `accepted_risk` independently of verification.
-- [x] Disposition changes are append-only and rationales required by the selected
-      disposition are retained.
-- [x] Editing a comment creates a versioned presentation record and never alters
-      the finding's evidence or machine-verification history.
-
-**Verification:**
-
-- `go test ./...`
-- Exercise moved lines, renamed paths, rewritten claims, ambiguous matches,
-  dispositions, and comment edits across two fixture rounds.
-
 ### V1-13 — Keep every chat turn bound to review context
 
-**What to build:** Provide one durable chat timeline per session for questions,
+Provide one durable chat timeline per session for questions,
 challenges, candidate proposals, and re-verification requests, while requiring
 every turn to reference an exact finding revision or validated diff selection.
 
-**Blocked by:** V1-11, V1-12
-
-**Acceptance criteria:**
-
-- [x] A user chat message is rejected unless it contains at least one finding
-      revision or diff anchor from its active round and snapshot.
-- [x] The service validates and persists canonical bindings before a model starts;
-      assistant replies inherit the initiating turn's primary binding.
-- [x] Changing later selection never rewrites prior message context, and live
-      divergence marks chat stale relative to the worktree without invalidating
-      its snapshot meaning.
-- [x] Any extra snapshot context retrieved by chat is logged as run input.
-- [x] Chat may propose a structured candidate or request verification but cannot
-      silently change a finding, disposition, wording, snapshot, or repository.
-- [x] Re-verification creates a new run and revision-aware evidence history rather
-      than overwriting the previous result.
-- [x] Timeline, failures, cancellation, and usage survive restart.
-
-**Verification:**
-
-- `go test ./...`
-- Submit scoped and deliberately unscoped turns directly to the service, change
-  live files, restart, and inspect preserved bindings and re-verification history.
-
 ### V1-14 — Run all model roles through OpenAI-compatible endpoints
 
-**What to build:** Let a user configure planner, reviewer, verifier, and chat
+Let a user configure planner, reviewer, verifier, and chat
 roles against an OpenAI-compatible HTTP endpoint while preserving the common run
 contract and explicit capability differences.
 
-**Blocked by:** V1-09
-
-**Acceptance criteria:**
-
-- [x] Role configuration supports one shared model or separate aliases, base URL,
-      requested model, timeouts, retry and budget limits, and a credential
-      reference.
-- [x] Streaming and nonstreaming responses, structured output, usage, finish
-      reasons, provider errors, rate limits, malformed frames, and cancellation
-      map into provider-neutral records.
-- [x] Capability detection reports partial compatibility rather than assuming
-      every endpoint supports every OpenAI feature.
-- [x] Bounded retries respect cancellation and retryable status guidance; partial
-      output never becomes a completed structured result.
-- [x] Authorization values and launch secrets never enter logs, the database,
-      browser payloads, or exports.
-- [x] Default tests use local HTTP fixtures and require no live credentials.
-
-**Verification:**
-
-- `go test ./...`
-- Exercise the adapter against `httptest.Server` fixtures for streaming,
-  malformed events, retries, timeouts, cancellation, usage, redaction, and budget
-  termination.
-
 ### V1-15 — Run all model roles through Anthropic
 
-**What to build:** Let a user route any review role to Anthropic's native API
+Lets a user route any review role to Anthropic's native API
 with the same cancellation, provenance, validation, and privacy guarantees as
 the OpenAI-compatible adapter.
-
-**Blocked by:** V1-09
-
-**Acceptance criteria:**
-
-- [x] Role configuration supports a native Anthropic endpoint, model, credential
-      reference, timeouts, retries, and budgets without leaking provider types
-      into the domain.
-- [x] Native streaming events, tool/structured output, usage, stop reasons,
-      overload/rate-limit responses, malformed frames, and cancellation map into
-      common run records.
-- [x] Structured-output validation and bounded repair behavior match the domain
-      guarantees used by other providers.
-- [x] Secrets and raw authorization data are redacted from all durable and
-      exported records.
-- [x] Planner, reviewer, verifier, and chat can all use Anthropic or participate
-      in cross-provider routing.
-- [x] Default tests use local HTTP fixtures and require no live credentials.
-
-**Verification:**
-
-- `go test ./...`
-- Exercise native Anthropic fixtures for streaming, malformed events, retries,
-  timeouts, cancellation, usage, redaction, and budget termination.
 
 ## Milestone 4: Terminal, exports, and optional analyzers
 
@@ -311,19 +115,19 @@ candidates, and incomplete-analysis diagnostics on stdout.
 
 **Acceptance criteria:**
 
-- [ ] `mire review` captures, runs, and persists a review, prints stable progress
+- [x] `mire review` captures, runs, and persists a review, prints stable progress
       and a final summary to stderr, and does not fail merely because findings
       exist.
-- [ ] `mire show [session]` renders the selected round's unified diff and verified
+- [x] `mire show [session]` renders the selected round's unified diff and verified
       findings as the primary section.
-- [ ] `--candidates` reveals a separate candidate section; refuted findings and
+- [x] `--candidates` reveals a separate candidate section; refuted findings and
       omissions remain separately identifiable and are never blended into
       verified output.
-- [ ] Anchored comments remain readable for additions, deletions, moved context,
+- [x] Anchored comments remain readable for additions, deletions, moved context,
       Unicode, and narrow terminals.
-- [ ] Output is deterministic at a fixed width, respects `NO_COLOR`, and never
+- [x] Output is deterministic at a fixed width, respects `NO_COLOR`, and never
       requires an interactive TUI.
-- [ ] Provider or pass failure is displayed as incomplete analysis rather than a
+- [x] Provider or pass failure is displayed as incomplete analysis rather than a
       successful no-findings result.
 
 **Verification:**
@@ -707,6 +511,3 @@ claimed platforms.
 - `mkdir -p dist`
 - `go build -trimpath -o dist/mire ./cmd/mire`
 - `go test ./internal/acceptance -run TestReleaseSmoke`
-
-**Notes:** CI should fail if formatting changes tracked files. A thin Makefile may
-alias these commands but must not contain hidden build or release logic.

@@ -165,6 +165,12 @@ func Label(message string) string {
 	return makeStyle(colorPurple, true).Render(message)
 }
 
+// StyleHeading styles a report section heading without adding layout or
+// terminal-control side effects beyond the current color policy.
+func StyleHeading(message string) string {
+	return makeStyle(colorText, true).Render(message)
+}
+
 // SessionID styles stable session identifiers.
 func SessionID(message string) string {
 	return makeStyle(colorBlue, false).Render(message)

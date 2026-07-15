@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/stormlightlabs/mire/internal/shared"
 )
 
 // OperationStatus is the durable lifecycle state of a long-running operation.
@@ -234,7 +236,7 @@ func (store *RepositoryStore) CreateRound(ctx context.Context, sessionID string)
 	VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
 		round.ID, round.SessionID, round.RepositoryID, round.PredecessorRoundID,
 		round.Number, round.Status,
-		timestampString(round.CreatedAt), timestampString(round.UpdatedAt),
+		shared.TimestampString(round.CreatedAt), shared.TimestampString(round.UpdatedAt),
 	); err != nil {
 		return Round{}, fmt.Errorf("insert round: %w", err)
 	}
@@ -397,7 +399,7 @@ LIMIT 1`, sessionID, OperationStatusQueued, OperationStatusRunning).Scan(&active
 INSERT INTO operations (id, session_id, repository_id, round_id, kind, status, failure, created_at, updated_at)
 VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?)`,
 		operation.ID, operation.SessionID, operation.RepositoryID, operation.RoundID, operation.Kind,
-		operation.Status, operation.Failure, timestampString(operation.CreatedAt), timestampString(operation.UpdatedAt),
+		operation.Status, operation.Failure, shared.TimestampString(operation.CreatedAt), shared.TimestampString(operation.UpdatedAt),
 	); err != nil {
 		if isActiveOperationConstraint(err) {
 			return Operation{}, fmt.Errorf("%w: session %q", ErrOperationActive, sessionID)
@@ -530,8 +532,8 @@ UPDATE operations
 SET status = ?, owner_id = ?, heartbeat_at = ?, lease_expires_at = ?,
     updated_at = ?, started_at = COALESCE(started_at, ?)
 WHERE id = ? AND status = ?`,
-		OperationStatusRunning, store.processID, timestampString(now), timestampString(leaseExpiresAt),
-		timestampString(now), timestampString(now), operationID, OperationStatusQueued,
+		OperationStatusRunning, store.processID, shared.TimestampString(now), shared.TimestampString(leaseExpiresAt),
+		shared.TimestampString(now), shared.TimestampString(now), operationID, OperationStatusQueued,
 	)
 	if err != nil {
 		return Operation{}, fmt.Errorf("acquire operation %q: %w", operationID, err)
@@ -614,7 +616,7 @@ func (store *RepositoryStore) RenewOperation(ctx context.Context, operationID st
 UPDATE operations
 SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
 WHERE id = ? AND status = ? AND owner_id = ?`,
-		timestampString(now), timestampString(leaseExpiresAt), timestampString(now),
+		shared.TimestampString(now), shared.TimestampString(leaseExpiresAt), shared.TimestampString(now),
 		operationID, OperationStatusRunning, store.processID,
 	); err != nil {
 		return Operation{}, fmt.Errorf("renew operation %q: %w", operationID, err)
@@ -698,7 +700,7 @@ func (store *RepositoryStore) finishOperation(ctx context.Context, operationID s
 UPDATE operations
 SET status = ?, failure = ?, updated_at = ?, finished_at = ?
 WHERE id = ? AND status = ? AND owner_id = ?`,
-		target, failure, timestampString(now), timestampString(now), operationID,
+		target, failure, shared.TimestampString(now), shared.TimestampString(now), operationID,
 		OperationStatusRunning, store.processID,
 	); err != nil {
 		return Operation{}, fmt.Errorf("finish operation %q: %w", operationID, err)
@@ -782,7 +784,7 @@ func (store *RepositoryStore) CancelOperation(ctx context.Context, operationID s
 UPDATE operations
 SET status = ?, updated_at = ?, finished_at = ?
 WHERE id = ? AND status IN (?, ?)`,
-		OperationStatusCancelled, timestampString(now), timestampString(now), operationID,
+		OperationStatusCancelled, shared.TimestampString(now), shared.TimestampString(now), operationID,
 		OperationStatusQueued, OperationStatusRunning,
 	); err != nil {
 		return Operation{}, fmt.Errorf("cancel operation %q: %w", operationID, err)
@@ -924,7 +926,7 @@ func recoverExpiredOperationsTx(ctx context.Context, tx *sql.Tx, now time.Time) 
 SELECT id, session_id, repository_id, COALESCE(round_id, '')
 FROM operations
 WHERE status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?
-ORDER BY id ASC`, OperationStatusRunning, timestampString(now))
+ORDER BY id ASC`, OperationStatusRunning, shared.TimestampString(now))
 	if err != nil {
 		return nil, fmt.Errorf("find expired operations: %w", err)
 	}
@@ -953,7 +955,7 @@ SET status = ?, failure = ?, updated_at = ?, finished_at = ?
 WHERE id = ? AND status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`,
 			OperationStatusAbandoned,
 			"Operation lease expired before completion.",
-			timestampString(now), timestampString(now), candidate.ID, OperationStatusRunning, timestampString(now),
+			shared.TimestampString(now), shared.TimestampString(now), candidate.ID, OperationStatusRunning, shared.TimestampString(now),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("abandon operation %q: %w", candidate.ID, err)
@@ -1013,7 +1015,7 @@ UPDATE rounds
 SET status = ?, updated_at = ?
 WHERE id = ? AND session_id = ? AND repository_id = ?
   AND status IN (?, ?)`,
-		status, timestampString(now), operation.RoundID, operation.SessionID, operation.RepositoryID,
+		status, shared.TimestampString(now), operation.RoundID, operation.SessionID, operation.RepositoryID,
 		RoundStatusPending, RoundStatusRunning,
 	)
 	if err != nil {
@@ -1072,7 +1074,7 @@ func insertActivityTx(ctx context.Context, tx *sql.Tx, activity Activity) error 
 INSERT INTO activity (session_id, repository_id, round_id, operation_id, kind, status, message, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		activity.SessionID, activity.RepositoryID, roundID, operationID, activity.Kind,
-		activity.Status, activity.Message, timestampString(activity.CreatedAt),
+		activity.Status, activity.Message, shared.TimestampString(activity.CreatedAt),
 	); err != nil {
 		return fmt.Errorf("insert activity: %w", err)
 	}
@@ -1111,11 +1113,11 @@ func scanRound(row scanner) (Round, error) {
 		return Round{}, err
 	}
 	var err error
-	round.CreatedAt, err = parseTimestamp(createdAtRaw)
+	round.CreatedAt, err = shared.ParseTimestamp(createdAtRaw)
 	if err != nil {
 		return Round{}, fmt.Errorf("parse round creation time: %w", err)
 	}
-	round.UpdatedAt, err = parseTimestamp(updatedAtRaw)
+	round.UpdatedAt, err = shared.ParseTimestamp(updatedAtRaw)
 	if err != nil {
 		return Round{}, fmt.Errorf("parse round update time: %w", err)
 	}
@@ -1134,34 +1136,34 @@ func scanOperation(row scanner) (Operation, error) {
 		return Operation{}, err
 	}
 	var err error
-	operation.CreatedAt, err = parseTimestamp(createdRaw)
+	operation.CreatedAt, err = shared.ParseTimestamp(createdRaw)
 	if err != nil {
 		return Operation{}, fmt.Errorf("parse operation creation time: %w", err)
 	}
-	operation.UpdatedAt, err = parseTimestamp(updatedRaw)
+	operation.UpdatedAt, err = shared.ParseTimestamp(updatedRaw)
 	if err != nil {
 		return Operation{}, fmt.Errorf("parse operation update time: %w", err)
 	}
 	if heartbeatRaw != "" {
-		operation.HeartbeatAt, err = parseTimestamp(heartbeatRaw)
+		operation.HeartbeatAt, err = shared.ParseTimestamp(heartbeatRaw)
 		if err != nil {
 			return Operation{}, fmt.Errorf("parse operation heartbeat time: %w", err)
 		}
 	}
 	if expiresRaw != "" {
-		operation.LeaseExpiresAt, err = parseTimestamp(expiresRaw)
+		operation.LeaseExpiresAt, err = shared.ParseTimestamp(expiresRaw)
 		if err != nil {
 			return Operation{}, fmt.Errorf("parse operation lease time: %w", err)
 		}
 	}
 	if startedRaw != "" {
-		operation.StartedAt, err = parseTimestamp(startedRaw)
+		operation.StartedAt, err = shared.ParseTimestamp(startedRaw)
 		if err != nil {
 			return Operation{}, fmt.Errorf("parse operation start time: %w", err)
 		}
 	}
 	if finishedRaw != "" {
-		operation.FinishedAt, err = parseTimestamp(finishedRaw)
+		operation.FinishedAt, err = shared.ParseTimestamp(finishedRaw)
 		if err != nil {
 			return Operation{}, fmt.Errorf("parse operation finish time: %w", err)
 		}
@@ -1179,7 +1181,7 @@ func scanActivity(row scanner) (Activity, error) {
 		return Activity{}, err
 	}
 	var err error
-	activity.CreatedAt, err = parseTimestamp(createdRaw)
+	activity.CreatedAt, err = shared.ParseTimestamp(createdRaw)
 	if err != nil {
 		return Activity{}, fmt.Errorf("parse activity creation time: %w", err)
 	}

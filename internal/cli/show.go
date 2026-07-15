@@ -9,10 +9,13 @@ import (
 	"github.com/stormlightlabs/mire/internal/echo"
 	"github.com/stormlightlabs/mire/internal/gitrepo"
 	"github.com/stormlightlabs/mire/internal/snapshot"
+	"github.com/stormlightlabs/mire/internal/terminal"
 )
 
 func newShowCommand(state *commandContext) *cobra.Command {
-	return &cobra.Command{
+	var width int
+	var candidates bool
+	command := &cobra.Command{
 		Use:   "show [SESSION]",
 		Short: "Show review rounds and live divergence",
 		Args:  cobra.MaximumNArgs(1),
@@ -71,7 +74,42 @@ func newShowCommand(state *commandContext) *cobra.Command {
 				}
 				reports = append(reports, echo.RoundReport{Round: round, Snapshot: persisted, Divergence: report})
 			}
-			return echo.RenderReviewHistory(command.OutOrStdout(), session, reports)
+			if err := echo.RenderReviewHistory(command.OutOrStdout(), session, reports); err != nil {
+				return err
+			}
+			selectedRound := rounds[len(rounds)-1]
+			if session.CurrentRoundID != "" {
+				for _, round := range rounds {
+					if round.ID == session.CurrentRoundID {
+						selectedRound = round
+						break
+					}
+				}
+			}
+			if selectedRound.SnapshotID == "" {
+				return nil
+			}
+			persisted, err := store.GetSnapshot(command.Context(), selectedRound.SnapshotID)
+			if err != nil {
+				return fmt.Errorf("show: load selected snapshot: %w", err)
+			}
+			capture, err := captureFromStore(command.Context(), store, persisted)
+			if err != nil {
+				return fmt.Errorf("show: reconstruct selected snapshot: %w", err)
+			}
+			objectStore, err = state.openObjectStore()
+			if err != nil {
+				return fmt.Errorf("show: initialize private object store: %w", err)
+			}
+			report, err := buildTerminalReport(command.Context(), store, session, selectedRound, persisted, capture, objectStore)
+			if err != nil {
+				return fmt.Errorf("show: assemble terminal report: %w", err)
+			}
+			sortReportViews(&report)
+			return terminal.Render(command.OutOrStdout(), report, terminal.Options{Width: width, Candidates: candidates})
 		},
 	}
+	command.Flags().IntVar(&width, "width", terminal.DefaultWidth, "report width in terminal columns")
+	command.Flags().BoolVar(&candidates, "candidates", false, "include retained candidate and refuted sections")
+	return command
 }

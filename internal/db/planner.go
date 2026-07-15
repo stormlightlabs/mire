@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stormlightlabs/mire/internal/review"
+	"github.com/stormlightlabs/mire/internal/shared"
 )
 
 var _ review.PlanStore = (*RepositoryStore)(nil)
@@ -75,7 +76,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NUL
 		run.Provenance.PromptTemplateVersion, run.Provenance.Model, parameters,
 		run.Provenance.InputManifestDigest, run.Provenance.InputDigest, run.Provenance.OutputDigest,
 		usage, run.Provenance.FinishReason, redactions, run.Provenance.TerminationCause,
-		timestampString(now), timestampString(run.UpdatedAt), timestampString(run.StartedAt), timestampString(run.FinishedAt))
+		shared.TimestampString(now), shared.TimestampString(run.UpdatedAt), shared.TimestampString(run.StartedAt), shared.TimestampString(run.FinishedAt))
 	if err != nil {
 		return review.RunRecord{}, fmt.Errorf("insert planner run: %w", err)
 	}
@@ -112,8 +113,8 @@ WHERE id = ?`,
 		run.Provenance.Protocol, run.Provenance.PromptTemplateVersion, run.Provenance.Model,
 		parameters, run.Provenance.InputManifestDigest, run.Provenance.InputDigest,
 		run.Provenance.OutputDigest, usage, run.Provenance.FinishReason, redactions,
-		run.Provenance.TerminationCause, timestampString(run.UpdatedAt), timestampString(run.StartedAt),
-		timestampString(run.FinishedAt), run.ID)
+		run.Provenance.TerminationCause, shared.TimestampString(run.UpdatedAt), shared.TimestampString(run.StartedAt),
+		shared.TimestampString(run.FinishedAt), run.ID)
 	if err != nil {
 		return fmt.Errorf("update planner run %q: %w", run.ID, err)
 	}
@@ -183,7 +184,7 @@ func (store *RepositoryStore) SaveReviewPlan(ctx context.Context, plan review.Re
 	_, err = store.database.ExecContext(ctx, `
 INSERT INTO review_plans (run_id, session_id, round_id, snapshot_id, change_model_digest, plan_digest, plan_json, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, plan.RunID, plan.SessionID, plan.RoundID, plan.SnapshotID,
-		plan.ChangeModelDigest, plan.Digest, data, timestampString(created))
+		plan.ChangeModelDigest, plan.Digest, data, shared.TimestampString(created))
 	if err != nil {
 		return fmt.Errorf("save review plan: %w", err)
 	}

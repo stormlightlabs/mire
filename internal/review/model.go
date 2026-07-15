@@ -584,7 +584,7 @@ func assembleFiles(ctx context.Context, capture snapshot.Capture, content Conten
 				hunkPath = file.BasePath
 			}
 			file.Hunks = []Hunk{makeHunk(hunkPath, "rename", 0, 0, 0, 0, nil, false, true)}
-		} else if oldAvailable && newAvailable {
+		} else if oldAvailable || newAvailable {
 			file.Hunks, file.Patch = diffHunks(file.BasePath, file.TargetPath, oldBytes, newBytes)
 		} else {
 			file.Hunks = []Hunk{makeHunk(file.TargetPath, "content_unavailable", 0, 0, 0, 0, nil, false, false)}

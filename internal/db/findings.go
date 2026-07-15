@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stormlightlabs/mire/internal/review"
+	"github.com/stormlightlabs/mire/internal/shared"
 )
 
 var _ review.FindingStore = (*RepositoryStore)(nil)
@@ -56,7 +57,7 @@ INSERT INTO finding_revisions (
     finding_json, created_at
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, finding.FindingID, finding.Revision, finding.SessionID,
-		finding.RoundID, finding.SnapshotID, finding.Digest, data, timestampString(finding.CreatedAt.UTC()))
+		finding.RoundID, finding.SnapshotID, finding.Digest, data, shared.TimestampString(finding.CreatedAt.UTC()))
 	if err != nil {
 		return fmt.Errorf("insert finding revision %q/%d: %w", finding.FindingID, finding.Revision, err)
 	}
@@ -160,7 +161,7 @@ FROM finding_revisions WHERE `+predicate+` ORDER BY revision ASC, finding_id ASC
 		if err != nil {
 			return nil, err
 		}
-		if decoded.CreatedAt, err = parseTimestamp(created); err != nil {
+		if decoded.CreatedAt, err = shared.ParseTimestamp(created); err != nil {
 			return nil, fmt.Errorf("parse finding revision time: %w", err)
 		}
 		findings = append(findings, decoded)
@@ -234,7 +235,7 @@ INSERT INTO finding_dispositions (
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, disposition.ID, disposition.FindingID, disposition.Revision,
 		disposition.SessionID, disposition.RoundID, disposition.Disposition, disposition.Rationale,
-		disposition.Digest, data, timestampString(disposition.CreatedAt.UTC()))
+		disposition.Digest, data, shared.TimestampString(disposition.CreatedAt.UTC()))
 	if err != nil {
 		return fmt.Errorf("insert disposition %q: %w", disposition.ID, err)
 	}
@@ -352,7 +353,7 @@ INSERT INTO finding_presentations (
     id, finding_id, finding_revision, version, digest, presentation_json, created_at
 )
 VALUES (?, ?, ?, ?, ?, ?, ?)`, presentation.ID, presentation.FindingID, presentation.FindingRevision,
-		presentation.Version, presentation.Digest, data, timestampString(presentation.CreatedAt.UTC()))
+		presentation.Version, presentation.Digest, data, shared.TimestampString(presentation.CreatedAt.UTC()))
 	if err != nil {
 		return fmt.Errorf("insert presentation %q: %w", presentation.ID, err)
 	}

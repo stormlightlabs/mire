@@ -5,6 +5,8 @@ import (
 	"embed"
 	"fmt"
 	"time"
+
+	"github.com/stormlightlabs/mire/internal/shared"
 )
 
 // migrationFiles contains the immutable forward migrations shipped with the
@@ -145,7 +147,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
 			migration.Version,
-			timestampString(time.Now()),
+			shared.TimestampString(time.Now()),
 		); err != nil {
 			return fmt.Errorf("record migration %d (%s): %w", migration.Version, migration.Name, err)
 		}

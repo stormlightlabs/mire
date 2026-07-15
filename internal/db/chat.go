@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/stormlightlabs/mire/internal/review"
+	"github.com/stormlightlabs/mire/internal/shared"
 	"github.com/stormlightlabs/mire/internal/snapshot"
 )
 
@@ -84,7 +85,7 @@ WHERE round_id = ? AND side = ? AND path = ? AND hunk_id = ?`, roundID, anchor.S
 		case errors.Is(queryErr, sql.ErrNoRows):
 			_, err = tx.ExecContext(ctx, `
 INSERT INTO round_diff_anchors (round_id, snapshot_id, side, path, hunk_id, digest, anchor_json, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, roundID, snapshotID, anchor.Side, anchor.Path, anchor.HunkID, digest, data, timestampString(now))
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, roundID, snapshotID, anchor.Side, anchor.Path, anchor.HunkID, digest, data, shared.TimestampString(now))
 			if err != nil {
 				return fmt.Errorf("insert diff anchor %q: %w", anchor.HunkID, err)
 			}
@@ -314,7 +315,7 @@ func (store *RepositoryStore) SaveChatMessage(ctx context.Context, message revie
 	_, err = store.database.ExecContext(ctx, `
 INSERT INTO chat_messages (id, session_id, round_id, snapshot_id, role, digest, message_json, producer_run_id, reply_to, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, message.ID, message.SessionID, message.RoundID, message.SnapshotID,
-		message.Role, message.Digest, data, message.ProducerRunID, message.ReplyTo, timestampString(message.CreatedAt.UTC()))
+		message.Role, message.Digest, data, message.ProducerRunID, message.ReplyTo, shared.TimestampString(message.CreatedAt.UTC()))
 	if err != nil {
 		return review.ChatMessage{}, fmt.Errorf("insert chat message %q: %w", message.ID, err)
 	}
@@ -416,7 +417,7 @@ func (store *RepositoryStore) CreateChatRun(ctx context.Context, record review.C
 INSERT INTO chat_runs (id, session_id, round_id, snapshot_id, user_message_id, status, run_json, binding_json, input_json, response_json, retained_output, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, record.Run.ID, record.Run.SessionID, record.Run.RoundID, record.Run.SnapshotID,
 		record.UserMessageID, record.Run.Status, runJSON, bindingJSON, inputJSON, responseJSON, record.RetainedOutput,
-		timestampString(record.Run.CreatedAt.UTC()), timestampString(record.Run.UpdatedAt.UTC()))
+		shared.TimestampString(record.Run.CreatedAt.UTC()), shared.TimestampString(record.Run.UpdatedAt.UTC()))
 	if err != nil {
 		return review.ChatRunRecord{}, fmt.Errorf("insert chat run %q: %w", record.Run.ID, err)
 	}
@@ -456,7 +457,7 @@ func (store *RepositoryStore) UpdateChatRun(ctx context.Context, record review.C
 	result, err := store.database.ExecContext(ctx, `
 UPDATE chat_runs SET status = ?, run_json = ?, response_json = ?, retained_output = ?, updated_at = ?
 WHERE id = ?`, record.Run.Status, runJSON, responseJSON, record.RetainedOutput,
-		timestampString(record.Run.UpdatedAt.UTC()), record.Run.ID)
+		shared.TimestampString(record.Run.UpdatedAt.UTC()), record.Run.ID)
 	if err != nil {
 		return fmt.Errorf("update chat run %q: %w", record.Run.ID, err)
 	}

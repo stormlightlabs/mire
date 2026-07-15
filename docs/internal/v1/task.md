@@ -236,19 +236,24 @@ every turn to reference an exact finding revision or validated diff selection.
 
 **Acceptance criteria:**
 
-- [ ] A user chat message is rejected unless it contains at least one finding
+- [x] A user chat message is rejected unless it contains at least one finding
       revision or diff anchor from its active round and snapshot.
-- [ ] The service validates and persists canonical bindings before a model starts;
+- [x] The service validates and persists canonical bindings before a model starts;
       assistant replies inherit the initiating turn's primary binding.
-- [ ] Changing later selection never rewrites prior message context, and live
+- [x] Changing later selection never rewrites prior message context, and live
       divergence marks chat stale relative to the worktree without invalidating
       its snapshot meaning.
-- [ ] Any extra snapshot context retrieved by chat is logged as run input.
-- [ ] Chat may propose a structured candidate or request verification but cannot
+- [x] Any extra snapshot context retrieved by chat is logged as run input.
+- [x] Chat may propose a structured candidate or request verification but cannot
       silently change a finding, disposition, wording, snapshot, or repository.
-- [ ] Re-verification creates a new run and revision-aware evidence history rather
+- [x] Re-verification creates a new run and revision-aware evidence history rather
       than overwriting the previous result.
-- [ ] Timeline, failures, cancellation, and usage survive restart.
+- [x] Timeline, failures, cancellation, and usage survive restart.
+
+**Status:** Complete. `internal/review` defines the context-bound chat contract
+and bounded structured runner; `internal/db` persists immutable messages, run
+inputs, outputs, failures, usage, and exact snapshot hunk bindings through the
+chat migration.
 
 **Verification:**
 

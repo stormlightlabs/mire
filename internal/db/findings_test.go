@@ -60,7 +60,7 @@ func TestFindingLedgerPersistence(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveDisposition(accepted) error = %v", err)
 	}
-	if err := store.AppendDisposition(context.Background(), review.DispositionRecord{
+	if err := store.SaveDisposition(context.Background(), review.DispositionRecord{
 		FindingID: finding.FindingID, Revision: finding.Revision, Disposition: review.FindingDispositionAcceptedRisk,
 		Rationale: "The risk is bounded by an external control.",
 	}); err != nil {
@@ -77,7 +77,7 @@ func TestFindingLedgerPersistence(t *testing.T) {
 	if err := store.SavePresentation(context.Background(), review.PresentationRecord{FindingID: finding.FindingID, Body: "Reject invalid input."}); err != nil {
 		t.Fatalf("SavePresentation(first) error = %v", err)
 	}
-	if err := store.SaveCommentRevision(context.Background(), review.PresentationRecord{FindingID: finding.FindingID, Body: "Reject invalid input before the changed branch."}); err != nil {
+	if err := store.SavePresentation(context.Background(), review.PresentationRecord{FindingID: finding.FindingID, Body: "Reject invalid input before the changed branch."}); err != nil {
 		t.Fatalf("SaveCommentRevision(second) error = %v", err)
 	}
 	presentations, err := store.ListPresentations(context.Background(), finding.FindingID)
@@ -114,7 +114,7 @@ func TestFindingLedgerPersistence(t *testing.T) {
 	if len(restartedFindings) != 1 || restartedFindings[0].FindingID != finding.FindingID {
 		t.Fatalf("findings after restart = %#v", restartedFindings)
 	}
-	restartedPresentation, err := restarted.GetLatestCommentRevision(context.Background(), finding.FindingID)
+	restartedPresentation, err := restarted.GetLatestPresentation(context.Background(), finding.FindingID)
 	if err != nil {
 		t.Fatal(err)
 	}

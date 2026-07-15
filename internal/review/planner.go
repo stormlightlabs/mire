@@ -20,6 +20,8 @@ type ModelRole string
 const (
 	// ModelRolePlanner requests a review plan from a change model.
 	ModelRolePlanner ModelRole = "planner"
+	// ModelRoleChat requests a response bound to one frozen review context.
+	ModelRoleChat ModelRole = "chat"
 )
 
 // MessageRole identifies the speaker of a provider-neutral message.

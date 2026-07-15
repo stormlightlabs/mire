@@ -76,6 +76,11 @@ var migrations = []Migration{
 		Name:    "immutable findings dispositions and presentations",
 		SQL:     embeddedMigration("sql/011_findings_and_human_decisions.sql"),
 	},
+	{
+		Version: 12,
+		Name:    "context-bound chat timeline and runs",
+		SQL:     embeddedMigration("sql/012_context_bound_chat.sql"),
+	},
 }
 
 func embeddedMigration(name string) string {

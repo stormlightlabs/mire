@@ -224,12 +224,6 @@ func NewFindingRevision(change ChangeModel, candidate CandidateRecord, inputs ..
 	return normalizeFindingRevision(revision, false)
 }
 
-// BuildFindingRevision is an explicit alias for callers that prefer a builder
-// name when assembling a ledger record from review outputs.
-func BuildFindingRevision(change ChangeModel, candidate CandidateRecord, inputs ...any) (FindingRevision, error) {
-	return NewFindingRevision(change, candidate, inputs...)
-}
-
 func mergeFindingRevisionOptions(base, overlay FindingRevisionOptions) FindingRevisionOptions {
 	if overlay.RoundID != "" {
 		base.RoundID = overlay.RoundID
@@ -474,10 +468,6 @@ const (
 	FindingDispositionAcceptedRisk FindingDisposition = "accepted_risk"
 )
 
-// Disposition is a concise alias for FindingDisposition used by action-layer
-// callers.
-type Disposition = FindingDisposition
-
 // Disposition constants mirror the explicit human decision vocabulary.
 const (
 	DispositionOpen         = FindingDispositionOpen
@@ -525,9 +515,6 @@ type DispositionRecord struct {
 	CreatedAt   time.Time          `json:"created_at"`
 	Digest      string             `json:"digest"`
 }
-
-// DispositionEvent is the readable alias used by append-only event callers.
-type DispositionEvent = DispositionRecord
 
 // Validate checks a disposition event before it crosses a persistence
 // boundary.
@@ -783,11 +770,6 @@ func CorrelateFindings(previous, next []FindingRevision) ([]FindingRevision, err
 		result[index].Digest = FindingRevisionDigest(result[index])
 	}
 	return result, nil
-}
-
-// CorrelateFindingRevisions is an explicit alias for round-level correlation.
-func CorrelateFindingRevisions(previous, next []FindingRevision) ([]FindingRevision, error) {
-	return CorrelateFindings(previous, next)
 }
 
 type rankedFindingMatch struct {

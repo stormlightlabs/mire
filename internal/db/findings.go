@@ -63,21 +63,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, finding.FindingID, finding.Revision, finding.S
 	return nil
 }
 
-// SaveFinding is a readable alias for SaveFindingRevision.
-func (store *RepositoryStore) SaveFinding(ctx context.Context, finding review.FindingRevision) error {
-	return store.SaveFindingRevision(ctx, finding)
-}
-
-// GetFinding is a readable alias for GetFindingRevision.
-func (store *RepositoryStore) GetFinding(ctx context.Context, findingID string, revision int) (review.FindingRevision, error) {
-	return store.GetFindingRevision(ctx, findingID, revision)
-}
-
-// ListFindings is a readable alias for ListFindingRevisions by round.
-func (store *RepositoryStore) ListFindings(ctx context.Context, roundID string) ([]review.FindingRevision, error) {
-	return store.ListFindingRevisions(ctx, roundID)
-}
-
 // GetFindingRevision returns one immutable finding revision and verifies its
 // stored digest and identity columns.
 func (store *RepositoryStore) GetFindingRevision(ctx context.Context, findingID string, revision int) (review.FindingRevision, error) {
@@ -256,16 +241,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, disposition.ID, disposition.FindingID, d
 	return nil
 }
 
-// AppendDisposition is an explicit append-only alias for SaveDisposition.
-func (store *RepositoryStore) AppendDisposition(ctx context.Context, disposition review.DispositionRecord) error {
-	return store.SaveDisposition(ctx, disposition)
-}
-
-// SaveDispositionEvent is a readable event-oriented alias for SaveDisposition.
-func (store *RepositoryStore) SaveDispositionEvent(ctx context.Context, disposition review.DispositionRecord) error {
-	return store.SaveDisposition(ctx, disposition)
-}
-
 // ListDispositions returns all human decision events for a finding in append
 // order. The caller can derive the current decision from the final event.
 func (store *RepositoryStore) ListDispositions(ctx context.Context, findingID string) ([]review.DispositionRecord, error) {
@@ -320,11 +295,6 @@ func (store *RepositoryStore) GetCurrentDisposition(ctx context.Context, finding
 	return review.DispositionRecord{FindingID: finding.FindingID, Revision: finding.Revision,
 		SessionID: finding.SessionID, RoundID: finding.RoundID, Disposition: review.FindingDispositionOpen,
 		CreatedAt: finding.CreatedAt}, nil
-}
-
-// GetLatestDisposition is an alias for GetCurrentDisposition.
-func (store *RepositoryStore) GetLatestDisposition(ctx context.Context, findingID string) (review.DispositionRecord, error) {
-	return store.GetCurrentDisposition(ctx, findingID)
 }
 
 // SavePresentation appends one version of publishable finding wording.
@@ -389,11 +359,6 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, presentation.ID, presentation.FindingID, presenta
 	return nil
 }
 
-// SaveCommentRevision is an alias for SavePresentation.
-func (store *RepositoryStore) SaveCommentRevision(ctx context.Context, presentation review.CommentRevision) error {
-	return store.SavePresentation(ctx, presentation)
-}
-
 // ListPresentations returns all wording versions for a finding in version
 // order. It never changes the associated finding revision.
 func (store *RepositoryStore) ListPresentations(ctx context.Context, findingID string) ([]review.PresentationRecord, error) {
@@ -441,21 +406,6 @@ func (store *RepositoryStore) GetLatestPresentation(ctx context.Context, finding
 		return review.PresentationRecord{}, fmt.Errorf("%w: %q", ErrPresentationNotFound, findingID)
 	}
 	return presentations[len(presentations)-1], nil
-}
-
-// ListCommentRevisions is an alias for ListPresentations.
-func (store *RepositoryStore) ListCommentRevisions(ctx context.Context, findingID string) ([]review.CommentRevision, error) {
-	return store.ListPresentations(ctx, findingID)
-}
-
-// GetLatestCommentRevision is an alias for GetLatestPresentation.
-func (store *RepositoryStore) GetLatestCommentRevision(ctx context.Context, findingID string) (review.CommentRevision, error) {
-	return store.GetLatestPresentation(ctx, findingID)
-}
-
-// GetFindingDisposition is an alias for GetCurrentDisposition.
-func (store *RepositoryStore) GetFindingDisposition(ctx context.Context, findingID string) (review.DispositionRecord, error) {
-	return store.GetCurrentDisposition(ctx, findingID)
 }
 
 // Ensure the compiler keeps the time import used by persistence timestamps

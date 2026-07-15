@@ -553,9 +553,13 @@ func TestCheckDivergenceReportsChangedPathsAndUnavailableRefs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CaptureRange() error = %v", err)
 	}
-	_, _, frozen, err := store.CreateCapturedSession(context.Background(), identity, "Review", capture)
+	session, _, frozen, err := store.CreateCapturedSession(context.Background(), identity, "Review", capture)
 	if err != nil {
 		t.Fatalf("CreateCapturedSession() error = %v", err)
+	}
+	timeline, err := CheckChatDivergenceForSession(context.Background(), repositoryPath, store, session.ID, objectStore)
+	if err != nil || timeline.Stale || timeline.Divergence.Status != snapshot.DivergenceUnchanged {
+		t.Fatalf("unchanged chat divergence = %#v, error = %v", timeline, err)
 	}
 	report, err := CheckDivergence(context.Background(), repositoryPath, store, frozen, objectStore)
 	if err != nil || report.Status != snapshot.DivergenceUnchanged {
@@ -574,6 +578,10 @@ func TestCheckDivergenceReportsChangedPathsAndUnavailableRefs(t *testing.T) {
 	}
 	if len(report.AffectedRefs) != 1 || report.AffectedRefs[0] != "target" {
 		t.Fatalf("changed refs = %#v, want target", report.AffectedRefs)
+	}
+	timeline, err = CheckChatDivergenceForSession(context.Background(), repositoryPath, store, session.ID, objectStore)
+	if err != nil || !timeline.Stale || timeline.Divergence.Status != snapshot.DivergenceChanged {
+		t.Fatalf("changed chat divergence = %#v, error = %v", timeline, err)
 	}
 
 	if err := repository.Storer.RemoveReference(plumbing.NewBranchReferenceName("review-base")); err != nil {

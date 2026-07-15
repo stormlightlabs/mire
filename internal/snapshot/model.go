@@ -13,7 +13,8 @@ import (
 )
 
 const (
-	ComparisonTwoDot = "two_dot"
+	ComparisonTwoDot   = "two_dot"
+	ComparisonThreeDot = "three_dot"
 
 	TreeSideBase   = "base"
 	TreeSideTarget = "target"
@@ -55,9 +56,12 @@ type Change struct {
 // Capture is the in-memory result of a successful Git capture. It is safe to
 // persist only after every non-submodule entry has a verified ContentDigest.
 type Capture struct {
+	ComparisonKind       string
 	RequestedComparison  string
+	BaseOID              string
 	EffectiveBaseOID     string
 	TargetOID            string
+	MergeBaseOID         string
 	ObjectFormat         string
 	ContextPolicyHash    string
 	CapturedAt           time.Time
@@ -81,8 +85,23 @@ func (capture Capture) Validate() error {
 	if strings.TrimSpace(capture.RequestedComparison) == "" {
 		return fmt.Errorf("snapshot capture: requested comparison is empty")
 	}
+	comparisonKind, err := ComparisonKindForComparison(capture.RequestedComparison)
+	if err != nil {
+		return err
+	}
+	if capture.ComparisonKind != "" && capture.ComparisonKind != comparisonKind {
+		return fmt.Errorf("snapshot capture: comparison kind %q does not match %q", capture.ComparisonKind, capture.RequestedComparison)
+	}
 	if strings.TrimSpace(capture.EffectiveBaseOID) == "" || strings.TrimSpace(capture.TargetOID) == "" {
 		return fmt.Errorf("snapshot capture: resolved object IDs are incomplete")
+	}
+	if comparisonKind == ComparisonThreeDot {
+		if strings.TrimSpace(capture.BaseOID) == "" || strings.TrimSpace(capture.MergeBaseOID) == "" {
+			return fmt.Errorf("snapshot capture: three-dot base and merge-base object IDs are incomplete")
+		}
+		if capture.EffectiveBaseOID != capture.MergeBaseOID {
+			return fmt.Errorf("snapshot capture: effective base and merge-base object IDs differ")
+		}
 	}
 	if capture.ObjectFormat != "sha1" && capture.ObjectFormat != "sha256" {
 		return fmt.Errorf("snapshot capture: unsupported object format %q", capture.ObjectFormat)
@@ -104,6 +123,26 @@ func (capture Capture) Validate() error {
 		return fmt.Errorf("snapshot capture: manifest digests are incomplete")
 	}
 	return nil
+}
+
+// ComparisonKindForComparison identifies the committed comparison syntax in a
+// requested range. It rejects malformed or unsupported expressions before any
+// repository object is read.
+func ComparisonKindForComparison(requestedComparison string) (string, error) {
+	requestedComparison = strings.TrimSpace(requestedComparison)
+	if requestedComparison == "" {
+		return "", fmt.Errorf("snapshot capture: requested comparison is empty")
+	}
+	if strings.Contains(requestedComparison, "...") {
+		if strings.Count(requestedComparison, "...") != 1 || strings.Count(requestedComparison, "..") != 1 {
+			return "", fmt.Errorf("snapshot capture: invalid comparison %q", requestedComparison)
+		}
+		return ComparisonThreeDot, nil
+	}
+	if strings.Count(requestedComparison, "..") != 1 {
+		return "", fmt.Errorf("snapshot capture: unsupported comparison %q", requestedComparison)
+	}
+	return ComparisonTwoDot, nil
 }
 
 func validateEntries(side string, entries []Entry) error {
@@ -168,10 +207,24 @@ func ManifestDigest(entries []Entry) (string, error) {
 // OverallManifestDigest returns the digest for the complete immutable
 // snapshot manifest, including provenance and both tree manifests.
 func OverallManifestDigest(capture Capture) (string, error) {
+	comparisonKind, err := ComparisonKindForComparison(capture.RequestedComparison)
+	if err != nil {
+		return "", err
+	}
+	if capture.ComparisonKind != "" && capture.ComparisonKind != comparisonKind {
+		return "", fmt.Errorf("snapshot capture: comparison kind %q does not match %q", capture.ComparisonKind, capture.RequestedComparison)
+	}
+	baseOID := capture.BaseOID
+	if baseOID == "" {
+		baseOID = capture.EffectiveBaseOID
+	}
 	type manifest struct {
+		ComparisonKind       string   `json:"comparison_kind"`
 		RequestedComparison  string   `json:"requested_comparison"`
+		BaseOID              string   `json:"base_oid"`
 		EffectiveBaseOID     string   `json:"effective_base_oid"`
 		TargetOID            string   `json:"target_oid"`
+		MergeBaseOID         string   `json:"merge_base_oid"`
 		ObjectFormat         string   `json:"object_format"`
 		ContextPolicyHash    string   `json:"context_policy_hash"`
 		BaseManifestDigest   string   `json:"base_manifest_digest"`
@@ -186,9 +239,12 @@ func OverallManifestDigest(capture Capture) (string, error) {
 		return changes[i].TargetPath < changes[j].TargetPath
 	})
 	encoded, err := json.Marshal(manifest{
+		ComparisonKind:       comparisonKind,
 		RequestedComparison:  capture.RequestedComparison,
+		BaseOID:              baseOID,
 		EffectiveBaseOID:     capture.EffectiveBaseOID,
 		TargetOID:            capture.TargetOID,
+		MergeBaseOID:         capture.MergeBaseOID,
 		ObjectFormat:         capture.ObjectFormat,
 		ContextPolicyHash:    capture.ContextPolicyHash,
 		BaseManifestDigest:   capture.BaseManifestDigest,

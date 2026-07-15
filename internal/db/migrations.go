@@ -36,6 +36,11 @@ var migrations = []Migration{
 		Name:    "immutable Git snapshots",
 		SQL:     embeddedMigration("sql/003_snapshots.sql"),
 	},
+	{
+		Version: 4,
+		Name:    "three-dot snapshot provenance",
+		SQL:     embeddedMigration("sql/004_three_dot_snapshots.sql"),
+	},
 }
 
 func embeddedMigration(name string) string {

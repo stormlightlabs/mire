@@ -13,11 +13,10 @@ Work the frontier: any ticket whose blockers are complete.
 
 ## Dependency frontier
 
-Completed prerequisites: V1-01, V1-02, and V1-03.
+Completed prerequisites: V1-01, V1-02, V1-03, and V1-04.
 
-The current frontier contains two tickets:
+The current frontier contains one ticket:
 
-- **V1-04 — Preserve three-dot merge-base semantics.**
 - **V1-05 — Capture the complete working tree without tearing.**
 
 Later tickets may proceed as soon as their declared blockers are complete; a
@@ -163,14 +162,14 @@ comparison and the exact objects that determined it.
 
 **Acceptance criteria:**
 
-- [ ] Three-dot input resolves and stores the base OID, target OID, and effective
+- [x] Three-dot input resolves and stores the base OID, target OID, and effective
       merge-base OID exactly once.
-- [ ] The captured diff matches Git's merge-base comparison for diverged fixture
+- [x] The captured diff matches Git's merge-base comparison for diverged fixture
       histories.
-- [ ] Missing, multiple, or invalid merge-base situations produce explicit
+- [x] Missing, multiple, or invalid merge-base situations produce explicit
       diagnostics before model work.
-- [ ] Later movement of branches or tags cannot change the stored round.
-- [ ] Two-dot behavior remains unchanged and the requested comparison kind is
+- [x] Later movement of branches or tags cannot change the stored round.
+- [x] Two-dot behavior remains unchanged and the requested comparison kind is
       distinguishable in storage and exports.
 
 **Verification:**
@@ -178,6 +177,9 @@ comparison and the exact objects that determined it.
 - `go test ./...`
 - Compare MIRE's manifest and diff with Git output in temporary linear, diverged,
   renamed-branch, and invalid-history fixtures.
+
+**Status:** Complete. Three-dot capture rejects missing or ambiguous merge bases
+and stores the requested comparison plus resolved provenance immutably.
 
 ### V1-05 — Capture the complete working tree without tearing
 

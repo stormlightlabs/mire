@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/stormlightlabs/mire/internal/db"
+	"github.com/stormlightlabs/mire/internal/snapshot"
 )
 
 // Eldritch.nvim-inspired colors.
@@ -60,14 +61,21 @@ func RenderSessions(output io.Writer, sessions []db.Session) error {
 
 // RenderReviewCapture writes the stable result of the model-free
 // capture. Progress and diagnostics remain owned by the command's stderr.
-func RenderReviewCapture(output io.Writer, session db.Session, round db.Round, snapshot db.Snapshot) error {
+func RenderReviewCapture(output io.Writer, session db.Session, round db.Round, persistedSnapshot db.Snapshot) error {
 	if output == nil {
 		return fmt.Errorf("render review capture: output is nil")
 	}
+	if persistedSnapshot.Kind == snapshot.ComparisonThreeDot {
+		_, err := fmt.Fprintf(output,
+			"Captured review\nSession: %s\nRound: %s\nSnapshot: %s\nKind: %s\nRange: %s\nBase: %s\nEffective base: %s\nTarget: %s\nMerge base: %s\n",
+			session.ID, round.ID, persistedSnapshot.ID, persistedSnapshot.Kind, persistedSnapshot.RequestedComparison,
+			persistedSnapshot.BaseOID, persistedSnapshot.EffectiveBaseOID, persistedSnapshot.TargetOID, persistedSnapshot.MergeBaseOID)
+		return err
+	}
 	_, err := fmt.Fprintf(output,
 		"Captured review\nSession: %s\nRound: %s\nSnapshot: %s\nRange: %s\nBase: %s\nTarget: %s\n",
-		session.ID, round.ID, snapshot.ID, snapshot.RequestedComparison,
-		snapshot.EffectiveBaseOID, snapshot.TargetOID)
+		session.ID, round.ID, persistedSnapshot.ID, persistedSnapshot.RequestedComparison,
+		persistedSnapshot.EffectiveBaseOID, persistedSnapshot.TargetOID)
 	return err
 }
 

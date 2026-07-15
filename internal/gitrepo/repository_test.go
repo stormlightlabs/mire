@@ -98,6 +98,161 @@ func TestCaptureRangeStoresCompleteTreesAndDurableChanges(t *testing.T) {
 	}
 }
 
+func TestCaptureRangeThreeDotUsesUniqueMergeBaseAndFreezesRefs(t *testing.T) {
+	t.Parallel()
+
+	repositoryPath := t.TempDir()
+	repository := initRepository(t, repositoryPath)
+	worktree, err := repository.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	writeFile(t, repositoryPath, "common.txt", "common\n", 0o644)
+	addFiles(t, worktree, "common.txt")
+	common := commit(t, repository, worktree, "common", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
+	mainBranch, err := repository.Head()
+	if err != nil {
+		t.Fatalf("Head() error = %v", err)
+	}
+	if err := repository.Storer.SetReference(plumbing.NewHashReference(
+		plumbing.NewBranchReferenceName("base"), common)); err != nil {
+		t.Fatalf("create base branch: %v", err)
+	}
+	if err := worktree.Checkout(&git.CheckoutOptions{Branch: mainBranch.Name(), Force: true}); err != nil {
+		t.Fatalf("checkout main branch: %v", err)
+	}
+	writeFile(t, repositoryPath, "target.txt", "target\n", 0o644)
+	addFiles(t, worktree, "target.txt")
+	target := commit(t, repository, worktree, "target", time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC))
+
+	objectStore, err := snapshot.OpenObjectStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenObjectStore() error = %v", err)
+	}
+	requested := "base..." + mainBranch.Name().Short()
+	captured, err := CaptureRangeWithOptions(context.Background(), repositoryPath, requested, objectStore, CaptureOptions{
+		Clock: func() time.Time { return time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		t.Fatalf("CaptureRange() error = %v", err)
+	}
+	if captured.ComparisonKind != snapshot.ComparisonThreeDot || captured.RequestedComparison != requested {
+		t.Fatalf("comparison provenance = %#v", captured)
+	}
+	if captured.BaseOID != common.String() || captured.TargetOID != target.String() ||
+		captured.EffectiveBaseOID != common.String() || captured.MergeBaseOID != common.String() {
+		t.Fatalf("resolved IDs = base %s effective %s target %s merge-base %s, want %s %s %s %s",
+			captured.BaseOID, captured.EffectiveBaseOID, captured.TargetOID, captured.MergeBaseOID,
+			common, common, target, common)
+	}
+	if findEntry(captured.BaseEntries, "target.txt").Path != "" || findEntry(captured.TargetEntries, "target.txt").Path == "" {
+		t.Fatalf("three-dot trees = base %#v target %#v", captured.BaseEntries, captured.TargetEntries)
+	}
+	if !hasChange(captured.Changes, snapshot.ChangeAdded, "", "target.txt") {
+		t.Fatalf("three-dot changes = %#v", captured.Changes)
+	}
+
+	writeFile(t, repositoryPath, "target.txt", "moved after capture\n", 0o644)
+	addFiles(t, worktree, "target.txt")
+	commit(t, repository, worktree, "moved ref", time.Date(2026, time.July, 14, 13, 0, 0, 0, time.UTC))
+	if captured.TargetOID != target.String() {
+		t.Fatalf("captured target OID changed after ref movement = %q, want %s", captured.TargetOID, target)
+	}
+}
+
+func TestCaptureRangeThreeDotRejectsMissingMergeBase(t *testing.T) {
+	t.Parallel()
+
+	repositoryPath := t.TempDir()
+	repository := initRepository(t, repositoryPath)
+	worktree, err := repository.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	writeFile(t, repositoryPath, "common.txt", "common\n", 0o644)
+	addFiles(t, worktree, "common.txt")
+	common := commit(t, repository, worktree, "common", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
+	if err := repository.Storer.SetReference(plumbing.NewHashReference(
+		plumbing.NewBranchReferenceName("base"), common)); err != nil {
+		t.Fatalf("create base branch: %v", err)
+	}
+	head, err := repository.Head()
+	if err != nil {
+		t.Fatalf("Head() error = %v", err)
+	}
+	if err := repository.Storer.RemoveReference(head.Name()); err != nil {
+		t.Fatalf("remove main branch for orphan commit: %v", err)
+	}
+	writeFile(t, repositoryPath, "orphan.txt", "orphan\n", 0o644)
+	addFiles(t, worktree, "orphan.txt")
+	if _, err := worktree.Commit("orphan", &git.CommitOptions{
+		Parents: nil,
+		Author:  &object.Signature{Name: "MIRE Test", Email: "mire@example.test", When: time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC)},
+	}); err != nil {
+		t.Fatalf("create orphan commit: %v", err)
+	}
+
+	objectStore, err := snapshot.OpenObjectStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenObjectStore() error = %v", err)
+	}
+	_, err = CaptureRange(context.Background(), repositoryPath, "base...HEAD", objectStore)
+	if !errors.Is(err, ErrNoMergeBase) {
+		t.Fatalf("CaptureRange() error = %v, want ErrNoMergeBase", err)
+	}
+}
+
+func TestCaptureRangeThreeDotRejectsMultipleMergeBases(t *testing.T) {
+	t.Parallel()
+
+	repositoryPath := t.TempDir()
+	repository := initRepository(t, repositoryPath)
+	worktree, err := repository.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	writeFile(t, repositoryPath, "common.txt", "common\n", 0o644)
+	addFiles(t, worktree, "common.txt")
+	common := commit(t, repository, worktree, "common", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
+	mainBranch, err := repository.Head()
+	if err != nil {
+		t.Fatalf("Head() error = %v", err)
+	}
+	if err := repository.Storer.SetReference(plumbing.NewHashReference(
+		plumbing.NewBranchReferenceName("side"), common)); err != nil {
+		t.Fatalf("create side branch: %v", err)
+	}
+	writeFile(t, repositoryPath, "base.txt", "base\n", 0o644)
+	addFiles(t, worktree, "base.txt")
+	baseTip := commit(t, repository, worktree, "base", time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC))
+	if err := worktree.Checkout(&git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName("side"), Force: true}); err != nil {
+		t.Fatalf("checkout side branch: %v", err)
+	}
+	writeFile(t, repositoryPath, "side.txt", "side\n", 0o644)
+	addFiles(t, worktree, "side.txt")
+	sideTip := commit(t, repository, worktree, "side", time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC))
+	if err := worktree.Checkout(&git.CheckoutOptions{Branch: mainBranch.Name(), Force: true}); err != nil {
+		t.Fatalf("checkout main branch: %v", err)
+	}
+	firstMerge := commitWithParents(t, worktree, "first cross merge", []plumbing.Hash{baseTip, sideTip}, time.Date(2026, time.July, 14, 13, 0, 0, 0, time.UTC))
+	if err := worktree.Checkout(&git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName("side"), Force: true}); err != nil {
+		t.Fatalf("checkout side branch for second merge: %v", err)
+	}
+	secondMerge := commitWithParents(t, worktree, "second cross merge", []plumbing.Hash{sideTip, baseTip}, time.Date(2026, time.July, 14, 14, 0, 0, 0, time.UTC))
+	if firstMerge == secondMerge {
+		t.Fatal("cross merges have identical object IDs")
+	}
+
+	objectStore, err := snapshot.OpenObjectStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("OpenObjectStore() error = %v", err)
+	}
+	_, err = CaptureRange(context.Background(), repositoryPath, mainBranch.Name().Short()+"...side", objectStore)
+	if !errors.Is(err, ErrMultipleMergeBases) {
+		t.Fatalf("CaptureRange() error = %v, want ErrMultipleMergeBases", err)
+	}
+}
+
 func TestCaptureRangeRejectsAmbiguousBranchAndTag(t *testing.T) {
 	t.Parallel()
 
@@ -169,6 +324,20 @@ func commit(t *testing.T, repository *git.Repository, worktree *git.Worktree, me
 	hash, err := worktree.Commit(message, &git.CommitOptions{
 		Author:    &object.Signature{Name: "MIRE Test", Email: "mire@example.test", When: when},
 		Committer: &object.Signature{Name: "MIRE Test", Email: "mire@example.test", When: when},
+	})
+	if err != nil {
+		t.Fatalf("Commit() error = %v", err)
+	}
+	return hash
+}
+
+func commitWithParents(t *testing.T, worktree *git.Worktree, message string, parents []plumbing.Hash, when time.Time) plumbing.Hash {
+	t.Helper()
+	hash, err := worktree.Commit(message, &git.CommitOptions{
+		Parents:           parents,
+		AllowEmptyCommits: true,
+		Author:            &object.Signature{Name: "MIRE Test", Email: "mire@example.test", When: when},
+		Committer:         &object.Signature{Name: "MIRE Test", Email: "mire@example.test", When: when},
 	})
 	if err != nil {
 		t.Fatalf("Commit() error = %v", err)

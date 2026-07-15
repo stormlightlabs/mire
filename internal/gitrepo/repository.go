@@ -30,6 +30,11 @@ var (
 	// ErrAmbiguousRevision is returned when a revision expression has more than
 	// one valid committed interpretation.
 	ErrAmbiguousRevision = errors.New("ambiguous Git revision")
+	// ErrNoMergeBase is returned when the two revisions have no common ancestor.
+	ErrNoMergeBase = errors.New("no merge base")
+	// ErrMultipleMergeBases is returned when Git's best common ancestor set is
+	// not unique.
+	ErrMultipleMergeBases = errors.New("multiple merge bases")
 )
 
 // Repository is an opened read-only view of a local worktree.
@@ -121,8 +126,8 @@ type CaptureOptions struct {
 	PolicyHash string
 }
 
-// CaptureRange opens directory, resolves the committed two-dot range exactly
-// once, and copies complete base and target trees into objectStore.
+// CaptureRange opens directory, resolves a committed range exactly once, and
+// copies complete effective-base and target trees into objectStore.
 func CaptureRange(ctx context.Context, directory, requestedComparison string, objectStore *snapshot.ObjectStore) (snapshot.Capture, error) {
 	return CaptureRangeWithOptions(ctx, directory, requestedComparison, objectStore, CaptureOptions{})
 }
@@ -132,7 +137,7 @@ func CaptureRangeWithOptions(ctx context.Context, directory, requestedComparison
 	if objectStore == nil {
 		return snapshot.Capture{}, fmt.Errorf("capture Git range: object store is nil")
 	}
-	baseRevision, targetRevision, err := parseTwoDotRange(requestedComparison)
+	baseRevision, targetRevision, comparisonKind, err := parseComparisonRange(requestedComparison)
 	if err != nil {
 		return snapshot.Capture{}, err
 	}
@@ -148,6 +153,15 @@ func CaptureRangeWithOptions(ctx context.Context, directory, requestedComparison
 	targetOID, err := resolveCommitRevision(repository.Git, targetRevision)
 	if err != nil {
 		return snapshot.Capture{}, fmt.Errorf("resolve target revision %q: %w", targetRevision, err)
+	}
+	effectiveBaseOID := baseOID
+	mergeBaseOID := ""
+	if comparisonKind == snapshot.ComparisonThreeDot {
+		mergeBaseOID, err = resolveMergeBase(repository.Git, baseOID, targetOID)
+		if err != nil {
+			return snapshot.Capture{}, fmt.Errorf("resolve merge base for %q...%q: %w", baseRevision, targetRevision, err)
+		}
+		effectiveBaseOID = plumbing.NewHash(mergeBaseOID)
 	}
 	objectFormat, err := gitObjectFormat(repository.Git)
 	if err != nil {
@@ -165,9 +179,9 @@ func CaptureRangeWithOptions(ctx context.Context, directory, requestedComparison
 	if policyHash == "" {
 		policyHash = snapshot.DefaultContextPolicyHash()
 	}
-	baseEntries, err := captureTree(ctx, repository.Git, baseOID, objectStore)
+	baseEntries, err := captureTree(ctx, repository.Git, effectiveBaseOID, objectStore)
 	if err != nil {
-		return snapshot.Capture{}, fmt.Errorf("capture base tree %s: %w", baseOID, err)
+		return snapshot.Capture{}, fmt.Errorf("capture effective base tree %s: %w", effectiveBaseOID, err)
 	}
 	targetEntries, err := captureTree(ctx, repository.Git, targetOID, objectStore)
 	if err != nil {
@@ -182,9 +196,12 @@ func CaptureRangeWithOptions(ctx context.Context, directory, requestedComparison
 		return snapshot.Capture{}, err
 	}
 	capture := snapshot.Capture{
+		ComparisonKind:       comparisonKind,
 		RequestedComparison:  requestedComparison,
-		EffectiveBaseOID:     baseOID.String(),
+		BaseOID:              baseOID.String(),
+		EffectiveBaseOID:     effectiveBaseOID.String(),
 		TargetOID:            targetOID.String(),
+		MergeBaseOID:         mergeBaseOID,
 		ObjectFormat:         objectFormat,
 		ContextPolicyHash:    policyHash,
 		CapturedAt:           capturedAt,
@@ -204,23 +221,57 @@ func CaptureRangeWithOptions(ctx context.Context, directory, requestedComparison
 	return capture, nil
 }
 
-func parseTwoDotRange(expression string) (string, string, error) {
+func parseComparisonRange(expression string) (string, string, string, error) {
 	expression = strings.TrimSpace(expression)
 	if expression == "" {
-		return "", "", fmt.Errorf("capture Git range: comparison is empty")
+		return "", "", "", fmt.Errorf("capture Git range: comparison is empty")
 	}
-	if strings.Contains(expression, "...") {
-		return "", "", fmt.Errorf("capture Git range: three-dot comparisons are not supported yet")
-	}
-	if strings.Count(expression, "..") != 1 {
-		return "", "", fmt.Errorf("capture Git range: expected <base>..<head>, got %q", expression)
+	comparisonKind, err := snapshot.ComparisonKindForComparison(expression)
+	if err != nil {
+		return "", "", "", fmt.Errorf("capture Git range: %w", err)
 	}
 	parts := strings.SplitN(expression, "..", 2)
+	if comparisonKind == snapshot.ComparisonThreeDot {
+		parts = strings.SplitN(expression, "...", 2)
+	}
 	base, target := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 	if base == "" || target == "" || strings.ContainsAny(base, " \t\r\n") || strings.ContainsAny(target, " \t\r\n") {
-		return "", "", fmt.Errorf("capture Git range: invalid comparison %q", expression)
+		return "", "", "", fmt.Errorf("capture Git range: invalid comparison %q", expression)
 	}
-	return base, target, nil
+	return base, target, comparisonKind, nil
+}
+
+func resolveMergeBase(repository *git.Repository, baseOID, targetOID plumbing.Hash) (string, error) {
+	baseCommit, err := repository.CommitObject(baseOID)
+	if err != nil {
+		return "", fmt.Errorf("read base commit %s: %w", baseOID, err)
+	}
+	targetCommit, err := repository.CommitObject(targetOID)
+	if err != nil {
+		return "", fmt.Errorf("read target commit %s: %w", targetOID, err)
+	}
+	mergeBases, err := baseCommit.MergeBase(targetCommit)
+	if err != nil {
+		return "", fmt.Errorf("compute common ancestors: %w", err)
+	}
+	if len(mergeBases) == 0 {
+		return "", fmt.Errorf("%w for %s and %s", ErrNoMergeBase, baseOID, targetOID)
+	}
+	if len(mergeBases) > 1 {
+		identifiers := make([]string, 0, len(mergeBases))
+		for _, mergeBase := range mergeBases {
+			if mergeBase == nil || mergeBase.Hash.IsZero() {
+				continue
+			}
+			identifiers = append(identifiers, mergeBase.Hash.String())
+		}
+		sort.Strings(identifiers)
+		return "", fmt.Errorf("%w for %s and %s: %s", ErrMultipleMergeBases, baseOID, targetOID, strings.Join(identifiers, ", "))
+	}
+	if mergeBases[0] == nil || mergeBases[0].Hash.IsZero() {
+		return "", fmt.Errorf("%w: Git returned an empty object ID", ErrNoMergeBase)
+	}
+	return mergeBases[0].Hash.String(), nil
 }
 
 func resolveCommitRevision(repository *git.Repository, expression string) (plumbing.Hash, error) {

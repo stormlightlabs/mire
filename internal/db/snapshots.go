@@ -22,8 +22,10 @@ type Snapshot struct {
 	RepositoryID         string
 	Kind                 string
 	RequestedComparison  string
+	BaseOID              string
 	EffectiveBaseOID     string
 	TargetOID            string
+	MergeBaseOID         string
 	ObjectFormat         string
 	ContextPolicyHash    string
 	BaseManifestDigest   string
@@ -72,6 +74,10 @@ func (store *RepositoryStore) CreateCapturedSession(ctx context.Context, identit
 	if title == "" {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("create captured session: title is empty")
 	}
+	capture, err = normalizeCapture(capture)
+	if err != nil {
+		return Session{}, Round{}, Snapshot{}, err
+	}
 	if err := validateCapture(capture); err != nil {
 		return Session{}, Round{}, Snapshot{}, err
 	}
@@ -111,8 +117,10 @@ VALUES (?, ?, ?, ?)`, sessionID, repository.ID, title, timestampString(now)); er
 		RepositoryID:         repository.ID,
 		Kind:                 captureKind(capture),
 		RequestedComparison:  capture.RequestedComparison,
+		BaseOID:              capture.BaseOID,
 		EffectiveBaseOID:     capture.EffectiveBaseOID,
 		TargetOID:            capture.TargetOID,
+		MergeBaseOID:         capture.MergeBaseOID,
 		ObjectFormat:         capture.ObjectFormat,
 		ContextPolicyHash:    capture.ContextPolicyHash,
 		BaseManifestDigest:   capture.BaseManifestDigest,
@@ -123,14 +131,15 @@ VALUES (?, ?, ?, ?)`, sessionID, repository.ID, title, timestampString(now)); er
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO snapshots (
-    id, repository_id, kind, requested_comparison, effective_base_oid, target_oid,
-    object_format, context_policy_hash, base_manifest_digest, target_manifest_digest,
-    manifest_digest, complete, created_at
+    id, repository_id, kind, requested_comparison, base_oid, effective_base_oid,
+    target_oid, merge_base_oid, object_format, context_policy_hash,
+    base_manifest_digest, target_manifest_digest, manifest_digest, complete, created_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
 		persistedSnapshot.ID, persistedSnapshot.RepositoryID, persistedSnapshot.Kind,
-		persistedSnapshot.RequestedComparison, persistedSnapshot.EffectiveBaseOID,
-		persistedSnapshot.TargetOID, persistedSnapshot.ObjectFormat,
+		persistedSnapshot.RequestedComparison, persistedSnapshot.BaseOID,
+		persistedSnapshot.EffectiveBaseOID, persistedSnapshot.TargetOID,
+		persistedSnapshot.MergeBaseOID, persistedSnapshot.ObjectFormat,
 		persistedSnapshot.ContextPolicyHash, persistedSnapshot.BaseManifestDigest,
 		persistedSnapshot.TargetManifestDigest, persistedSnapshot.ManifestDigest,
 		timestampString(persistedSnapshot.CreatedAt)); err != nil {
@@ -197,9 +206,9 @@ func (store *RepositoryStore) GetSnapshot(ctx context.Context, snapshotID string
 		ctx = context.Background()
 	}
 	row := store.database.QueryRowContext(ctx, `
-SELECT id, repository_id, kind, requested_comparison, effective_base_oid, target_oid,
-       object_format, context_policy_hash, base_manifest_digest, target_manifest_digest,
-       manifest_digest, complete, created_at
+SELECT id, repository_id, kind, requested_comparison, base_oid, effective_base_oid,
+       target_oid, merge_base_oid, object_format, context_policy_hash,
+       base_manifest_digest, target_manifest_digest, manifest_digest, complete, created_at
 FROM snapshots WHERE id = ?`, snapshotID)
 	result, err := scanSnapshot(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -282,10 +291,30 @@ FROM snapshot_changes WHERE snapshot_id = ? ORDER BY base_path ASC, target_path 
 }
 
 func captureKind(capture snapshot.Capture) string {
-	if strings.Contains(capture.RequestedComparison, "...") {
-		return "three_dot"
+	if capture.ComparisonKind != "" {
+		return capture.ComparisonKind
 	}
-	return snapshot.ComparisonTwoDot
+	kind, err := snapshot.ComparisonKindForComparison(capture.RequestedComparison)
+	if err == nil {
+		return kind
+	}
+	return ""
+}
+
+func normalizeCapture(capture snapshot.Capture) (snapshot.Capture, error) {
+	kind, err := snapshot.ComparisonKindForComparison(capture.RequestedComparison)
+	if err != nil {
+		return snapshot.Capture{}, err
+	}
+	if capture.ComparisonKind == "" {
+		capture.ComparisonKind = kind
+	} else if capture.ComparisonKind != kind {
+		return snapshot.Capture{}, fmt.Errorf("snapshot capture: comparison kind %q does not match %q", capture.ComparisonKind, capture.RequestedComparison)
+	}
+	if capture.BaseOID == "" {
+		capture.BaseOID = capture.EffectiveBaseOID
+	}
+	return capture, nil
 }
 
 func validateCapture(capture snapshot.Capture) error {
@@ -335,7 +364,8 @@ func scanSnapshot(row scanner) (Snapshot, error) {
 	var complete int
 	var createdAtRaw string
 	if err := row.Scan(&result.ID, &result.RepositoryID, &result.Kind, &result.RequestedComparison,
-		&result.EffectiveBaseOID, &result.TargetOID, &result.ObjectFormat, &result.ContextPolicyHash,
+		&result.BaseOID, &result.EffectiveBaseOID, &result.TargetOID, &result.MergeBaseOID,
+		&result.ObjectFormat, &result.ContextPolicyHash,
 		&result.BaseManifestDigest, &result.TargetManifestDigest, &result.ManifestDigest,
 		&complete, &createdAtRaw); err != nil {
 		return Snapshot{}, err

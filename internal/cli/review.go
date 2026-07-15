@@ -49,7 +49,7 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 			return echo.RenderReviewCapture(command.OutOrStdout(), session, round, persistedSnapshot)
 		},
 	}
-	command.Flags().StringVar(&requestedComparison, "range", "", "committed comparison in the form <base>..<head>")
+	command.Flags().StringVar(&requestedComparison, "range", "", "committed comparison in the form <base>..<head> or <base>...<head>")
 	command.Flags().StringVar(&sessionID, "session", "", "append to an existing session")
 	return command
 }

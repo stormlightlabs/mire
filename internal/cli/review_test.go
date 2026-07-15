@@ -98,6 +98,69 @@ func TestReviewRangeCreatesSessionRoundAndPrivateSnapshot(t *testing.T) {
 	}
 }
 
+func TestReviewThreeDotPersistsRequestedAndEffectiveBaseProvenance(t *testing.T) {
+	t.Parallel()
+
+	repositoryPath := t.TempDir()
+	repository := initReviewRepository(t, repositoryPath)
+	worktree, err := repository.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree() error = %v", err)
+	}
+	writeReviewFile(t, repositoryPath, "common.txt", "common\n")
+	addReviewFile(t, worktree, "common.txt")
+	base := commitReview(t, worktree, "base", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
+	if err := repository.Storer.SetReference(plumbing.NewHashReference(
+		plumbing.NewBranchReferenceName("base"), base)); err != nil {
+		t.Fatalf("create base branch: %v", err)
+	}
+	writeReviewFile(t, repositoryPath, "target.txt", "target\n")
+	addReviewFile(t, worktree, "target.txt")
+	target := commitReview(t, worktree, "target", time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC))
+
+	stateDir := filepath.Join(t.TempDir(), "state")
+	var output, diagnostics bytes.Buffer
+	command := NewRootCommand(Config{
+		Stdout: &output, Stderr: &diagnostics, StateDir: stateDir, WorkingDir: repositoryPath,
+	})
+	command.SetArgs([]string{"review", "--range", "base...HEAD"})
+	if err := command.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("review command error = %v", err)
+	}
+	if !strings.Contains(output.String(), "Kind: three_dot") || !strings.Contains(output.String(), "Merge base: "+base.String()) {
+		t.Fatalf("stdout = %q", output.String())
+	}
+	if diagnostics.Len() != 0 {
+		t.Fatalf("stderr = %q", diagnostics.String())
+	}
+	writeReviewFile(t, repositoryPath, "target.txt", "moved after capture\n")
+	addReviewFile(t, worktree, "target.txt")
+	commitReview(t, worktree, "move target ref", time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC))
+
+	store, err := db.OpenStore(context.Background(), stateDir)
+	if err != nil {
+		t.Fatalf("OpenStore() error = %v", err)
+	}
+	defer store.Close()
+	sessions, err := store.ListSessions(context.Background())
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	round, err := store.GetRound(context.Background(), sessions[0].CurrentRoundID)
+	if err != nil {
+		t.Fatalf("GetRound() error = %v", err)
+	}
+	persisted, err := store.GetSnapshot(context.Background(), round.SnapshotID)
+	if err != nil {
+		t.Fatalf("GetSnapshot() error = %v", err)
+	}
+	if persisted.Kind != snapshot.ComparisonThreeDot || persisted.BaseOID != base.String() ||
+		persisted.EffectiveBaseOID != base.String() || persisted.MergeBaseOID != base.String() ||
+		persisted.TargetOID != target.String() {
+		t.Fatalf("persisted provenance = %#v", persisted)
+	}
+}
+
 func TestReviewInvalidRangeCreatesNoDatabaseRecord(t *testing.T) {
 	t.Parallel()
 

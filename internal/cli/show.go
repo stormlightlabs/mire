@@ -15,6 +15,7 @@ import (
 func newShowCommand(state *commandContext) *cobra.Command {
 	var width int
 	var candidates bool
+	var verbose bool
 	command := &cobra.Command{
 		Use:   "show [SESSION]",
 		Short: "Show review rounds and live divergence",
@@ -123,14 +124,14 @@ func newShowCommand(state *commandContext) *cobra.Command {
 				return fmt.Errorf("show: assemble terminal report: %w", err)
 			}
 			sortReportViews(&report)
-			return terminal.Render(
+			return report.Render(
 				command.OutOrStdout(),
-				report,
-				terminal.Options{Width: width, Candidates: candidates},
+				terminal.Options{Width: width, Candidates: candidates, Verbose: verbose},
 			)
 		},
 	}
 	command.Flags().IntVar(&width, "width", terminal.DefaultWidth, "report width in terminal columns")
 	command.Flags().BoolVar(&candidates, "candidates", false, "include retained candidate and refuted sections")
+	command.Flags().BoolVar(&verbose, "verbose", false, "include the full diff and detailed coverage diagnostics")
 	return command
 }

@@ -51,13 +51,35 @@ func TestReviewRunsStaticReportWithProgressOnStderr(t *testing.T) {
 			t.Fatalf("progress missing %q: %q", expected, progress.String())
 		}
 	}
-	for _, expected := range []string{"Review report", "Diff", "-old value", "+new value", "Verified findings", "No verified findings."} {
+	for _, expected := range []string{"Review summary", "Review totals", "Changed files: 1", "Verified findings: 0", "Coverage summary"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("stdout missing %q: %q", expected, output.String())
 		}
 	}
+	for _, hidden := range []string{"Diff", "-old value", "+new value"} {
+		if strings.Contains(output.String(), hidden) {
+			t.Fatalf("default output exposed verbose content %q: %q", hidden, output.String())
+		}
+	}
 	if strings.Contains(output.String(), "review: captured") || strings.Contains(output.String(), "\x1b[") {
 		t.Fatalf("stdout leaked progress or color: %q", output.String())
+	}
+
+	var verboseOutput bytes.Buffer
+	verboseCommand := NewRootCommand(Config{
+		Stdout: &verboseOutput, Stderr: &bytes.Buffer{}, Progress: &bytes.Buffer{},
+		StateDir: filepath.Join(t.TempDir(), "verbose-state"), WorkingDir: repositoryPath,
+	})
+	verboseCommand.SetArgs(
+		[]string{"review", "--range", base.String() + ".." + target.String(), "--verbose", "--width", "48"},
+	)
+	if err := verboseCommand.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("verbose review command error = %v", err)
+	}
+	for _, expected := range []string{"Review report", "Diff", "-old value", "+new value", "Verified findings"} {
+		if !strings.Contains(verboseOutput.String(), expected) {
+			t.Fatalf("verbose stdout missing %q: %q", expected, verboseOutput.String())
+		}
 	}
 
 	store, err := db.OpenStore(context.Background(), stateDir)

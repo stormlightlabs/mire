@@ -26,13 +26,15 @@ Capture a committed comparison:
 ```sh
 mire review --range main..HEAD
 mire review --range origin/main...HEAD
+mire review --range main..HEAD --verbose
 ```
 
-`mire review` prints progress and its final summary to stderr. The deterministic
-static report, unified diff, and verified findings are written to stdout. Use
-`--width` for stable narrow output and `--candidates` when auditing retained or
-refuted candidates. The built-in baseline is credential-free; no findings is
-not an approval, so inspect the coverage and incomplete-analysis sections.
+`mire review` prints progress and its final status to stderr. By default, stdout
+contains a concise summary with review totals and aggregated coverage. Use
+`--verbose` to include the full unified diff and detailed coverage diagnostics.
+Use `--width` to control wrapping and `--candidates` when auditing retained or
+refuted candidates. The built-in baseline is credential-free; no findings is not
+an approval, so inspect the coverage and incomplete-analysis sections.
 
 The two-dot form compares the requested base and target directly.
 
@@ -63,10 +65,14 @@ mire sessions delete <SESSION>
 
 Inspect the current repository's review history and live divergence:
 
+`mire show` uses the same concise default and `--verbose` full-report mode for
+the selected round.
+
 ```sh
 mire show
 mire show <SESSION>
-mire show <SESSION> --candidates --width 80
+mire show <SESSION> --verbose
+mire show <SESSION> --candidates --verbose --width 80
 ```
 
 Export the selected session's current round explicitly as an inspectable handoff.

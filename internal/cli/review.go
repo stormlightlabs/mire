@@ -19,6 +19,7 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 	var worktree bool
 	var width int
 	var candidates bool
+	var verbose bool
 	command := &cobra.Command{
 		Use:   "review",
 		Short: "Run a review against a captured Git range or working tree",
@@ -144,10 +145,9 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 			); err != nil {
 				return err
 			}
-			if err := terminal.Render(
+			if err := report.Render(
 				command.OutOrStdout(),
-				report,
-				terminal.Options{Width: width, Candidates: candidates},
+				terminal.Options{Width: width, Candidates: candidates, Verbose: verbose},
 			); err != nil {
 				return err
 			}
@@ -172,6 +172,7 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 	command.Flags().StringVar(&sessionID, "session", "", "append to an existing session")
 	command.Flags().IntVar(&width, "width", terminal.DefaultWidth, "report width in terminal columns")
 	command.Flags().BoolVar(&candidates, "candidates", false, "include retained candidate and refuted sections")
+	command.Flags().BoolVar(&verbose, "verbose", false, "include the full diff and detailed coverage diagnostics")
 	return command
 }
 

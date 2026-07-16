@@ -4,18 +4,15 @@ package terminal
 import (
 	"fmt"
 	"io"
-	"os"
-	"strconv"
+	"sort"
 	"strings"
 
 	"github.com/stormlightlabs/mire/internal/echo"
 	"github.com/stormlightlabs/mire/internal/review"
-	"github.com/stormlightlabs/mire/internal/shared"
 )
 
-// DefaultWidth is used when a caller does not provide a report width. It is
-// intentionally fixed so captured output is stable in pipes and tests.
-const DefaultWidth = 100
+// DefaultWidth is used when a caller does not provide a report width.
+const DefaultWidth int = 100
 
 // Report is the read-only projection needed by the terminal renderer. It is
 // assembled from the stored ledger and never contains live repository data.
@@ -36,84 +33,69 @@ type Report struct {
 	IncompleteReason    string
 }
 
-// FindingView is one finding with its derived presentation lane.
-type FindingView struct {
-	Revision     review.FindingRevision
-	Lane         review.FindingLane
-	Candidate    *review.CandidateRecord
-	Verification *review.VerificationRecord
-}
-
-// CandidateView is one retained candidate that is not in the primary verified
-// lane. Refuted candidates are kept separately for audit presentation.
-type CandidateView struct {
-	Candidate review.CandidateRecord
-	Reason    string
-}
-
-// Options controls deterministic report layout.
-type Options struct {
-	Width      int
-	Candidates bool
-}
-
 // Render writes a static report. It never reads files, talks to a model, or
 // changes persisted state.
-func Render(output io.Writer, report Report, options Options) error {
+func (r Report) Render(output io.Writer, options Options) error {
 	if output == nil {
 		return fmt.Errorf("render terminal report: output is nil")
 	}
 	width := options.Width
 	if width <= 0 {
-		width = widthFromEnvironment()
+		width = widthFromEnv()
 	}
 	if width < 24 {
 		width = 24
 	}
 
-	if err := renderHeader(output, report, width); err != nil {
-		return err
+	if options.Verbose {
+		return r.renderVerbose(output, width, options.Candidates)
 	}
-	if err := renderDiff(output, report, width, options.Candidates); err != nil {
-		return err
-	}
-	if err := renderFindings(output, report, width); err != nil {
-		return err
-	}
-	if options.Candidates {
-		if err := renderCandidates(output, "Candidates", report.Candidates, width); err != nil {
-			return err
-		}
-		if err := renderCandidates(output, "Refuted findings (audit)", report.Refuted, width); err != nil {
-			return err
-		}
-	} else if len(report.Candidates)+len(report.Refuted) > 0 {
-		if _, err := fmt.Fprintln(output); err != nil {
-			return err
-		}
-		if err := writeWrapped(
-			output,
-			"",
-			"Candidates and refuted findings are hidden; rerun with --candidates.",
-			width,
-		); err != nil {
-			return err
-		}
-	}
-	return renderCoverage(output, report, width)
+	return r.renderSummary(output, width, options.Candidates)
 }
 
-func renderHeader(output io.Writer, report Report, width int) error {
-	if err := writeSectionHeading(output, "Review report", width); err != nil {
+func (r Report) renderVerbose(output io.Writer, width int, includeCandidates bool) error {
+	if err := r.renderHeader(output, "Review report", width); err != nil {
+		return err
+	}
+	if err := r.renderDiff(output, width, includeCandidates); err != nil {
+		return err
+	}
+	if err := r.renderFindings(output, width); err != nil {
+		return err
+	}
+	if err := r.renderCandidateSections(output, width, includeCandidates); err != nil {
+		return err
+	}
+	return r.renderCoverage(output, width)
+}
+
+func (r Report) renderSummary(output io.Writer, width int, includeCandidates bool) error {
+	if err := r.renderHeader(output, "Review summary", width); err != nil {
+		return err
+	}
+	if err := r.renderTotals(output, width); err != nil {
+		return err
+	}
+	if err := r.renderFindings(output, width); err != nil {
+		return err
+	}
+	if err := r.renderCandidateSections(output, width, includeCandidates); err != nil {
+		return err
+	}
+	return r.renderCoverageSummary(output, width)
+}
+
+func (r Report) renderHeader(output io.Writer, title string, width int) error {
+	if err := writeSectionHeading(output, title, width); err != nil {
 		return err
 	}
 	values := []struct{ label, value string }{
-		{"Session", report.SessionID},
-		{"Round", report.RoundID},
-		{"Snapshot", report.SnapshotID},
-		{"Kind", report.SnapshotKind},
-		{"Comparison", report.RequestedComparison},
-		{"Status", report.Status},
+		{"Session", r.SessionID},
+		{"Round", r.RoundID},
+		{"Snapshot", r.SnapshotID},
+		{"Kind", r.SnapshotKind},
+		{"Comparison", r.RequestedComparison},
+		{"Status", r.Status},
 	}
 	for _, value := range values {
 		if strings.TrimSpace(value.value) == "" {
@@ -123,11 +105,11 @@ func renderHeader(output io.Writer, report Report, width int) error {
 			return err
 		}
 	}
-	if report.IncompleteReason != "" {
+	if r.IncompleteReason != "" {
 		if err := writeWrapped(
 			output,
 			echo.Error("Incomplete analysis: "),
-			report.IncompleteReason,
+			r.IncompleteReason,
 			width,
 		); err != nil {
 			return err
@@ -136,18 +118,60 @@ func renderHeader(output io.Writer, report Report, width int) error {
 	return nil
 }
 
-func renderDiff(output io.Writer, report Report, width int, includeCandidates bool) error {
+func (r Report) renderTotals(output io.Writer, width int) error {
+	if _, err := fmt.Fprintln(output); err != nil {
+		return err
+	}
+	if err := writeSectionHeading(output, "Review totals", width); err != nil {
+		return err
+	}
+	totals := []string{
+		fmt.Sprintf("Changed files: %d", len(r.Change.Files)),
+		fmt.Sprintf("Verified findings: %d", len(r.Findings)),
+		fmt.Sprintf("Retained candidates: %d", len(r.Candidates)),
+		fmt.Sprintf("Refuted findings: %d", len(r.Refuted)),
+	}
+	for _, total := range totals {
+		if err := writeWrapped(output, "- ", total, width); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r Report) renderCandidateSections(output io.Writer, width int, includeCandidates bool) error {
+	if includeCandidates {
+		if err := renderCandidates(output, "Candidates", r.Candidates, width); err != nil {
+			return err
+		}
+		return renderCandidates(output, "Refuted findings (audit)", r.Refuted, width)
+	}
+	if len(r.Candidates)+len(r.Refuted) == 0 {
+		return nil
+	}
+	if _, err := fmt.Fprintln(output); err != nil {
+		return err
+	}
+	return writeWrapped(
+		output,
+		"",
+		"Candidates and refuted findings are hidden; rerun with --candidates.",
+		width,
+	)
+}
+
+func (r Report) renderDiff(output io.Writer, width int, includeCandidates bool) error {
 	if _, err := fmt.Fprintln(output); err != nil {
 		return err
 	}
 	if err := writeSectionHeading(output, "Diff", width); err != nil {
 		return err
 	}
-	if len(report.Change.Files) == 0 {
+	if len(r.Change.Files) == 0 {
 		_, err := fmt.Fprintln(output, echo.Muted("No changed files."))
 		return err
 	}
-	for _, file := range report.Change.Files {
+	for _, file := range r.Change.Files {
 		pathName := file.TargetPath
 		if pathName == "" {
 			pathName = file.BasePath
@@ -196,7 +220,7 @@ func renderDiff(output io.Writer, report Report, width int, includeCandidates bo
 					}
 				}
 			}
-			for _, finding := range report.Findings {
+			for _, finding := range r.Findings {
 				if hasHunk(finding.Revision.Anchors, hunk.ID) {
 					if err := renderAnchorComment(output, finding.Lane, finding.Revision, width); err != nil {
 						return err
@@ -204,7 +228,7 @@ func renderDiff(output io.Writer, report Report, width int, includeCandidates bo
 				}
 			}
 			if includeCandidates {
-				for _, candidate := range report.Candidates {
+				for _, candidate := range r.Candidates {
 					if hasHunk(candidate.Candidate.Candidate.Anchors, hunk.ID) {
 						if err := renderCandidateAnchorComment(
 							output,
@@ -216,7 +240,7 @@ func renderDiff(output io.Writer, report Report, width int, includeCandidates bo
 						}
 					}
 				}
-				for _, candidate := range report.Refuted {
+				for _, candidate := range r.Refuted {
 					if hasHunk(candidate.Candidate.Candidate.Anchors, hunk.ID) {
 						if err := renderCandidateAnchorComment(
 							output,
@@ -239,98 +263,165 @@ func renderDiff(output io.Writer, report Report, width int, includeCandidates bo
 	return nil
 }
 
-func renderDiffLine(output io.Writer, line string, width int) error {
-	if line == "" {
-		_, err := fmt.Fprintln(output)
-		return err
-	}
-	prefix := line[:1]
-	body := strings.TrimSuffix(line[1:], "\n")
-	if body == "" {
-		_, err := fmt.Fprintln(output, prefix)
-		return err
-	}
-	parts := wrapDiffBody(body, max(1, width-2))
-	for _, part := range parts {
-		styledPrefix := prefix
-		switch prefix {
-		case "+":
-			styledPrefix = echo.Success(prefix)
-		case "-":
-			styledPrefix = echo.Error(prefix)
-		default:
-			styledPrefix = echo.Muted(prefix)
-		}
-		if _, err := fmt.Fprintln(output, styledPrefix+part); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func renderAnchorComment(output io.Writer, lane review.FindingLane, finding review.FindingRevision, width int) error {
-	anchor := "hunk"
-	if len(finding.Anchors) > 0 {
-		value := finding.Anchors[0]
-		anchor = value.HunkID
-		if value.Path != "" && !strings.HasPrefix(anchor, value.Path+"#") {
-			anchor = value.Path + "#" + anchor
-		}
-		if value.StartLine > 0 {
-			anchor += ":" + strconv.Itoa(value.StartLine)
-		}
-	}
-	return writeWrapped(output, echo.Muted("  ! ")+echo.Label(string(lane))+": ", finding.Claim+" ["+anchor+"]", width)
-}
-
-func renderCandidateAnchorComment(
-	output io.Writer,
-	lane review.FindingLane,
-	candidate review.CandidateRecord,
-	width int,
-) error {
-	anchor := "hunk"
-	if len(candidate.Candidate.Anchors) > 0 {
-		value := candidate.Candidate.Anchors[0]
-		anchor = value.HunkID
-		if value.Path != "" && !strings.HasPrefix(anchor, value.Path+"#") {
-			anchor = value.Path + "#" + anchor
-		}
-		if value.StartLine > 0 {
-			anchor += ":" + strconv.Itoa(value.StartLine)
-		}
-	}
-	return writeWrapped(
-		output,
-		echo.Muted("  ! ")+echo.Label(string(lane))+": ",
-		candidate.Candidate.Claim+" ["+anchor+"]",
-		width,
-	)
-}
-
-func renderFindings(output io.Writer, report Report, width int) error {
+func (r Report) renderFindings(output io.Writer, width int) error {
 	if _, err := fmt.Fprintln(output); err != nil {
 		return err
 	}
 	if err := writeSectionHeading(output, "Verified findings", width); err != nil {
 		return err
 	}
-	if len(report.Findings) == 0 {
+	if len(r.Findings) == 0 {
 		if _, err := fmt.Fprintln(output, echo.Muted("No verified findings.")); err != nil {
 			return err
 		}
 		return nil
 	}
-	for _, finding := range report.Findings {
-		if err := renderFinding(output, finding, width); err != nil {
+	for _, finding := range r.Findings {
+		if err := finding.render(output, width); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func renderFinding(output io.Writer, finding FindingView, width int) error {
-	revision := finding.Revision
+func (r Report) renderCoverage(output io.Writer, width int) error {
+	if _, err := fmt.Fprintln(output); err != nil {
+		return err
+	}
+	if err := writeSectionHeading(output, "Coverage and incomplete analysis", width); err != nil {
+		return err
+	}
+	if len(r.Passes) == 0 {
+		if err := writeWrapped(output, "", "No review passes were persisted.", width); err != nil {
+			return err
+		}
+	} else {
+		for _, pass := range r.Passes {
+			line := fmt.Sprintf("- %s: %s", pass.Name, pass.Status)
+			if pass.Reason != "" {
+				line += " — " + pass.Reason
+			}
+			if pass.CandidateCount > 0 {
+				line += fmt.Sprintf(" (%d candidate(s))", pass.CandidateCount)
+			}
+			if err := writeWrapped(output, "", line, width); err != nil {
+				return err
+			}
+		}
+	}
+	for _, diagnostic := range r.Diagnostics {
+		if err := writeWrapped(output, echo.Error("! ")+diagnostic.Code+": ", diagnostic.Message, width); err != nil {
+			return err
+		}
+	}
+	for _, failure := range r.Coverage.Failures {
+		if err := writeWrapped(
+			output,
+			echo.Error("! coverage: "),
+			failure.PassName+": "+failure.Message,
+			width,
+		); err != nil {
+			return err
+		}
+	}
+	for _, exclusion := range r.Coverage.Exclusions {
+		if err := writeWrapped(
+			output,
+			echo.Muted("! omitted: "),
+			exclusion.PassName+": "+exclusion.Reason,
+			width,
+		); err != nil {
+			return err
+		}
+	}
+	for _, gap := range r.Coverage.Gaps {
+		if err := writeWrapped(output, echo.Muted("! gap: "), gap, width); err != nil {
+			return err
+		}
+	}
+	if len(r.Diagnostics) == 0 && len(r.Coverage.Failures) == 0 && len(r.Coverage.Exclusions) == 0 &&
+		len(r.Coverage.Gaps) == 0 &&
+		r.IncompleteReason == "" {
+		return writeWrapped(output, "", "No incomplete-analysis diagnostics.", width)
+	}
+	return nil
+}
+
+func (r Report) renderCoverageSummary(output io.Writer, width int) error {
+	if _, err := fmt.Fprintln(output); err != nil {
+		return err
+	}
+	if err := writeSectionHeading(output, "Coverage summary", width); err != nil {
+		return err
+	}
+	if len(r.Passes) == 0 {
+		if err := writeWrapped(output, "", "No review passes were persisted.", width); err != nil {
+			return err
+		}
+	} else {
+		for _, pass := range r.Passes {
+			line := fmt.Sprintf("- %s: %s", pass.Name, pass.Status)
+			if pass.CandidateCount > 0 {
+				line += fmt.Sprintf(" (%d candidate(s))", pass.CandidateCount)
+			}
+			if err := writeWrapped(output, "", line, width); err != nil {
+				return err
+			}
+		}
+	}
+
+	metrics := []string{
+		fmt.Sprintf("Examined files: %d", len(r.Coverage.ExaminedFiles)),
+		fmt.Sprintf("Examined hunks: %d", len(r.Coverage.ExaminedHunks)),
+		fmt.Sprintf("Context exclusions: %d", len(r.Coverage.Exclusions)),
+		fmt.Sprintf("Coverage failures: %d", len(r.Coverage.Failures)),
+		fmt.Sprintf("Coverage gaps: %d", len(r.Coverage.Gaps)),
+		fmt.Sprintf("Diagnostics: %d", len(r.Diagnostics)),
+	}
+	for _, metric := range metrics {
+		if err := writeWrapped(output, "", "- "+metric, width); err != nil {
+			return err
+		}
+	}
+
+	for _, exclusion := range summarizeCoverageExclusions(r.Coverage.Exclusions) {
+		line := fmt.Sprintf(
+			"  - %s: %d exclusion(s) — %s",
+			exclusion.PassName,
+			exclusion.Count,
+			exclusion.Reason,
+		)
+		if err := writeWrapped(output, "", line, width); err != nil {
+			return err
+		}
+	}
+
+	hasDiagnostics := len(r.Diagnostics) > 0 || len(r.Coverage.Failures) > 0 ||
+		len(r.Coverage.Exclusions) > 0 || len(r.Coverage.Gaps) > 0
+	if hasDiagnostics {
+		return writeWrapped(
+			output,
+			"",
+			"Detailed coverage diagnostics are hidden; rerun with --verbose.",
+			width,
+		)
+	}
+	if r.IncompleteReason == "" {
+		return writeWrapped(output, "", "No incomplete-analysis diagnostics.", width)
+	}
+	return nil
+}
+
+// FindingView is one finding with its derived presentation lane.
+type FindingView struct {
+	Revision     review.FindingRevision
+	Lane         review.FindingLane
+	Candidate    *review.CandidateRecord
+	Verification *review.VerificationRecord
+}
+
+func (f FindingView) render(output io.Writer, width int) error {
+	revision := f.Revision
 	title := fmt.Sprintf("[%s] %s r%d", revision.Severity, revision.FindingID, revision.Revision)
 	if err := writeWrapped(output, echo.Label("- "), title, width); err != nil {
 		return err
@@ -352,160 +443,45 @@ func renderFinding(output io.Writer, finding FindingView, width int) error {
 	return nil
 }
 
-func renderCandidates(output io.Writer, title string, values []CandidateView, width int) error {
-	if _, err := fmt.Fprintln(output); err != nil {
-		return err
-	}
-	if err := writeSectionHeading(output, title, width); err != nil {
-		return err
-	}
-	if len(values) == 0 {
-		_, err := fmt.Fprintln(output, echo.Muted("None."))
-		return err
-	}
+// CandidateView is one retained candidate that is not in the primary verified
+// lane. Refuted candidates are kept separately for audit presentation.
+type CandidateView struct {
+	Candidate review.CandidateRecord
+	Reason    string
+}
+
+// Options controls deterministic report layout.
+type Options struct {
+	Width      int
+	Candidates bool
+	Verbose    bool
+}
+
+type coverageExclusionSummary struct {
+	PassName string
+	Reason   string
+	Count    int
+}
+
+func summarizeCoverageExclusions(values []review.CoverageExclusion) []coverageExclusionSummary {
+	counts := make(map[string]*coverageExclusionSummary)
 	for _, value := range values {
-		candidate := value.Candidate
-		if err := writeWrapped(
-			output,
-			echo.Label("- "),
-			fmt.Sprintf("%s (%s)", candidate.ID, candidate.Candidate.Severity),
-			width,
-		); err != nil {
-			return err
+		key := value.PassName + "\x00" + value.Reason
+		if summary, ok := counts[key]; ok {
+			summary.Count++
+			continue
 		}
-		if err := writeWrapped(output, "  Claim: ", candidate.Candidate.Claim, width); err != nil {
-			return err
+		counts[key] = &coverageExclusionSummary{PassName: value.PassName, Reason: value.Reason, Count: 1}
+	}
+	result := make([]coverageExclusionSummary, 0, len(counts))
+	for _, summary := range counts {
+		result = append(result, *summary)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].PassName != result[j].PassName {
+			return result[i].PassName < result[j].PassName
 		}
-		if value.Reason != "" {
-			if err := writeWrapped(output, "  State: ", value.Reason, width); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func renderCoverage(output io.Writer, report Report, width int) error {
-	if _, err := fmt.Fprintln(output); err != nil {
-		return err
-	}
-	if err := writeSectionHeading(output, "Coverage and incomplete analysis", width); err != nil {
-		return err
-	}
-	if len(report.Passes) == 0 {
-		if err := writeWrapped(output, "", "No review passes were persisted.", width); err != nil {
-			return err
-		}
-	} else {
-		for _, pass := range report.Passes {
-			line := fmt.Sprintf("- %s: %s", pass.Name, pass.Status)
-			if pass.Reason != "" {
-				line += " — " + pass.Reason
-			}
-			if pass.CandidateCount > 0 {
-				line += fmt.Sprintf(" (%d candidate(s))", pass.CandidateCount)
-			}
-			if err := writeWrapped(output, "", line, width); err != nil {
-				return err
-			}
-		}
-	}
-	for _, diagnostic := range report.Diagnostics {
-		if err := writeWrapped(output, echo.Error("! ")+diagnostic.Code+": ", diagnostic.Message, width); err != nil {
-			return err
-		}
-	}
-	for _, failure := range report.Coverage.Failures {
-		if err := writeWrapped(
-			output,
-			echo.Error("! coverage: "),
-			failure.PassName+": "+failure.Message,
-			width,
-		); err != nil {
-			return err
-		}
-	}
-	for _, exclusion := range report.Coverage.Exclusions {
-		if err := writeWrapped(
-			output,
-			echo.Muted("! omitted: "),
-			exclusion.PassName+": "+exclusion.Reason,
-			width,
-		); err != nil {
-			return err
-		}
-	}
-	for _, gap := range report.Coverage.Gaps {
-		if err := writeWrapped(output, echo.Muted("! gap: "), gap, width); err != nil {
-			return err
-		}
-	}
-	if len(report.Diagnostics) == 0 && len(report.Coverage.Failures) == 0 && len(report.Coverage.Exclusions) == 0 &&
-		len(report.Coverage.Gaps) == 0 &&
-		report.IncompleteReason == "" {
-		return writeWrapped(output, "", "No incomplete-analysis diagnostics.", width)
-	}
-	return nil
-}
-
-func writeWrapped(output io.Writer, prefix, value string, width int) error {
-	prefixWidth := shared.RuneWidth(prefix)
-	available := max(1, width-prefixWidth)
-	parts := shared.WrapText(value, available)
-	if len(parts) == 0 {
-		_, err := fmt.Fprintln(output, prefix)
-		return err
-	}
-	for index, part := range parts {
-		linePrefix := prefix
-		if index > 0 {
-			linePrefix = strings.Repeat(" ", prefixWidth)
-		}
-		if _, err := fmt.Fprintln(output, linePrefix+part); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func writeSectionHeading(output io.Writer, title string, width int) error {
-	for _, line := range shared.WrapText(title, width) {
-		if _, err := fmt.Fprintln(output, echo.StyleHeading(line)); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func wrapDiffBody(value string, width int) []string {
-	value = strings.TrimSuffix(strings.ReplaceAll(value, "\r\n", "\n"), "\n")
-	if value == "" {
-		return nil
-	}
-	if shared.RuneWidth(value) <= width {
-		return []string{value}
-	}
-	parts := make([]string, 0, (shared.RuneWidth(value)+width-1)/width)
-	for value != "" {
-		part, rest := shared.SplitRunes(value, width)
-		parts = append(parts, part)
-		value = rest
-	}
-	return parts
-}
-
-func hasHunk(anchors []review.Anchor, hunkID string) bool {
-	for _, anchor := range anchors {
-		if anchor.HunkID == hunkID {
-			return true
-		}
-	}
-	return false
-}
-
-func widthFromEnvironment() int {
-	if value, err := strconv.Atoi(strings.TrimSpace(os.Getenv("COLUMNS"))); err == nil && value > 0 {
-		return value
-	}
-	return DefaultWidth
+		return result[i].Reason < result[j].Reason
+	})
+	return result
 }

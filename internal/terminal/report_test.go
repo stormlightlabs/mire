@@ -91,7 +91,7 @@ func TestRenderSeparatesVerifiedCandidatesAndRefutedAtFixedWidth(t *testing.T) {
 	}
 
 	var hidden bytes.Buffer
-	if err := Render(&hidden, report, Options{Width: 42}); err != nil {
+	if err := report.Render(&hidden, Options{Width: 42, Verbose: true}); err != nil {
 		t.Fatalf("Render(hidden) error = %v", err)
 	}
 	if strings.Contains(hidden.String(), "candidate-1") || strings.Contains(hidden.String(), "Refuted findings") {
@@ -106,7 +106,7 @@ func TestRenderSeparatesVerifiedCandidatesAndRefutedAtFixedWidth(t *testing.T) {
 	}
 
 	var visible bytes.Buffer
-	if err := Render(&visible, report, Options{Width: 42, Candidates: true}); err != nil {
+	if err := report.Render(&visible, Options{Width: 42, Candidates: true, Verbose: true}); err != nil {
 		t.Fatalf("Render(visible) error = %v", err)
 	}
 	for _, expected := range []string{"Candidates", "candidate-1", "Refuted findings (audit)", "candidate-2", "inconclusive", "refuted"} {
@@ -121,7 +121,7 @@ func TestRenderSeparatesVerifiedCandidatesAndRefutedAtFixedWidth(t *testing.T) {
 	}
 
 	var narrow bytes.Buffer
-	if err := Render(&narrow, report, Options{Width: 24, Candidates: true}); err != nil {
+	if err := report.Render(&narrow, Options{Width: 24, Candidates: true, Verbose: true}); err != nil {
 		t.Fatalf("Render(narrow) error = %v", err)
 	}
 	for _, line := range strings.Split(narrow.String(), "\n") {
@@ -155,12 +155,63 @@ func TestRenderDiffHandlesAddedDeletedAndMovedFiles(t *testing.T) {
 	}}}
 
 	var output bytes.Buffer
-	if err := Render(&output, report, Options{Width: 32}); err != nil {
+	if err := report.Render(&output, Options{Width: 32, Verbose: true}); err != nil {
 		t.Fatalf("Render() error = %v", err)
 	}
 	for _, expected := range []string{"--- /dev/null", "+++ b/new.txt", "+added", "--- a/old.txt", "+++ /dev/null", "-deleted", "moved context"} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("output missing %q: %q", expected, output.String())
+		}
+	}
+}
+
+func TestRenderSummaryOmitsDiffAndAggregatesCoverage(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	report := Report{
+		SessionID:           "session",
+		RoundID:             "round",
+		SnapshotID:          "snapshot",
+		SnapshotKind:        "two_dot",
+		RequestedComparison: "base..head",
+		Status:              "complete",
+		Change: review.ChangeModel{Files: []review.FileChange{
+			{Status: "modified", TargetPath: "changed.go", Hunks: []review.Hunk{{Lines: []string{"-old\n", "+new\n"}}}},
+			{Status: "added", TargetPath: "new.go"},
+		}},
+		Coverage: review.ReviewCoverage{
+			ExaminedFiles: []string{"changed.go", "new.go"},
+			ExaminedHunks: []string{"hunk-1"},
+			Passes:        []review.PassCoverage{{Name: "correctness", Status: review.ReviewPassCompleted}},
+			Exclusions: []review.CoverageExclusion{
+				{PassName: "correctness", Reason: "retrieval budget"},
+				{PassName: "correctness", Reason: "retrieval budget"},
+			},
+			Gaps: []string{"correctness reached its retrieval budget"},
+		},
+		Diagnostics: []review.ReviewDiagnostic{{Code: "retrieval_exclusion", Message: "context was omitted"}},
+	}
+
+	var summary bytes.Buffer
+	if err := report.Render(&summary, Options{Width: 72}); err != nil {
+		t.Fatalf("Render(summary) error = %v", err)
+	}
+	output := summary.String()
+	for _, expected := range []string{
+		"Review summary",
+		"Changed files: 2",
+		"Verified findings: 0",
+		"Coverage summary",
+		"Context exclusions: 2",
+		"correctness: 2 exclusion(s) — retrieval budget",
+		"Detailed coverage diagnostics are hidden; rerun with --verbose.",
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("summary missing %q: %q", expected, output)
+		}
+	}
+	for _, hidden := range []string{"Diff", "--- a/changed.go", "-old", "+new", "! omitted:"} {
+		if strings.Contains(output, hidden) {
+			t.Fatalf("summary exposed verbose content %q: %q", hidden, output)
 		}
 	}
 }

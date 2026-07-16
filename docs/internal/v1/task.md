@@ -1,28 +1,9 @@
 ---
 title: "MIRE V1 implementation tasks"
 status: "in progress"
-updated: "2026-07-15"
+updated: "2026-07-16"
 source: "plan.md"
 ---
-
-# MIRE V1 implementation tasks
-
-These tickets deliver the local review workbench specified in
-[plan.md](plan.md). They are ordered by dependency, not by package or UI layer.
-Work the frontier: any ticket whose blockers are complete.
-
-## Dependency frontier
-
-- **V1-13 — Keep every chat turn bound to review context.**
-- **V1-14 — Run all model roles through OpenAI-compatible endpoints.**
-- **V1-15 — Run all model roles through Anthropic.**
-- **V1-16 — Review and inspect results in a static terminal report.**
-- **V1-18 — Run fixed analyzers with bounded, auditable subprocesses.**
-- **V1-21 — Serve the review API, durable progress, and embedded app securely.**
-
-Later tickets may proceed as soon as their declared blockers are complete; a
-milestone need not finish before work starts on an unblocked ticket in the next
-milestone.
 
 ## Milestone 1: Durable private sessions
 
@@ -43,11 +24,11 @@ captured atomically into application-owned storage.
 
 ## Milestone 3: Evidence-led review and model roles
 
-**Exit criterion:** A deterministic fixture model and both supported provider
-adapters can run the planner, reviewer, verifier, and contextual-chat roles over
-frozen snapshots. The ledger retains complete pass outcomes, derives verified and
-candidate lanes from evidence, supports human decisions, and rejects unscoped
-chat.
+**Exit criterion:** The review ledger retains complete pass outcomes, derives
+verified and candidate lanes from evidence, supports human decisions, and
+rejects unscoped chat. Model requests expose only capabilities MIRE can execute,
+and explicitly configured ChatGPT Codex, OpenCode Zen, OpenCode Go, and Umans
+models can run every role through the normal CLI and web application.
 
 ### V1-08 — Assemble review intent and the frozen change model
 
@@ -99,6 +80,105 @@ Lets a user route any review role to Anthropic's native API
 with the same cancellation, provenance, validation, and privacy guarantees as
 the OpenAI-compatible adapter.
 
+### V1-27 — Make the bounded model-completion contract honest
+
+**What to build:** Keep V1 model execution as a bounded, one-shot structured
+completion by removing advertised application tools that the planner, reviewer,
+verifier, and chat runners cannot execute. Continue assembling and retrieving
+the required snapshot context before each provider request.
+
+**Blocked by:** None - can start immediately
+
+**Acceptance criteria:**
+
+- [ ] Planner, reviewer, verifier, and chat requests do not advertise
+      `snapshot_read` or any other application tool until an application-owned
+      tool loop exists.
+- [ ] Each role receives only bounded context assembled or retrieved by MIRE
+      before the request, and retrieved artifacts, exclusions, truncation, and
+      digests remain in the durable run record.
+- [ ] Provider-native structured-output mechanisms may use adapter-private
+      schemas or synthetic tools without appearing in the provider-neutral
+      request as MIRE application authority.
+- [ ] A provider response that requests an unsupported application tool is a
+      visible malformed/unsupported-output diagnostic; MIRE executes nothing and
+      does not convert the run into a successful no-finding result.
+- [ ] Deterministic fixtures cover all four roles through both existing wire
+      adapters and prove that no application tool call is offered or executed.
+- [ ] Built-in policy, prompt text, capability reports, provenance, and README
+      claims consistently describe V1 as read-only pre-retrieval plus structured
+      completion rather than a tool-using agent loop.
+
+**Verification:**
+
+- `go test ./...`
+- `go test -race ./...`
+- Inspect recorded requests and run provenance from fixture reviews for planner,
+  reviewer, verifier, repair, and contextual-chat paths.
+
+### V1-28 — Activate Thunderus-aligned first-party model providers
+
+**What to build:** Let users explicitly configure ChatGPT Codex, OpenCode Zen,
+OpenCode Go, and Umans for planner, reviewer, verifier, and chat roles through
+the normal CLI and web application. Separate product-provider behavior from
+Responses, Messages, and Chat Completions wire transports while retaining the
+credential-free fixture baseline by default.
+
+**Blocked by:** V1-27
+
+**Acceptance criteria:**
+
+- [ ] A single role resolver is used by CLI review, web review, re-verification,
+      and contextual chat; it supports one shared model or role-specific aliases
+      without importing provider DTOs into review-domain packages.
+- [ ] Public provider and model conventions match pinned Thunderus contracts:
+      `chatgpt-codex/<model>`, `opencode/<model>`,
+      `opencode-go/<model>`, and the supported/discovered Umans IDs.
+- [ ] A Responses transport supports ChatGPT Codex and the applicable OpenCode
+      Zen GPT models with the same structured-output, streaming, usage, timeout,
+      cancellation, retry, output-limit, repair, and redaction guarantees as the
+      existing transports.
+- [ ] OpenCode Zen routes GPT models to Responses, Claude/Qwen models to
+      Messages, and other supported models to Chat Completions; OpenCode Go
+      routes MiniMax/Qwen models to Messages and other supported models to Chat
+      Completions.
+- [ ] Umans uses its Messages-compatible endpoint and model metadata without
+      exposing Umans wire shapes as domain records.
+- [ ] `OPENCODE_ZEN_KEY`, `OPENCODE_GO_KEY`, and `UMANS_API_KEY` resolve only at
+      request time or through managed user credential storage. ChatGPT Codex
+      uses refreshable OAuth and the required account identity rather than
+      `OPENAI_API_KEY`.
+- [ ] Configuration stores credential references, never values. Repository
+      content and browser requests cannot select arbitrary endpoints,
+      credentials, executables, or permission-bearing provider options.
+- [ ] Missing credentials, rejected authentication, unsupported models,
+      incompatible capabilities, rate limits, malformed streams, and provider
+      outages produce sanitized, durable incomplete states rather than a
+      successful zero-finding review.
+- [ ] Every run records product adapter, wire protocol, requested and resolved
+      model, prompt version, parameters, input/output digests, usage when
+      supplied, finish reason, redactions, and terminal cause.
+- [ ] Normal commands remain credential-free and deterministic when no live
+      provider is enabled. Live-provider tests are explicit and separate from
+      the default suite.
+- [ ] README and command help document provider selection, per-role routing,
+      credential setup, model discovery, privacy implications, and ChatGPT
+      Codex's experimental subscription-backed status.
+
+**Verification:**
+
+- `go test ./...`
+- `go test -race ./...`
+- Run deterministic HTTP fixtures for every provider/transport route, model-ID
+  validation, authentication mode, discovery response, stream terminal state,
+  retry class, malformed response, cancellation, redaction, and role selection.
+- Run opt-in credentialed smoke tests for each provider without placing secrets
+  or private repository data in fixtures, logs, state, or exports.
+
+**Notes:** Align public provider behavior and pinned fixtures with Thunderus; do
+not shell out to `thndrs`, import its interactive agent loop, or create a general
+provider plugin framework. V1 remains a structured review pipeline.
+
 ## Milestone 4: Terminal, exports, and optional analyzers
 
 **Exit criterion:** The native CLI renders a deterministic human review, exports
@@ -107,73 +187,13 @@ Setaryb and Mccabre subprocesses without making either executable mandatory.
 
 ### V1-16 — Review and inspect results in a static terminal report
 
-**What to build:** Complete `mire review` and `mire show` so users receive stable
-progress on stderr and a width-aware static diff with anchored findings,
-candidates, and incomplete-analysis diagnostics on stdout.
-
-**Blocked by:** V1-10, V1-11
-
-**Acceptance criteria:**
-
-- [x] `mire review` captures, runs, and persists a review, prints stable progress
-      and a final summary to stderr, and does not fail merely because findings
-      exist.
-- [x] `mire show [session]` renders the selected round's unified diff and verified
-      findings as the primary section.
-- [x] `--candidates` reveals a separate candidate section; refuted findings and
-      omissions remain separately identifiable and are never blended into
-      verified output.
-- [x] Anchored comments remain readable for additions, deletions, moved context,
-      Unicode, and narrow terminals.
-- [x] Output is deterministic at a fixed width, respects `NO_COLOR`, and never
-      requires an interactive TUI.
-- [x] Provider or pass failure is displayed as incomplete analysis rather than a
-      successful no-findings result.
-
-**Verification:**
-
-- `go test ./...`
-- Run compiled-CLI golden tests at fixed widths with and without color, checking
-  stdout/stderr separation and exit semantics.
+Completed `mire review` and `mire show` so users receive stable progress on stderr and
+a width-aware static diff with anchored findings, candidates, and incomplete-analysis diagnostics on stdout.
 
 ### V1-17 — Export one canonical ledger into all V1 formats
 
-**What to build:** Let `mire export` deterministically project a stored session
-into Markdown, canonical JSON, SARIF 2.1.0, or an inspectable multi-file bundle,
-without implying the export can restore the private snapshot.
-
-**Blocked by:** V1-12, V1-13
-
-**Acceptance criteria:**
-
-- [x] Canonical `review.json` is versioned independently of SQLite and contains
-      the normalized ledger, snapshot manifest, artifact descriptors,
-      provenance, coverage, and omissions without credentials or snapshot-object
-      contents.
-- [x] Markdown is a readable front door with clearly distinct verified,
-      candidate, refuted/audit, chat, coverage, and incomplete-analysis sections.
-- [x] SARIF 2.1.0 contains only representable findings with valid locations,
-      stable rule/result identities, and a declared loss of chat, detailed
-      verification history, and rich dispositions.
-- [x] Bundle output contains `REVIEW.md`, `review.json`, `manifest.json`,
-      `diff.patch`, `findings.json`, `evidence.jsonl`, `chat.jsonl`,
-      `activity.jsonl`, and `findings.sarif`, plus only named evidence artifacts.
-- [x] IDs and ordering are deterministic; repeated exports of unchanged state
-      are byte-stable except for fields explicitly defined as export-instance
-      metadata.
-- [x] Export is explicit, never silently overwrites a destination, warns that
-      code/conversation may be sensitive, and cannot be mistaken for a V1 import
-      or replay format.
-
-**Verification:**
-
-- `go test ./...`
-- Export a fixture session twice to every format, compare bytes and schemas,
-  inspect the bundle manifest, and scan outputs for fixture credentials.
-
-**Notes:** Generate every view from the stored domain projection, not from
-another export format. SARIF and SQLite representations must not become domain
-types.
+Lets `mire export` deterministically project a stored session into Markdown, canonical JSON,
+SARIF 2.1.0, or an inspectable multi-file bundle, without implying the export can restore the private snapshot.
 
 ### V1-18 — Run fixed analyzers with bounded, auditable subprocesses
 
@@ -280,39 +300,8 @@ including mandatory-context chat, across refresh and reconnect.
 
 ### V1-21 — Serve the review API, durable progress, and embedded app securely
 
-**What to build:** Let `mire web [session]` serve the embedded static SvelteKit
-application and versioned JSON/SSE API from one foreground Go process, using the
-same application service as the CLI.
-
-**Blocked by:** V1-02 (complete), V1-07 (complete)
-
-**Acceptance criteria:**
-
-- [x] The server binds only to loopback on an available or requested port and
-      shuts down cleanly on interruption; there is no daemon or remote-bind mode.
-- [x] A high-entropy launch capability establishes an HttpOnly, SameSite cookie
-      through a one-time URL and redirects to a clean URL.
-- [x] Unexpected Host and Origin values, CORS requests, unauthenticated API/SSE,
-      non-JSON mutations, and invalid paths are rejected.
-- [x] `/api/v1` exposes validated bootstrap, session, round, operation,
-      cancellation, activity, and divergence resources; later tickets extend the
-      API for review data and actions.
-- [x] Long mutations return `202` operations, creation uses idempotency keys, and
-      revision changes reject stale expected revisions.
-- [x] SSE emits versioned events with monotonic activity IDs, supports
-      `Last-Event-ID`, and recovers durable state written by another CLI process;
-      transient deltas may be lost without losing canonical results.
-- [x] Static assets are built from `app/`, embedded in the binary, receive correct
-      cache headers, and support client-side fallback routing without a Node
-      process.
-
-**Verification:**
-
-- `go test ./...`
-- `pnpm --dir app build`
-- Run HTTP contract tests for authentication, Host/Origin, idempotency,
-  concurrency, validation, SSE reconnect, cancellation, static caching, and
-  fallback routing.
+Lets `mire web [session]` serve the embedded static SvelteKit application and versioned
+JSON/SSE API from one foreground Go process, using the same application service as the CLI.
 
 ### V1-22 — Explore diffs, slices, lanes, and evidence in the browser
 
@@ -399,7 +388,7 @@ optional analyzers or live model credentials in its default test suite.
 and process boundary, close any path that can widen V1 authority or leak secrets,
 and make every partial or failed operation visible in stored and exported state.
 
-**Blocked by:** V1-14, V1-15, V1-19, V1-20, V1-21, V1-23
+**Blocked by:** V1-19, V1-20, V1-21, V1-23, V1-28
 
 **Acceptance criteria:**
 
@@ -410,9 +399,10 @@ and make every partial or failed operation visible in stored and exported state.
       MIRE, or escape snapshot paths.
 - [ ] Analyzer invocations cannot use a shell or user-controlled arbitrary
       executables and visibly disclose that enabled tools retain host authority.
-- [ ] Model access is limited to configured endpoints and read-only snapshot
-      tools; no API accepts arbitrary commands, executable paths, project paths,
-      provider credentials, or remote bind addresses.
+- [ ] Model access is limited to configured endpoints and bounded snapshot
+      context selected by MIRE before each request; no API accepts arbitrary
+      commands, executable paths, project paths, provider credentials, or remote
+      bind addresses.
 - [ ] Credentials, authorization headers, launch tokens, and configured secret
       fixtures are absent from logs, SQLite, browser payloads, diagnostics, model
       provenance, and every export.
@@ -436,7 +426,7 @@ recall, redundancy, actionability, structured-output reliability, human triage
 burden, latency, and cost independently, then apply the V1 verified-lane release
 gate to each supported model configuration.
 
-**Blocked by:** V1-10, V1-11, V1-14, V1-15
+**Blocked by:** V1-10, V1-11, V1-28
 
 **Acceptance criteria:**
 
@@ -473,7 +463,7 @@ exercise the compiled CLI and real loopback server against temporary
 repositories, and publish a release candidate only when all V1 gates pass on the
 claimed platforms.
 
-**Blocked by:** V1-06, V1-16, V1-17, V1-19, V1-20, V1-23, V1-24, V1-25
+**Blocked by:** V1-06, V1-16, V1-17, V1-19, V1-20, V1-23, V1-24, V1-25, V1-28
 
 **Acceptance criteria:**
 

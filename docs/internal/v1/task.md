@@ -324,21 +324,21 @@ side-by-side diffs, finding lanes, coverage, evidence, provenance, and omissions
 
 **Acceptance criteria:**
 
-- [ ] Session and round overview shows intent, status, snapshot identity,
+- [x] Session and round overview shows intent, status, snapshot identity,
       divergence, models, analyzers, coverage, and omissions.
-- [ ] Users can navigate logical slices or files and order by recorded risk,
+- [x] Users can navigate logical slices or files and order by recorded risk,
       relevance, diff size, tests, or dependency impact without implying that
       navigation proves review coverage.
-- [ ] Unified and side-by-side diffs expose stable, selectable anchors and remain
+- [x] Unified and side-by-side diffs expose stable, selectable anchors and remain
       usable at ordinary laptop widths.
-- [ ] Verified, candidate, and optional refuted views are visually and
+- [x] Verified, candidate, and optional refuted views are visually and
       semantically distinct using more than color.
-- [ ] Finding details expose claim, impact, anchors, supporting and contradicting
+- [x] Finding details expose claim, impact, anchors, supporting and contradicting
       evidence, retrieved context, run provenance, analyzer limitations, and
       relationships.
-- [ ] The read-only API exposes diff, slice, finding, coverage, evidence, and
+- [x] The read-only API exposes diff, slice, finding, coverage, evidence, and
       provenance resources without accepting arbitrary paths.
-- [ ] Keyboard navigation and focus behavior permit complete read-only
+- [x] Keyboard navigation and focus behavior permit complete read-only
       exploration, and refresh restores canonical state from the API.
 
 **Verification:**

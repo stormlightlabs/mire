@@ -288,6 +288,7 @@ type Review struct {
 	Chat             []review.ChatMessage  `json:"chat"`
 	Omissions        []Omission            `json:"omissions"`
 	DiffPatch        string                `json:"-"`
+	ChangeModel      review.ChangeModel    `json:"-"`
 	artifactContents []EvidenceArtifact    `json:"-"`
 }
 
@@ -375,6 +376,7 @@ func Build(
 			if err != nil {
 				result.Omissions = append(result.Omissions, Omission{Kind: "diff", Reason: err.Error()})
 			} else {
+				result.ChangeModel = changeModel
 				result.Change = changeDescriptor(changeModel)
 				result.DiffPatch = diffPatch(changeModel)
 			}

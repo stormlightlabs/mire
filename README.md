@@ -92,6 +92,8 @@ serves the embedded app in the foreground. Open that URL in a browser and stop
 the server with `Ctrl-C`. To request a specific loopback port, pass
 `--addr 127.0.0.1:<PORT>`.
 
+The browser workbench restores its canonical state from the local API.
+
 Use `MIRE_STATE_DIR` to point isolated development or test runs at a private
 state directory:
 

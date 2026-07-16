@@ -23,7 +23,9 @@ import (
 	"time"
 
 	"github.com/stormlightlabs/mire/internal/db"
+	reviewexport "github.com/stormlightlabs/mire/internal/export"
 	"github.com/stormlightlabs/mire/internal/gitrepo"
+	"github.com/stormlightlabs/mire/internal/review"
 	"github.com/stormlightlabs/mire/internal/shared"
 	"github.com/stormlightlabs/mire/internal/snapshot"
 )
@@ -318,6 +320,11 @@ func (s *Server) serveAPI(response http.ResponseWriter, request *http.Request) {
 			part != "rounds" &&
 			part != "operations" &&
 			part != "divergence" &&
+			part != "overview" &&
+			part != "diff" &&
+			part != "slices" &&
+			part != "findings" &&
+			part != "coverage" &&
 			part != "reviews" &&
 			part != "cancel" {
 			writeError(response, http.StatusNotFound, errors.New("invalid API path"))
@@ -337,6 +344,18 @@ func (s *Server) serveAPI(response http.ResponseWriter, request *http.Request) {
 		writeError(response, http.StatusNotFound, errors.New("invalid API path"))
 	case len(parts) == 3 && parts[0] == "rounds" && parts[2] == "divergence":
 		s.handleDivergence(response, request, parts[1])
+	case len(parts) == 3 && parts[0] == "rounds" && parts[2] == "overview":
+		s.handleRoundOverview(response, request, parts[1])
+	case len(parts) == 3 && parts[0] == "rounds" && parts[2] == "diff":
+		s.handleRoundDiff(response, request, parts[1])
+	case len(parts) == 3 && parts[0] == "rounds" && parts[2] == "slices":
+		s.handleRoundSlices(response, request, parts[1])
+	case len(parts) == 3 && parts[0] == "rounds" && parts[2] == "findings":
+		s.handleRoundFindings(response, request, parts[1])
+	case len(parts) == 3 && parts[0] == "rounds" && parts[2] == "coverage":
+		s.handleRoundCoverage(response, request, parts[1])
+	case len(parts) == 2 && parts[0] == "findings":
+		s.handleFinding(response, request, parts[1])
 	case len(parts) == 3 && parts[0] == "rounds" && parts[2] == "reviews":
 		s.handleReview(response, request, parts[1])
 	case len(parts) == 2 && parts[0] == "operations":
@@ -386,7 +405,7 @@ func (s *Server) handleBootstrap(response http.ResponseWriter, request *http.Req
 	s.writeJSON(response, http.StatusOK, map[string]any{
 		"schema_version": schemaVersion, "authenticated": true,
 		"sessions": mapSessions(sessions), "selected_session": mapSession(selected), "current_round": round,
-		"capabilities": map[string]bool{"review_data": false, "actions": false, "sse": true},
+		"capabilities": map[string]bool{"review_data": true, "actions": false, "sse": true},
 	})
 }
 
@@ -714,6 +733,204 @@ func (s *Server) handleDivergence(response http.ResponseWriter, request *http.Re
 	)
 }
 
+func (s *Server) handleRoundOverview(response http.ResponseWriter, request *http.Request, roundID string) {
+	projection, round, session, ok := s.loadReviewProjection(response, request, roundID)
+	if !ok {
+		return
+	}
+	s.writeJSON(response, http.StatusOK, map[string]any{
+		"schema_version": schemaVersion,
+		"session":        mapSession(&session),
+		"round":          makeRoundDTO(round),
+		"snapshot":       projection.SnapshotManifest,
+		"intent":         projection.ChangeModel.Intent,
+		"change":         projection.Change,
+		"coverage":       projection.Coverage,
+		"omissions":      projection.Omissions,
+		"provenance":     projection.Provenance,
+	})
+}
+
+func (s *Server) handleRoundDiff(response http.ResponseWriter, request *http.Request, roundID string) {
+	projection, _, _, ok := s.loadReviewProjection(response, request, roundID)
+	if !ok {
+		return
+	}
+	s.writeJSON(response, http.StatusOK, map[string]any{
+		"schema_version": schemaVersion,
+		"snapshot_id":    projection.Round.SnapshotID,
+		"files":          projection.ChangeModel.Files,
+		"diff_patch":     projection.DiffPatch,
+		"omissions":      projection.Omissions,
+	})
+}
+
+func (s *Server) handleRoundSlices(response http.ResponseWriter, request *http.Request, roundID string) {
+	projection, _, _, ok := s.loadReviewProjection(response, request, roundID)
+	if !ok {
+		return
+	}
+	plan, hasPlan := s.latestReviewPlan(request.Context(), roundID)
+	slices := []review.LogicalSlice{}
+	riskAreas := []review.RiskArea{}
+	orderingRationale := "No completed review plan is available; use the file inventory."
+	if hasPlan {
+		slices = plan.Slices
+		riskAreas = plan.RiskAreas
+		orderingRationale = plan.Coverage.OrderingRationale
+	}
+	s.writeJSON(response, http.StatusOK, map[string]any{
+		"schema_version":     schemaVersion,
+		"snapshot_id":        projection.Round.SnapshotID,
+		"slices":             slices,
+		"risk_areas":         riskAreas,
+		"ordering_rationale": orderingRationale,
+		"files":              projection.Change.Files,
+	})
+}
+
+func (s *Server) handleRoundFindings(response http.ResponseWriter, request *http.Request, roundID string) {
+	projection, _, _, ok := s.loadReviewProjection(response, request, roundID)
+	if !ok {
+		return
+	}
+	lane := review.FindingLane(strings.TrimSpace(request.URL.Query().Get("lane")))
+	if lane == "" {
+		lane = review.FindingLaneVerified
+	}
+	if lane != review.FindingLaneVerified && lane != review.FindingLaneCandidate &&
+		lane != review.FindingLaneRefuted {
+		writeError(response, http.StatusBadRequest, errors.New("lane must be verified, candidate, or refuted"))
+		return
+	}
+	findings := make([]reviewexport.FindingProjection, 0)
+	for _, finding := range projection.Ledger.Findings {
+		if finding.Lane == lane {
+			findings = append(findings, finding)
+		}
+	}
+	candidates := make([]reviewexport.CandidateProjection, 0)
+	for _, candidate := range projection.Ledger.Candidates {
+		if candidate.Lane == lane {
+			candidates = append(candidates, candidate)
+		}
+	}
+	s.writeJSON(response, http.StatusOK, map[string]any{
+		"schema_version": schemaVersion,
+		"lane":           lane,
+		"findings":       findings,
+		"candidates":     candidates,
+	})
+}
+
+func (s *Server) handleRoundCoverage(response http.ResponseWriter, request *http.Request, roundID string) {
+	projection, round, _, ok := s.loadReviewProjection(response, request, roundID)
+	if !ok {
+		return
+	}
+	s.writeJSON(response, http.StatusOK, map[string]any{
+		"schema_version": schemaVersion,
+		"round_id":       round.ID,
+		"snapshot_id":    round.SnapshotID,
+		"coverage":       projection.Coverage,
+		"passes":         projection.Ledger.Passes,
+		"diagnostics":    projection.Ledger.Diagnostics,
+		"omissions":      projection.Omissions,
+	})
+}
+
+func (s *Server) handleFinding(response http.ResponseWriter, request *http.Request, findingID string) {
+	if request.Method != http.MethodGet {
+		writeError(response, http.StatusMethodNotAllowed, errors.New("finding route only supports GET"))
+		return
+	}
+	finding, err := s.store.GetLatestFindingRevision(request.Context(), findingID)
+	if err != nil {
+		writeStoreError(response, err)
+		return
+	}
+	projection, _, _, ok := s.loadReviewProjection(response, request, finding.RoundID)
+	if !ok {
+		return
+	}
+	for _, value := range projection.Ledger.Findings {
+		if value.Finding.FindingID != finding.FindingID || value.Finding.Revision != finding.Revision {
+			continue
+		}
+		s.writeJSON(response, http.StatusOK, map[string]any{
+			"schema_version": schemaVersion,
+			"finding":        value,
+			"artifacts":      projection.Artifacts,
+			"provenance":     projection.Provenance,
+			"coverage":       projection.Coverage,
+		})
+		return
+	}
+	writeError(response, http.StatusNotFound, db.ErrFindingNotFound)
+}
+
+func (s *Server) loadReviewProjection(
+	response http.ResponseWriter,
+	request *http.Request,
+	roundID string,
+) (reviewexport.Review, db.Round, db.Session, bool) {
+	if request.Method != http.MethodGet {
+		writeError(response, http.StatusMethodNotAllowed, errors.New("review resources only support GET"))
+		return reviewexport.Review{}, db.Round{}, db.Session{}, false
+	}
+	round, err := s.store.GetRound(request.Context(), roundID)
+	if err != nil {
+		writeStoreError(response, err)
+		return reviewexport.Review{}, db.Round{}, db.Session{}, false
+	}
+	session, err := s.store.GetSession(request.Context(), round.SessionID)
+	if err != nil {
+		writeStoreError(response, err)
+		return reviewexport.Review{}, db.Round{}, db.Session{}, false
+	}
+	if err := s.ensureCurrentRepository(session); err != nil {
+		writeError(response, http.StatusNotFound, err)
+		return reviewexport.Review{}, db.Round{}, db.Session{}, false
+	}
+	objectStore := s.objectStore
+	if objectStore == nil {
+		stateDir := s.stateDir
+		if stateDir == "" {
+			stateDir, err = db.DefaultStateDirectory()
+		}
+		if err == nil {
+			objectStore, err = snapshot.OpenObjectStore(stateDir)
+		}
+	}
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, fmt.Errorf("open private snapshot store: %w", err))
+		return reviewexport.Review{}, db.Round{}, db.Session{}, false
+	}
+	projection, err := reviewexport.Build(request.Context(), s.store, session, round, objectStore)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, err)
+		return reviewexport.Review{}, db.Round{}, db.Session{}, false
+	}
+	return projection, round, session, true
+}
+
+func (s *Server) latestReviewPlan(ctx context.Context, roundID string) (review.ReviewPlan, bool) {
+	runs, err := s.store.ListPlanRuns(ctx, roundID)
+	if err != nil {
+		return review.ReviewPlan{}, false
+	}
+	for index := len(runs) - 1; index >= 0; index-- {
+		if runs[index].Status != review.RunStatusComplete {
+			continue
+		}
+		plan, getErr := s.store.GetReviewPlan(ctx, runs[index].ID)
+		if getErr == nil {
+			return plan, true
+		}
+	}
+	return review.ReviewPlan{}, false
+}
+
 func (s *Server) handleEvents(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
 		writeError(response, http.StatusMethodNotAllowed, errors.New("events only support GET"))
@@ -896,7 +1113,8 @@ func writeStoreError(response http.ResponseWriter, err error) {
 	case errors.Is(err, db.ErrSessionNotFound),
 		errors.Is(err, db.ErrRoundNotFound),
 		errors.Is(err, db.ErrOperationNotFound),
-		errors.Is(err, db.ErrSnapshotNotFound):
+		errors.Is(err, db.ErrSnapshotNotFound),
+		errors.Is(err, db.ErrFindingNotFound):
 		writeError(response, http.StatusNotFound, err)
 	case errors.Is(err, db.ErrOperationActive),
 		errors.Is(err, db.ErrOperationAlreadyOwned),

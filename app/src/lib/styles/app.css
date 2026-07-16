@@ -22,6 +22,8 @@
 	--green: #7bd88f;
 	--mono: 'Martian Mono Variable', 'Martian Mono', monospace;
 	--shadow: 0 20px 60px rgb(0 0 0 / 22%), 0 2px 8px rgb(0 0 0 / 28%);
+	--shadow-border: 0 0 0 1px rgb(255 255 255 / 8%);
+	--shadow-border-hover: 0 0 0 1px rgb(255 255 255 / 13%);
 }
 
 *,
@@ -37,6 +39,10 @@ body {
 	margin: 0;
 }
 
+html {
+	-moz-osx-font-smoothing: grayscale;
+}
+
 body {
 	min-height: 100vh;
 	color: var(--ink);
@@ -46,6 +52,11 @@ body {
 
 button {
 	font: inherit;
+}
+
+button,
+select {
+	touch-action: manipulation;
 }
 
 button:focus-visible,

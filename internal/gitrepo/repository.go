@@ -471,19 +471,20 @@ func CaptureRangeWithOptions(
 		return snapshot.Capture{}, err
 	}
 	capture := snapshot.Capture{
-		ComparisonKind:       comparisonKind,
-		RequestedComparison:  requestedComparison,
-		BaseOID:              baseOID.String(),
-		EffectiveBaseOID:     effectiveBaseOID.String(),
-		TargetOID:            targetOID.String(),
-		MergeBaseOID:         mergeBaseOID,
-		ObjectFormat:         objectFormat,
-		ContextPolicyHash:    policyHash,
-		CapturedAt:           capturedAt,
-		BaseEntries:          baseEntries,
-		TargetEntries:        targetEntries,
-		BaseManifestDigest:   baseManifestDigest,
-		TargetManifestDigest: targetManifestDigest,
+		ComparisonKind:      comparisonKind,
+		RequestedComparison: requestedComparison,
+		BaseOID:             baseOID.String(),
+		EffectiveBaseOID:    effectiveBaseOID.String(),
+		MergeBaseOID:        mergeBaseOID,
+		ObjectFormat:        objectFormat,
+		ContextPolicyHash:   policyHash,
+		CapturedAt:          capturedAt,
+		Base: snapshot.TreeState{
+			OID: effectiveBaseOID.String(), Entries: baseEntries, ManifestDigest: baseManifestDigest,
+		},
+		Target: snapshot.TreeState{
+			OID: targetOID.String(), Entries: targetEntries, ManifestDigest: targetManifestDigest,
+		},
 	}
 	capture.Changes = snapshot.BuildChanges(baseEntries, targetEntries)
 	capture.ManifestDigest, err = snapshot.OverallManifestDigest(capture)
@@ -657,30 +658,23 @@ func captureWorktreeAttempt(
 		return snapshot.Capture{}, fmt.Errorf("capture Git worktree: clock returned zero time")
 	}
 	capture := snapshot.Capture{
-		ComparisonKind:         snapshot.ComparisonWorktree,
-		RequestedComparison:    snapshot.WorktreeComparison,
-		BaseOID:                headOID.String(),
-		EffectiveBaseOID:       headOID.String(),
-		TargetOID:              worktreeManifestDigest,
-		IndexOID:               indexIdentity,
-		WorktreeOID:            worktreeManifestDigest,
-		ObjectFormat:           objectFormat,
-		ContextPolicyHash:      policyHash,
-		IgnorePolicy:           worktreeIgnorePolicy,
-		CapturedAt:             capturedAt,
-		BaseEntries:            headEntries,
-		TargetEntries:          worktreeEntries,
-		HeadEntries:            headEntries,
-		IndexEntries:           indexEntries,
-		WorktreeEntries:        worktreeEntries,
-		BaseManifestDigest:     headManifestDigest,
-		TargetManifestDigest:   worktreeManifestDigest,
-		HeadManifestDigest:     headManifestDigest,
-		IndexManifestDigest:    indexManifestDigest,
-		WorktreeManifestDigest: worktreeManifestDigest,
-		Changes:                snapshot.BuildChanges(headEntries, worktreeEntries),
+		ComparisonKind:      snapshot.ComparisonWorktree,
+		RequestedComparison: snapshot.WorktreeComparison,
+		BaseOID:             headOID.String(),
+		EffectiveBaseOID:    headOID.String(),
+		Base:                snapshot.TreeState{OID: headOID.String(), Entries: headEntries, ManifestDigest: headManifestDigest},
+		Target:              snapshot.TreeState{OID: worktreeManifestDigest, Entries: worktreeEntries, ManifestDigest: worktreeManifestDigest},
+		Index:               snapshot.TreeState{OID: indexIdentity, Entries: indexEntries, ManifestDigest: indexManifestDigest},
+		Head:                snapshot.TreeState{OID: headOID.String(), Entries: headEntries, ManifestDigest: headManifestDigest},
+		Worktree: snapshot.TreeState{
+			OID: worktreeManifestDigest, Entries: worktreeEntries, ManifestDigest: worktreeManifestDigest,
+		},
+		ObjectFormat:      objectFormat,
+		ContextPolicyHash: policyHash,
+		IgnorePolicy:      worktreeIgnorePolicy,
+		CapturedAt:        capturedAt,
+		Changes:           snapshot.BuildChanges(headEntries, worktreeEntries),
 	}
-	capture.Layers = capture.ManifestLayers()
 	capture.ManifestDigest, err = snapshot.OverallManifestDigest(capture)
 	if err != nil {
 		return snapshot.Capture{}, err
@@ -993,7 +987,7 @@ func verifyWorktreeStable(ctx context.Context, repository *Repository, capture s
 	if err != nil {
 		return err
 	}
-	if indexIdentity != capture.IndexOID {
+	if indexIdentity != capture.Index.OID {
 		return fmt.Errorf("%w: index changed", ErrTornWorktree)
 	}
 	worktree, err := repository.Git.Worktree()
@@ -1008,7 +1002,7 @@ func verifyWorktreeStable(ctx context.Context, repository *Repository, capture s
 	if err != nil {
 		return fmt.Errorf("re-read Git index: %w", err)
 	}
-	paths, err := worktreeInventory(capture.HeadEntries, currentIndex, status)
+	paths, err := worktreeInventory(capture.Head.Entries, currentIndex, status)
 	if err != nil {
 		return err
 	}
@@ -1024,14 +1018,14 @@ func verifyWorktreeStable(ctx context.Context, repository *Repository, capture s
 			return fmt.Errorf("re-inspect %q: %w", entryPath, err)
 		}
 	}
-	capturedPresent := make(map[string]struct{}, len(capture.WorktreeEntries))
-	for _, entry := range capture.WorktreeEntries {
+	capturedPresent := make(map[string]struct{}, len(capture.Worktree.Entries))
+	for _, entry := range capture.Worktree.Entries {
 		capturedPresent[entry.Path] = struct{}{}
 	}
 	if !samePathSet(currentPresent, capturedPresent) {
 		return fmt.Errorf("%w: working-tree inventory changed", ErrTornWorktree)
 	}
-	for _, entry := range capture.WorktreeEntries {
+	for _, entry := range capture.Worktree.Entries {
 		if err := verifyWorktreeEntry(ctx, repository.Root, entry); err != nil {
 			return err
 		}

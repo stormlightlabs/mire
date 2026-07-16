@@ -639,28 +639,11 @@ func RunChat(ctx context.Context, request ChatTurnRequest, model Model, options 
 		return ChatTurnResult{}, fmt.Errorf("run chat: create run ID: %w", err)
 	}
 	run := ChatRunRecord{
-		Run: RunRecord{
-			ID:          runID,
-			SessionID:   binding.SessionID,
-			RoundID:     binding.RoundID,
-			SnapshotID:  binding.SnapshotID,
-			Role:        ModelRoleChat,
-			Status:      RunStatusQueued,
-			MaxAttempts: options.Retry.MaxAttempts,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-			Provenance: RunProvenance{
-				Adapter:               options.Adapter,
-				Protocol:              options.Protocol,
-				PromptTemplateVersion: options.PromptTemplateVersion,
-				Model:                 options.Model,
-				Parameters:            shared.CloneMap(options.Parameters),
-				InputManifestDigest:   binding.SnapshotDigest,
-				InputDigest:           input.Digest,
-				Redactions:            append([]string(nil), options.Redactions...),
-			},
-		}, UserMessageID: userMessage.ID,
-		Binding: binding, Input: input,
+		Run: newRunRecord(
+			runID, binding.SessionID, binding.RoundID, binding.SnapshotID,
+			ModelRoleChat, "", binding.SnapshotDigest, input.Digest, options.ModelRunOptions, now,
+		),
+		UserMessageID: userMessage.ID, Binding: binding, Input: input,
 	}
 	// The store validates this invariant again, which protects alternate callers
 	// that construct a ChatRunRecord directly.

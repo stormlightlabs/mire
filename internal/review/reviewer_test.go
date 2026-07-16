@@ -75,6 +75,11 @@ func TestRunReviewPassesRetainsDuplicatesAndSeparatesIncompleteOutcomes(t *testi
 	if len(result.Coverage.Passes) != len(passes) {
 		t.Fatalf("coverage passes = %#v, want %d pass outcomes", result.Coverage.Passes, len(passes))
 	}
+	for _, run := range result.Runs {
+		if run.Provenance.InputManifestDigest != change.SnapshotDigest || run.Provenance.InputDigest == "" {
+			t.Fatalf("review run provenance = %#v", run.Provenance)
+		}
+	}
 	wantStatuses := map[string]ReviewPassStatus{
 		"empty": ReviewPassCompleted, "duplicates": ReviewPassCompleted, "failed": ReviewPassFailed,
 		"truncated": ReviewPassTruncated, "unsupported": ReviewPassUnsupported, "skipped": ReviewPassSkipped,

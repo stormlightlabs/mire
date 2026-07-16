@@ -160,10 +160,10 @@ func checkWorktreeDivergence(
 	if current.BaseOID != frozen.BaseOID {
 		report.AffectedRefs = append(report.AffectedRefs, "HEAD")
 	}
-	if current.IndexOID != frozen.IndexOID {
+	if current.Index.OID != frozen.IndexOID {
 		report.AffectedRefs = append(report.AffectedRefs, "index")
 	}
-	if current.WorktreeOID != frozen.TargetOID {
+	if current.Worktree.OID != frozen.TargetOID {
 		report.AffectedRefs = append(report.AffectedRefs, "worktree")
 	}
 	if len(report.AffectedRefs) == 0 {
@@ -205,9 +205,9 @@ func changedPaths(
 	}
 	var currentBase, currentTarget []snapshot.Entry
 	if frozen.Kind == snapshot.ComparisonWorktree {
-		currentBase, currentTarget = current.HeadEntries, current.WorktreeEntries
+		currentBase, currentTarget = current.Head.Entries, current.Worktree.Entries
 	} else {
-		currentBase, currentTarget = current.BaseEntries, current.TargetEntries
+		currentBase, currentTarget = current.Base.Entries, current.Target.Entries
 	}
 	paths := make(map[string]struct{})
 	for _, path := range changedEntryPaths(oldBase, currentBase) {

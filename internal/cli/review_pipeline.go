@@ -332,54 +332,42 @@ func captureFromStore(ctx context.Context, store *db.RepositoryStore, persisted 
 		return snapshot.Capture{}, fmt.Errorf("read snapshot changes: %w", err)
 	}
 	capture := snapshot.Capture{
-		ComparisonKind:       persisted.Kind,
-		RequestedComparison:  persisted.RequestedComparison,
-		BaseOID:              persisted.BaseOID,
-		EffectiveBaseOID:     persisted.EffectiveBaseOID,
-		TargetOID:            persisted.TargetOID,
-		MergeBaseOID:         persisted.MergeBaseOID,
-		IndexOID:             persisted.IndexOID,
-		WorktreeOID:          persisted.TargetOID,
-		ObjectFormat:         persisted.ObjectFormat,
-		ContextPolicyHash:    persisted.ContextPolicyHash,
-		IgnorePolicy:         persisted.IgnorePolicy,
-		CapturedAt:           persisted.CreatedAt,
-		BaseEntries:          base,
-		TargetEntries:        target,
-		Changes:              changes,
-		BaseManifestDigest:   persisted.BaseManifestDigest,
-		TargetManifestDigest: persisted.TargetManifestDigest,
-		ManifestDigest:       persisted.ManifestDigest,
-		Layers:               make([]snapshot.Layer, 0, len(persisted.Layers)),
+		ComparisonKind:      persisted.Kind,
+		RequestedComparison: persisted.RequestedComparison,
+		BaseOID:             persisted.BaseOID,
+		EffectiveBaseOID:    persisted.EffectiveBaseOID,
+		MergeBaseOID:        persisted.MergeBaseOID,
+		ObjectFormat:        persisted.ObjectFormat,
+		ContextPolicyHash:   persisted.ContextPolicyHash,
+		IgnorePolicy:        persisted.IgnorePolicy,
+		CapturedAt:          persisted.CreatedAt,
+		Base: snapshot.TreeState{
+			OID: persisted.EffectiveBaseOID, Entries: base, ManifestDigest: persisted.BaseManifestDigest,
+		},
+		Target: snapshot.TreeState{
+			OID: persisted.TargetOID, Entries: target, ManifestDigest: persisted.TargetManifestDigest,
+		},
+		Changes:        changes,
+		ManifestDigest: persisted.ManifestDigest,
 	}
 	if persisted.Kind == snapshot.ComparisonWorktree {
-		capture.HeadEntries = append([]snapshot.Entry(nil), base...)
-		capture.WorktreeEntries = append([]snapshot.Entry(nil), target...)
-		capture.IndexEntries, err = readEntries(snapshot.TreeSideIndex)
+		capture.Base.OID = persisted.EffectiveBaseOID
+		capture.Head.OID = persisted.BaseOID
+		capture.Head.Entries = append([]snapshot.Entry(nil), base...)
+		capture.Worktree.Entries = append([]snapshot.Entry(nil), target...)
+		capture.Worktree.OID = persisted.TargetOID
+		capture.Index.OID = persisted.IndexOID
+		capture.Index.Entries, err = readEntries(snapshot.TreeSideIndex)
 		if err != nil {
 			return snapshot.Capture{}, fmt.Errorf("read snapshot index entries: %w", err)
 		}
-		capture.HeadManifestDigest = persisted.BaseManifestDigest
-		capture.WorktreeManifestDigest = persisted.TargetManifestDigest
+		capture.Head.ManifestDigest = persisted.BaseManifestDigest
+		capture.Worktree.ManifestDigest = persisted.TargetManifestDigest
 		for _, layer := range persisted.Layers {
 			if layer.Layer == snapshot.TreeSideIndex {
-				capture.IndexManifestDigest = layer.ManifestDigest
+				capture.Index.ManifestDigest = layer.ManifestDigest
 			}
-			capture.Layers = append(
-				capture.Layers,
-				snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest},
-			)
 		}
-	} else {
-		for _, layer := range persisted.Layers {
-			capture.Layers = append(
-				capture.Layers,
-				snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest},
-			)
-		}
-	}
-	if len(capture.Layers) == 0 {
-		capture.Layers = capture.ManifestLayers()
 	}
 	if err := capture.Validate(); err != nil {
 		return snapshot.Capture{}, fmt.Errorf("validate stored snapshot: %w", err)
@@ -400,7 +388,7 @@ func (retriever snapshotRetriever) Retrieve(
 	if pathName == "" || retriever.objectStore == nil {
 		return nil, nil
 	}
-	entries := append([]snapshot.Entry(nil), retriever.capture.TargetEntries...)
+	entries := append([]snapshot.Entry(nil), retriever.capture.Target.Entries...)
 	for _, entry := range entries {
 		if entry.Path != pathName || entry.ContentDigest == "" {
 			continue

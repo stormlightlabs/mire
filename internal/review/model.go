@@ -292,7 +292,7 @@ func Assemble(ctx context.Context, input Input) (ChangeModel, error) {
 		return ChangeModel{}, err
 	}
 	capture := input.Snapshot
-	changes := snapshot.BuildChanges(capture.BaseEntries, capture.TargetEntries)
+	changes := snapshot.BuildChanges(capture.Base.Entries, capture.Target.Entries)
 	if !sameChanges(changes, capture.Changes) {
 		return ChangeModel{}, fmt.Errorf("assemble review model: snapshot changes do not match manifests")
 	}
@@ -363,8 +363,8 @@ func validateInput(input Input) error {
 		entries  []snapshot.Entry
 		expected string
 	}{
-		{name: snapshot.TreeSideBase, entries: input.Snapshot.BaseEntries, expected: input.Snapshot.BaseManifestDigest},
-		{name: snapshot.TreeSideTarget, entries: input.Snapshot.TargetEntries, expected: input.Snapshot.TargetManifestDigest},
+		{name: snapshot.TreeSideBase, entries: input.Snapshot.Base.Entries, expected: input.Snapshot.Base.ManifestDigest},
+		{name: snapshot.TreeSideTarget, entries: input.Snapshot.Target.Entries, expected: input.Snapshot.Target.ManifestDigest},
 	} {
 		digest, err := snapshot.ManifestDigest(manifest.entries)
 		if err != nil || digest != manifest.expected {
@@ -377,9 +377,9 @@ func validateInput(input Input) error {
 			entries  []snapshot.Entry
 			expected string
 		}{
-			{name: snapshot.TreeSideHead, entries: input.Snapshot.HeadEntries, expected: input.Snapshot.HeadManifestDigest},
-			{name: snapshot.TreeSideIndex, entries: input.Snapshot.IndexEntries, expected: input.Snapshot.IndexManifestDigest},
-			{name: snapshot.TreeSideWorktree, entries: input.Snapshot.WorktreeEntries, expected: input.Snapshot.WorktreeManifestDigest},
+			{name: snapshot.TreeSideHead, entries: input.Snapshot.Head.Entries, expected: input.Snapshot.Head.ManifestDigest},
+			{name: snapshot.TreeSideIndex, entries: input.Snapshot.Index.Entries, expected: input.Snapshot.Index.ManifestDigest},
+			{name: snapshot.TreeSideWorktree, entries: input.Snapshot.Worktree.Entries, expected: input.Snapshot.Worktree.ManifestDigest},
 		} {
 			digest, err := snapshot.ManifestDigest(manifest.entries)
 			if err != nil || digest != manifest.expected {
@@ -411,13 +411,13 @@ func normalizeGit(gitMetadata PinnedGit, capture snapshot.Capture) (PinnedGit, e
 		gitMetadata.EffectiveBaseOID = capture.EffectiveBaseOID
 	}
 	if gitMetadata.TargetOID == "" {
-		gitMetadata.TargetOID = capture.TargetOID
+		gitMetadata.TargetOID = capture.Target.OID
 	}
 	if gitMetadata.MergeBaseOID == "" {
 		gitMetadata.MergeBaseOID = capture.MergeBaseOID
 	}
 	if gitMetadata.ObjectFormat != capture.ObjectFormat || gitMetadata.EffectiveBaseOID != capture.EffectiveBaseOID ||
-		gitMetadata.TargetOID != capture.TargetOID {
+		gitMetadata.TargetOID != capture.Target.OID {
 		return PinnedGit{}, fmt.Errorf("assemble review model: pinned Git metadata does not match snapshot")
 	}
 	commits := append([]PinnedCommit(nil), gitMetadata.Commits...)
@@ -616,8 +616,8 @@ func assembleFiles(
 	capture snapshot.Capture,
 	content ContentReader,
 ) ([]FileChange, []AffectedSurface, error) {
-	baseByPath := entriesByPath(capture.BaseEntries)
-	targetByPath := entriesByPath(capture.TargetEntries)
+	baseByPath := entriesByPath(capture.Base.Entries)
+	targetByPath := entriesByPath(capture.Target.Entries)
 	files := make([]FileChange, 0)
 	for _, change := range capture.Changes {
 		if change.Status == snapshot.ChangeUnchanged {

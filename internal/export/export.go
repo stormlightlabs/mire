@@ -760,53 +760,41 @@ func captureFromStore(ctx context.Context, store *db.RepositoryStore, persisted 
 		return snapshot.Capture{}, err
 	}
 	capture := snapshot.Capture{
-		ComparisonKind:       persisted.Kind,
-		RequestedComparison:  persisted.RequestedComparison,
-		BaseOID:              persisted.BaseOID,
-		EffectiveBaseOID:     persisted.EffectiveBaseOID,
-		TargetOID:            persisted.TargetOID,
-		MergeBaseOID:         persisted.MergeBaseOID,
-		IndexOID:             persisted.IndexOID,
-		ObjectFormat:         persisted.ObjectFormat,
-		ContextPolicyHash:    persisted.ContextPolicyHash,
-		IgnorePolicy:         persisted.IgnorePolicy,
-		CapturedAt:           persisted.CreatedAt,
-		BaseEntries:          base,
-		TargetEntries:        target,
-		Changes:              changes,
-		BaseManifestDigest:   persisted.BaseManifestDigest,
-		TargetManifestDigest: persisted.TargetManifestDigest,
-		ManifestDigest:       persisted.ManifestDigest,
-		Layers:               []snapshot.Layer{},
+		ComparisonKind:      persisted.Kind,
+		RequestedComparison: persisted.RequestedComparison,
+		BaseOID:             persisted.BaseOID,
+		EffectiveBaseOID:    persisted.EffectiveBaseOID,
+		MergeBaseOID:        persisted.MergeBaseOID,
+		ObjectFormat:        persisted.ObjectFormat,
+		ContextPolicyHash:   persisted.ContextPolicyHash,
+		IgnorePolicy:        persisted.IgnorePolicy,
+		CapturedAt:          persisted.CreatedAt,
+		Base: snapshot.TreeState{
+			OID: persisted.EffectiveBaseOID, Entries: base, ManifestDigest: persisted.BaseManifestDigest,
+		},
+		Target: snapshot.TreeState{
+			OID: persisted.TargetOID, Entries: target, ManifestDigest: persisted.TargetManifestDigest,
+		},
+		Changes:        changes,
+		ManifestDigest: persisted.ManifestDigest,
 	}
 	if persisted.Kind == snapshot.ComparisonWorktree {
-		capture.WorktreeOID = persisted.TargetOID
-		capture.HeadEntries = append([]snapshot.Entry(nil), base...)
-		capture.WorktreeEntries = append([]snapshot.Entry(nil), target...)
-		capture.IndexEntries, err = read(snapshot.TreeSideIndex)
+		capture.Base.OID = persisted.EffectiveBaseOID
+		capture.Head.OID = persisted.BaseOID
+		capture.Head.Entries = append([]snapshot.Entry(nil), base...)
+		capture.Index.OID = persisted.IndexOID
+		capture.Worktree.Entries = append([]snapshot.Entry(nil), target...)
+		capture.Worktree.OID = persisted.TargetOID
+		capture.Index.Entries, err = read(snapshot.TreeSideIndex)
 		if err != nil {
 			return snapshot.Capture{}, err
 		}
-		capture.HeadManifestDigest, capture.WorktreeManifestDigest = persisted.BaseManifestDigest, persisted.TargetManifestDigest
+		capture.Head.ManifestDigest, capture.Worktree.ManifestDigest = persisted.BaseManifestDigest, persisted.TargetManifestDigest
 		for _, layer := range persisted.Layers {
-			capture.Layers = append(
-				capture.Layers,
-				snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest},
-			)
 			if layer.Layer == snapshot.TreeSideIndex {
-				capture.IndexManifestDigest = layer.ManifestDigest
+				capture.Index.ManifestDigest = layer.ManifestDigest
 			}
 		}
-	} else {
-		for _, layer := range persisted.Layers {
-			capture.Layers = append(
-				capture.Layers,
-				snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest},
-			)
-		}
-	}
-	if len(capture.Layers) == 0 {
-		capture.Layers = capture.ManifestLayers()
 	}
 	if err := capture.Validate(); err != nil {
 		return snapshot.Capture{}, err

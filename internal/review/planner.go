@@ -174,7 +174,7 @@ type RunProvenance struct {
 	TerminationCause      string         `json:"termination_cause,omitempty"`
 }
 
-// RunRecord is the durable provider-neutral record for one planner run.
+// RunRecord is the durable provider-neutral record for one model run.
 type RunRecord struct {
 	ID          string        `json:"id"`
 	SessionID   string        `json:"session_id"`
@@ -191,6 +191,40 @@ type RunRecord struct {
 	StartedAt   time.Time     `json:"started_at"`
 	FinishedAt  time.Time     `json:"finished_at"`
 	Provenance  RunProvenance `json:"provenance"`
+}
+
+func newRunProvenance(options ModelRunOptions, inputManifestDigest, inputDigest string) RunProvenance {
+	return RunProvenance{
+		Adapter:               options.Adapter,
+		Protocol:              options.Protocol,
+		PromptTemplateVersion: options.PromptTemplateVersion,
+		Model:                 options.Model,
+		Parameters:            shared.CloneMap(options.Parameters),
+		InputManifestDigest:   inputManifestDigest,
+		InputDigest:           inputDigest,
+		Redactions:            append([]string(nil), options.Redactions...),
+	}
+}
+
+// newRunRecord constructs the common queued model-run projection. Callers must
+// provide the role-specific input digest and pass name so provenance cannot be
+// silently incomplete or attributed to the wrong review pass.
+func newRunRecord(
+	id, sessionID, roundID, snapshotID string,
+	role ModelRole,
+	passName string,
+	inputManifestDigest string,
+	inputDigest string,
+	options ModelRunOptions,
+	now time.Time,
+) RunRecord {
+	now = now.UTC()
+	return RunRecord{
+		ID: id, SessionID: sessionID, RoundID: roundID, SnapshotID: snapshotID,
+		Role: role, PassName: passName, Status: RunStatusQueued,
+		MaxAttempts: options.Retry.MaxAttempts, CreatedAt: now, UpdatedAt: now,
+		Provenance: newRunProvenance(options, inputManifestDigest, inputDigest),
+	}
 }
 
 // PlanStore persists planner runs and their resulting plans. Implementations
@@ -340,17 +374,10 @@ func RunPlanner(ctx context.Context, change ChangeModel, model Model, options Pl
 	if err != nil {
 		return PlannerResult{}, err
 	}
-	run := RunRecord{
-		ID: runID, SessionID: change.SessionID, RoundID: options.RoundID, SnapshotID: change.SnapshotID,
-		Role: ModelRolePlanner, Status: RunStatusQueued, MaxAttempts: options.Retry.MaxAttempts,
-		CreatedAt: now, UpdatedAt: now,
-		Provenance: RunProvenance{
-			Adapter: options.Adapter, Protocol: options.Protocol,
-			PromptTemplateVersion: options.PromptTemplateVersion, Model: options.Model,
-			Parameters: shared.CloneMap(options.Parameters), InputManifestDigest: change.SnapshotDigest,
-			InputDigest: input.InputDigest, Redactions: append([]string(nil), options.Redactions...),
-		},
-	}
+	run := newRunRecord(
+		runID, change.SessionID, options.RoundID, change.SnapshotID,
+		ModelRolePlanner, "", change.SnapshotDigest, input.InputDigest, options.ModelRunOptions, now,
+	)
 	if options.Store != nil {
 		run, err = options.Store.CreatePlanRun(ctx, run)
 		if err != nil {

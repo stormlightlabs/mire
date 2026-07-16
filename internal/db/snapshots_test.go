@@ -139,8 +139,8 @@ func TestAppendCapturedRoundPreserves(t *testing.T) {
 
 	secondCapture := testCapture(t)
 	secondCapture.CapturedAt = secondCapture.CapturedAt.Add(time.Minute)
-	secondCapture.TargetOID = "target-two"
-	secondCapture.TargetManifestDigest, err = snapshot.ManifestDigest(secondCapture.TargetEntries)
+	secondCapture.Target.OID = "target-two"
+	secondCapture.Target.ManifestDigest, err = snapshot.ManifestDigest(secondCapture.Target.Entries)
 	if err != nil {
 		t.Fatalf("ManifestDigest() error = %v", err)
 	}
@@ -237,20 +237,19 @@ func testCapture(t *testing.T) snapshot.Capture {
 	capture := snapshot.Capture{
 		RequestedComparison: "base..target",
 		EffectiveBaseOID:    "base-oid",
-		TargetOID:           "target-oid",
 		ObjectFormat:        "sha1",
 		ContextPolicyHash:   snapshot.DefaultContextPolicyHash(),
 		CapturedAt:          time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC),
-		BaseEntries:         baseEntries,
-		TargetEntries:       targetEntries,
+		Base:                snapshot.TreeState{OID: "base-oid", Entries: baseEntries},
+		Target:              snapshot.TreeState{OID: "target-oid", Entries: targetEntries},
 		Changes:             snapshot.BuildChanges(baseEntries, targetEntries),
 	}
 	var err error
-	capture.BaseManifestDigest, err = snapshot.ManifestDigest(baseEntries)
+	capture.Base.ManifestDigest, err = snapshot.ManifestDigest(baseEntries)
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture.TargetManifestDigest, err = snapshot.ManifestDigest(targetEntries)
+	capture.Target.ManifestDigest, err = snapshot.ManifestDigest(targetEntries)
 	if err != nil {
 		t.Fatal(err)
 	}

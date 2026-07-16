@@ -47,23 +47,16 @@ func TestBuildAndRenderAreDeterministicAndDoNotEmbedSnapshotContent(t *testing.T
 	baseDigest, _ := snapshot.ManifestDigest(baseEntries)
 	targetDigest, _ := snapshot.ManifestDigest(targetEntries)
 	capture := snapshot.Capture{
-		ComparisonKind:       snapshot.ComparisonTwoDot,
-		RequestedComparison:  "base..target",
-		BaseOID:              "base",
-		EffectiveBaseOID:     "base",
-		TargetOID:            "target",
-		ObjectFormat:         "sha256",
-		ContextPolicyHash:    snapshot.DefaultContextPolicyHash(),
-		CapturedAt:           time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC),
-		BaseEntries:          baseEntries,
-		TargetEntries:        targetEntries,
-		Changes:              changes,
-		BaseManifestDigest:   baseDigest,
-		TargetManifestDigest: targetDigest,
-		Layers: []snapshot.Layer{
-			{Name: snapshot.TreeSideBase, Identity: "base", ManifestDigest: baseDigest},
-			{Name: snapshot.TreeSideTarget, Identity: "target", ManifestDigest: targetDigest},
-		},
+		ComparisonKind:      snapshot.ComparisonTwoDot,
+		RequestedComparison: "base..target",
+		BaseOID:             "base",
+		EffectiveBaseOID:    "base",
+		ObjectFormat:        "sha256",
+		ContextPolicyHash:   snapshot.DefaultContextPolicyHash(),
+		CapturedAt:          time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC),
+		Base:                snapshot.TreeState{OID: "base", Entries: baseEntries, ManifestDigest: baseDigest},
+		Target:              snapshot.TreeState{OID: "target", Entries: targetEntries, ManifestDigest: targetDigest},
+		Changes:             changes,
 	}
 	capture.ManifestDigest, err = snapshot.OverallManifestDigest(capture)
 	if err != nil {
@@ -98,7 +91,7 @@ func TestBuildAndRenderAreDeterministicAndDoNotEmbedSnapshotContent(t *testing.T
 			digestErr,
 			persisted,
 			persisted.ManifestDigest,
-			reconstructed.Layers,
+			reconstructed.ManifestLayers(),
 		)
 	}
 	value, err := Build(ctx, store, session, round, objects)

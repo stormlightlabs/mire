@@ -68,35 +68,34 @@ type Layer struct {
 	ManifestDigest string `json:"manifest_digest"`
 }
 
+// TreeState is one complete immutable tree represented by a capture.
+// Entries and ManifestDigest describe the same tree identified by OID.
+type TreeState struct {
+	OID            string
+	Entries        []Entry
+	ManifestDigest string
+}
+
 // Capture is the in-memory result of a successful Git capture.
 //
 // It is safe to persist only after every non-submodule entry has a verified ContentDigest.
 type Capture struct {
-	ComparisonKind         string
-	RequestedComparison    string
-	BaseOID                string
-	EffectiveBaseOID       string
-	TargetOID              string
-	MergeBaseOID           string
-	IndexOID               string
-	WorktreeOID            string
-	ObjectFormat           string
-	ContextPolicyHash      string
-	IgnorePolicy           string
-	CapturedAt             time.Time
-	BaseEntries            []Entry
-	TargetEntries          []Entry
-	HeadEntries            []Entry
-	IndexEntries           []Entry
-	WorktreeEntries        []Entry
-	Changes                []Change
-	BaseManifestDigest     string
-	TargetManifestDigest   string
-	HeadManifestDigest     string
-	IndexManifestDigest    string
-	WorktreeManifestDigest string
-	ManifestDigest         string
-	Layers                 []Layer
+	ComparisonKind      string
+	RequestedComparison string
+	BaseOID             string
+	EffectiveBaseOID    string
+	MergeBaseOID        string
+	ObjectFormat        string
+	ContextPolicyHash   string
+	IgnorePolicy        string
+	CapturedAt          time.Time
+	Base                TreeState
+	Target              TreeState
+	Head                TreeState
+	Index               TreeState
+	Worktree            TreeState
+	Changes             []Change
+	ManifestDigest      string
 }
 
 // DefaultContextPolicyHash is the recorded hash for the built-in capture policy.
@@ -122,8 +121,11 @@ func (capture Capture) Validate() error {
 			capture.RequestedComparison,
 		)
 	}
-	if strings.TrimSpace(capture.EffectiveBaseOID) == "" || strings.TrimSpace(capture.TargetOID) == "" {
+	if strings.TrimSpace(capture.EffectiveBaseOID) == "" || strings.TrimSpace(capture.Target.OID) == "" {
 		return fmt.Errorf("snapshot capture: resolved object IDs are incomplete")
+	}
+	if capture.Base.OID != capture.EffectiveBaseOID {
+		return fmt.Errorf("snapshot capture: base tree identity does not match effective base")
 	}
 	if comparisonKind == ComparisonThreeDot {
 		if strings.TrimSpace(capture.BaseOID) == "" || strings.TrimSpace(capture.MergeBaseOID) == "" {
@@ -139,40 +141,61 @@ func (capture Capture) Validate() error {
 	if strings.TrimSpace(capture.ContextPolicyHash) == "" {
 		return fmt.Errorf("snapshot capture: context policy hash is empty")
 	}
-	if comparisonKind == ComparisonWorktree && strings.TrimSpace(capture.IndexOID) == "" {
+	if comparisonKind == ComparisonWorktree && strings.TrimSpace(capture.Index.OID) == "" {
 		return fmt.Errorf("snapshot capture: working-tree index identity is empty")
 	}
 	if capture.CapturedAt.IsZero() {
 		return fmt.Errorf("snapshot capture: capture time is zero")
 	}
-	for side, entries := range map[string][]Entry{
-		TreeSideBase: capture.BaseEntries, TreeSideTarget: capture.TargetEntries,
+	for side, tree := range map[string]TreeState{
+		TreeSideBase: capture.Base, TreeSideTarget: capture.Target,
 	} {
-		if err := validateEntries(side, entries); err != nil {
+		if err := validateEntries(side, tree.Entries); err != nil {
 			return err
 		}
 	}
 	if comparisonKind == ComparisonWorktree {
-		for side, entries := range map[string][]Entry{
-			TreeSideHead: capture.HeadEntries, TreeSideIndex: capture.IndexEntries,
-			TreeSideWorktree: capture.WorktreeEntries,
+		if strings.TrimSpace(capture.Head.OID) == "" || strings.TrimSpace(capture.Worktree.OID) == "" {
+			return fmt.Errorf("snapshot capture: working-tree layer identities are incomplete")
+		}
+		if !sameTreeState(capture.Base, capture.Head) {
+			return fmt.Errorf("snapshot capture: base and head tree states disagree")
+		}
+		if !sameTreeState(capture.Target, capture.Worktree) {
+			return fmt.Errorf("snapshot capture: target and worktree tree states disagree")
+		}
+		for side, tree := range map[string]TreeState{
+			TreeSideHead: capture.Head, TreeSideIndex: capture.Index,
+			TreeSideWorktree: capture.Worktree,
 		} {
-			if err := validateEntries(side, entries); err != nil {
+			if err := validateEntries(side, tree.Entries); err != nil {
 				return err
 			}
 		}
-		if capture.HeadManifestDigest == "" || capture.IndexManifestDigest == "" ||
-			capture.WorktreeManifestDigest == "" {
+		if capture.Head.ManifestDigest == "" || capture.Index.ManifestDigest == "" ||
+			capture.Worktree.ManifestDigest == "" {
 			return fmt.Errorf("snapshot capture: working-tree layer manifest digests are incomplete")
 		}
-		if capture.WorktreeOID != "" && capture.WorktreeOID != capture.WorktreeManifestDigest {
+		if capture.Worktree.OID != "" && capture.Worktree.OID != capture.Worktree.ManifestDigest {
 			return fmt.Errorf("snapshot capture: working-tree identity does not match its manifest")
 		}
 	}
-	if capture.BaseManifestDigest == "" || capture.TargetManifestDigest == "" || capture.ManifestDigest == "" {
+	if capture.Base.ManifestDigest == "" || capture.Target.ManifestDigest == "" || capture.ManifestDigest == "" {
 		return fmt.Errorf("snapshot capture: manifest digests are incomplete")
 	}
 	return nil
+}
+
+func sameTreeState(left, right TreeState) bool {
+	if left.OID != right.OID || left.ManifestDigest != right.ManifestDigest || len(left.Entries) != len(right.Entries) {
+		return false
+	}
+	for index := range left.Entries {
+		if left.Entries[index] != right.Entries[index] {
+			return false
+		}
+	}
+	return true
 }
 
 // ComparisonKindForComparison identifies the committed comparison syntax in a requested range.
@@ -310,27 +333,24 @@ func OverallManifestDigest(capture Capture) (string, error) {
 		}
 		return changes[i].TargetPath < changes[j].TargetPath
 	})
-	layers := append([]Layer(nil), capture.Layers...)
-	if len(layers) == 0 {
-		layers = capture.ManifestLayers()
-	}
+	layers := capture.ManifestLayers()
 	encoded, err := json.Marshal(manifest{
 		ComparisonKind:         comparisonKind,
 		RequestedComparison:    capture.RequestedComparison,
 		BaseOID:                baseOID,
 		EffectiveBaseOID:       capture.EffectiveBaseOID,
-		TargetOID:              capture.TargetOID,
+		TargetOID:              capture.Target.OID,
 		MergeBaseOID:           capture.MergeBaseOID,
-		IndexOID:               capture.IndexOID,
-		WorktreeOID:            capture.WorktreeOID,
+		IndexOID:               capture.Index.OID,
+		WorktreeOID:            capture.Worktree.OID,
 		ObjectFormat:           capture.ObjectFormat,
 		ContextPolicyHash:      capture.ContextPolicyHash,
 		IgnorePolicy:           capture.IgnorePolicy,
-		BaseManifestDigest:     capture.BaseManifestDigest,
-		TargetManifestDigest:   capture.TargetManifestDigest,
-		HeadManifestDigest:     capture.HeadManifestDigest,
-		IndexManifestDigest:    capture.IndexManifestDigest,
-		WorktreeManifestDigest: capture.WorktreeManifestDigest,
+		BaseManifestDigest:     capture.Base.ManifestDigest,
+		TargetManifestDigest:   capture.Target.ManifestDigest,
+		HeadManifestDigest:     capture.Head.ManifestDigest,
+		IndexManifestDigest:    capture.Index.ManifestDigest,
+		WorktreeManifestDigest: capture.Worktree.ManifestDigest,
 		Changes:                changes,
 		Layers:                 layers,
 	})
@@ -346,14 +366,14 @@ func (capture Capture) ManifestLayers() []Layer {
 	if capture.ComparisonKind == ComparisonWorktree ||
 		strings.EqualFold(capture.RequestedComparison, WorktreeComparison) {
 		return []Layer{
-			{Name: TreeSideHead, Identity: capture.BaseOID, ManifestDigest: capture.HeadManifestDigest},
-			{Name: TreeSideIndex, Identity: capture.IndexOID, ManifestDigest: capture.IndexManifestDigest},
-			{Name: TreeSideWorktree, Identity: capture.WorktreeOID, ManifestDigest: capture.WorktreeManifestDigest},
+			{Name: TreeSideHead, Identity: capture.Head.OID, ManifestDigest: capture.Head.ManifestDigest},
+			{Name: TreeSideIndex, Identity: capture.Index.OID, ManifestDigest: capture.Index.ManifestDigest},
+			{Name: TreeSideWorktree, Identity: capture.Worktree.OID, ManifestDigest: capture.Worktree.ManifestDigest},
 		}
 	}
 	return []Layer{
-		{Name: TreeSideBase, Identity: capture.EffectiveBaseOID, ManifestDigest: capture.BaseManifestDigest},
-		{Name: TreeSideTarget, Identity: capture.TargetOID, ManifestDigest: capture.TargetManifestDigest},
+		{Name: TreeSideBase, Identity: capture.Base.OID, ManifestDigest: capture.Base.ManifestDigest},
+		{Name: TreeSideTarget, Identity: capture.Target.OID, ManifestDigest: capture.Target.ManifestDigest},
 	}
 }
 

@@ -21,20 +21,20 @@ the change explicitly includes a compatible migration.
   copies, and redactions in one place. Let each role supply its own prompt
   template version and role-specific budgets, retriever, store, and round data.
 
-- [ ] Centralize `RunRecord` and `RunProvenance` construction. Planner,
+- [x] Centralize `RunRecord` and `RunProvenance` construction. Planner,
   reviewer, verifier, and chat currently assemble the same identity, timestamps,
   retry count, provider metadata, parameters, manifest digest, and redactions.
   A constructor should require the role-specific input digest and pass name
   rather than filling them implicitly.
 
-- [ ] Group the repeated tree state in `snapshot.Capture`. Define a named type
+- [x] Group the repeated tree state in `snapshot.Capture`. Define a named type
   containing an OID, entries, and manifest digest, then use named `Base`,
   `Target`, `Head`, `Index`, and `Worktree` fields. Keep comparison-wide values
   such as the requested comparison, effective base, merge base, object format,
   policy hashes, capture time, changes, and overall manifest digest on
   `Capture`.
 
-- [ ] Reconcile `snapshot.Capture.Layers` with the proposed named tree fields.
+- [x] Reconcile `snapshot.Capture.Layers` with the proposed named tree fields.
   There should be one authoritative representation of layer identity and
   manifest metadata. Derived layer lists should be built deterministically
   instead of allowing the named fields and `Layers` slice to disagree.

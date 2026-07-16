@@ -392,36 +392,11 @@ func runOneReviewPass(
 	if budget.Timeout <= 0 {
 		budget.Timeout = opts.Retry.Timeout
 	}
-	run := RunRecord{
-		ID: runID, SessionID: change.SessionID, RoundID: opts.RoundID,
-		SnapshotID: change.SnapshotID, Role: ModelRoleReviewer, PassName: planned.Name,
-		Status: RunStatusQueued, MaxAttempts: opts.Retry.MaxAttempts, CreatedAt: now, UpdatedAt: now,
-		Provenance: RunProvenance{
-			Adapter: opts.Adapter, Protocol: opts.Protocol,
-			PromptTemplateVersion: opts.PromptTemplateVersion, Model: opts.Model,
-			Parameters: shared.CloneMap(opts.Parameters), InputManifestDigest: change.SnapshotDigest,
-			Redactions: append([]string(nil), opts.Redactions...),
-		},
-	}
-	if opts.Store != nil {
-		run, err = opts.Store.CreateReviewRun(ctx, run)
-		if err != nil {
-			return ReviewPassResult{}, fmt.Errorf("run review pass: create run: %w", err)
-		}
-	}
-	setRunStatus(&run, RunStatusRunning, now, "")
-	if opts.Store != nil {
-		if err := opts.Store.UpdateReviewRun(ctx, run); err != nil {
-			return ReviewPassResult{}, fmt.Errorf("run review pass: mark running: %w", err)
-		}
-	}
-	pass.RunID = run.ID
-
 	artifacts, retrievalDiagnostics, retrievalTruncated := retrievePassArtifacts(
 		ctx,
 		change,
 		planned.Name,
-		run.ID,
+		runID,
 		opts.Retriever,
 		budget,
 		now,
@@ -459,11 +434,28 @@ func runOneReviewPass(
 		coverage.Gaps = append(coverage.Gaps, fmt.Sprintf("Pass %s reached its retrieval budget.", planned.Name))
 	}
 
-	request, err := reviewerRequest(change, planned.Name, artifacts, run, opts)
+	request, err := reviewerRequest(change, planned.Name, artifacts, runID, opts)
 	if err != nil {
-		return finishReviewPass(ctx, change, planned, opts, coverage, pass, run, artifacts, diagnostics,
+		return finishReviewPass(ctx, change, planned, opts, coverage, pass, RunRecord{}, artifacts, diagnostics,
 			&ReviewRunError{Status: RunStatusFailed, Cause: "request_error", Err: err})
 	}
+	run := newRunRecord(
+		runID, change.SessionID, opts.RoundID, change.SnapshotID,
+		ModelRoleReviewer, planned.Name, change.SnapshotDigest, request.InputDigest, opts.ModelRunOptions, now,
+	)
+	if opts.Store != nil {
+		run, err = opts.Store.CreateReviewRun(ctx, run)
+		if err != nil {
+			return ReviewPassResult{}, fmt.Errorf("run review pass: create run: %w", err)
+		}
+	}
+	setRunStatus(&run, RunStatusRunning, now, "")
+	if opts.Store != nil {
+		if err := opts.Store.UpdateReviewRun(ctx, run); err != nil {
+			return ReviewPassResult{}, fmt.Errorf("run review pass: mark running: %w", err)
+		}
+	}
+	pass.RunID = run.ID
 	var previousOutput string
 	repairCount := 0
 	for attempt := 1; attempt <= opts.Retry.MaxAttempts; attempt++ {
@@ -739,7 +731,7 @@ func reviewerRequest(
 	change ChangeModel,
 	passName string,
 	artifacts []RetrievedArtifact,
-	run RunRecord,
+	runID string,
 	opts ReviewerOpts,
 ) (ModelRequest, error) {
 	modelJSON, err := CanonicalJSON(change)
@@ -769,7 +761,7 @@ func reviewerRequest(
 		Model    string
 		Params   map[string]any
 		RunID    string
-	}{ModelRoleReviewer, passName, messages, StructuredOutput{Schema: ReviewCandidateSchemaVersion}, opts.Model, opts.Parameters, run.ID})
+	}{ModelRoleReviewer, passName, messages, StructuredOutput{Schema: ReviewCandidateSchemaVersion}, opts.Model, opts.Parameters, runID})
 	if err != nil {
 		return ModelRequest{}, fmt.Errorf("run review pass: digest request: %w", err)
 	}

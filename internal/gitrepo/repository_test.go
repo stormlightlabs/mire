@@ -66,47 +66,47 @@ func TestCaptureWorktreePreservesHeadIndexAndFinalLayers(t *testing.T) {
 		captured.RequestedComparison != snapshot.WorktreeComparison {
 		t.Fatalf("comparison = %#v", captured)
 	}
-	if captured.BaseOID == "" || captured.IndexOID == "" || captured.WorktreeOID == "" ||
-		captured.BaseOID == captured.IndexOID ||
-		captured.IndexOID == captured.WorktreeOID {
+	if captured.BaseOID == "" || captured.Index.OID == "" || captured.Worktree.OID == "" ||
+		captured.BaseOID == captured.Index.OID ||
+		captured.Index.OID == captured.Worktree.OID {
 		t.Fatalf(
 			"layer identities = head %q index %q worktree %q",
 			captured.BaseOID,
-			captured.IndexOID,
-			captured.WorktreeOID,
+			captured.Index.OID,
+			captured.Worktree.OID,
 		)
 	}
-	if len(captured.HeadEntries) != 5 || len(captured.IndexEntries) != 5 {
-		t.Fatalf("head/index entry counts = %d/%d, want 5/5", len(captured.HeadEntries), len(captured.IndexEntries))
+	if len(captured.Head.Entries) != 5 || len(captured.Index.Entries) != 5 {
+		t.Fatalf("head/index entry counts = %d/%d, want 5/5", len(captured.Head.Entries), len(captured.Index.Entries))
 	}
-	if findEntry(captured.WorktreeEntries, "ignored.log").Path != "" ||
-		findEntry(captured.WorktreeEntries, "ignored/nested.txt").Path != "" {
-		t.Fatalf("ignored entries were captured: %#v", captured.WorktreeEntries)
+	if findEntry(captured.Worktree.Entries, "ignored.log").Path != "" ||
+		findEntry(captured.Worktree.Entries, "ignored/nested.txt").Path != "" {
+		t.Fatalf("ignored entries were captured: %#v", captured.Worktree.Entries)
 	}
-	if findEntry(captured.WorktreeEntries, "new name-ユニコード.bin").Path == "" {
-		t.Fatalf("untracked Unicode path was not captured: %#v", captured.WorktreeEntries)
+	if findEntry(captured.Worktree.Entries, "new name-ユニコード.bin").Path == "" {
+		t.Fatalf("untracked Unicode path was not captured: %#v", captured.Worktree.Entries)
 	}
-	if findEntry(captured.WorktreeEntries, "deleted.txt").Path != "" {
-		t.Fatalf("deleted path was captured in final layer: %#v", captured.WorktreeEntries)
+	if findEntry(captured.Worktree.Entries, "deleted.txt").Path != "" {
+		t.Fatalf("deleted path was captured in final layer: %#v", captured.Worktree.Entries)
 	}
 	if got := string(
-		readObject(t, objectStore, findEntry(captured.WorktreeEntries, "shared.txt").ContentDigest),
+		readObject(t, objectStore, findEntry(captured.Worktree.Entries, "shared.txt").ContentDigest),
 	); got != "final\n" {
 		t.Fatalf("final shared content = %q", got)
 	}
 	if got := string(
-		readObject(t, objectStore, findEntry(captured.IndexEntries, "shared.txt").ContentDigest),
+		readObject(t, objectStore, findEntry(captured.Index.Entries, "shared.txt").ContentDigest),
 	); got != "index\n" {
 		t.Fatalf("index shared content = %q", got)
 	}
 	if link := findEntry(
-		captured.WorktreeEntries,
+		captured.Worktree.Entries,
 		"link",
 	); link.Kind != snapshot.EntryKindSymlink ||
 		link.SymlinkTarget != "shared.txt" {
 		t.Fatalf("symlink entry = %#v", link)
 	}
-	if script := findEntry(captured.WorktreeEntries, "script.sh"); script.Mode != 0o100755 {
+	if script := findEntry(captured.Worktree.Entries, "script.sh"); script.Mode != 0o100755 {
 		t.Fatalf("executable mode = %o, want 100755", script.Mode)
 	}
 	if !hasChange(captured.Changes, snapshot.ChangeModified, "shared.txt", "shared.txt") ||
@@ -227,11 +227,11 @@ func TestCaptureRangeStoresCompleteTreesAndDurableChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CaptureRange() error = %v", err)
 	}
-	if captured.EffectiveBaseOID != base.String() || captured.TargetOID != target.String() {
-		t.Fatalf("resolved IDs = %s..%s, want %s..%s", captured.EffectiveBaseOID, captured.TargetOID, base, target)
+	if captured.EffectiveBaseOID != base.String() || captured.Target.OID != target.String() {
+		t.Fatalf("resolved IDs = %s..%s, want %s..%s", captured.EffectiveBaseOID, captured.Target.OID, base, target)
 	}
-	if len(captured.BaseEntries) != 5 || len(captured.TargetEntries) != 5 {
-		t.Fatalf("complete entry counts = %d/%d, want 5/5", len(captured.BaseEntries), len(captured.TargetEntries))
+	if len(captured.Base.Entries) != 5 || len(captured.Target.Entries) != 5 {
+		t.Fatalf("complete entry counts = %d/%d, want 5/5", len(captured.Base.Entries), len(captured.Target.Entries))
 	}
 	if captured.ObjectFormat != "sha1" || captured.ContextPolicyHash == "" || captured.ManifestDigest == "" {
 		t.Fatalf("capture provenance = %#v", captured)
@@ -241,15 +241,15 @@ func TestCaptureRangeStoresCompleteTreesAndDurableChanges(t *testing.T) {
 		!hasChange(captured.Changes, snapshot.ChangeAdded, "", "new.txt") {
 		t.Fatalf("changes = %#v", captured.Changes)
 	}
-	link := findEntry(captured.BaseEntries, "link")
+	link := findEntry(captured.Base.Entries, "link")
 	if link.Kind != snapshot.EntryKindSymlink || link.SymlinkTarget != "unchanged.txt" || link.ContentDigest == "" {
 		t.Fatalf("symlink entry = %#v", link)
 	}
-	script := findEntry(captured.TargetEntries, "script.sh")
+	script := findEntry(captured.Target.Entries, "script.sh")
 	if script.Mode != 0o100755 {
 		t.Fatalf("executable mode = %o, want 100755", script.Mode)
 	}
-	file, err := objectStore.Open(findEntry(captured.TargetEntries, "new.txt").ContentDigest)
+	file, err := objectStore.Open(findEntry(captured.Target.Entries, "new.txt").ContentDigest)
 	if err != nil {
 		t.Fatalf("open captured object: %v", err)
 	}
@@ -308,15 +308,15 @@ func TestCaptureRangeThreeDotUsesUniqueMergeBaseAndFreezesRefs(t *testing.T) {
 	if captured.ComparisonKind != snapshot.ComparisonThreeDot || captured.RequestedComparison != requested {
 		t.Fatalf("comparison provenance = %#v", captured)
 	}
-	if captured.BaseOID != common.String() || captured.TargetOID != target.String() ||
+	if captured.BaseOID != common.String() || captured.Target.OID != target.String() ||
 		captured.EffectiveBaseOID != common.String() || captured.MergeBaseOID != common.String() {
 		t.Fatalf("resolved IDs = base %s effective %s target %s merge-base %s, want %s %s %s %s",
-			captured.BaseOID, captured.EffectiveBaseOID, captured.TargetOID, captured.MergeBaseOID,
+			captured.BaseOID, captured.EffectiveBaseOID, captured.Target.OID, captured.MergeBaseOID,
 			common, common, target, common)
 	}
-	if findEntry(captured.BaseEntries, "target.txt").Path != "" ||
-		findEntry(captured.TargetEntries, "target.txt").Path == "" {
-		t.Fatalf("three-dot trees = base %#v target %#v", captured.BaseEntries, captured.TargetEntries)
+	if findEntry(captured.Base.Entries, "target.txt").Path != "" ||
+		findEntry(captured.Target.Entries, "target.txt").Path == "" {
+		t.Fatalf("three-dot trees = base %#v target %#v", captured.Base.Entries, captured.Target.Entries)
 	}
 	if !hasChange(captured.Changes, snapshot.ChangeAdded, "", "target.txt") {
 		t.Fatalf("three-dot changes = %#v", captured.Changes)
@@ -325,8 +325,8 @@ func TestCaptureRangeThreeDotUsesUniqueMergeBaseAndFreezesRefs(t *testing.T) {
 	writeFile(t, repositoryPath, "target.txt", "moved after capture\n", 0o644)
 	addFiles(t, worktree, "target.txt")
 	commit(t, repository, worktree, "moved ref", time.Date(2026, time.July, 14, 13, 0, 0, 0, time.UTC))
-	if captured.TargetOID != target.String() {
-		t.Fatalf("captured target OID changed after ref movement = %q, want %s", captured.TargetOID, target)
+	if captured.Target.OID != target.String() {
+		t.Fatalf("captured target OID changed after ref movement = %q, want %s", captured.Target.OID, target)
 	}
 }
 
@@ -581,7 +581,7 @@ func TestCaptureWorktreeRetriesAfterAConcurrentChange(t *testing.T) {
 	if clockCalls != 2 {
 		t.Fatalf("capture attempts = %d, want 2", clockCalls)
 	}
-	entry := findEntry(captured.WorktreeEntries, "file.txt")
+	entry := findEntry(captured.Worktree.Entries, "file.txt")
 	if got := string(readObject(t, objectStore, entry.ContentDigest)); got != "after" {
 		t.Fatalf("captured content = %q, want retried version", got)
 	}

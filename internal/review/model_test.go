@@ -272,19 +272,18 @@ func makeCapture(t *testing.T, base, target []snapshot.Entry) snapshot.Capture {
 		RequestedComparison: "base..target",
 		BaseOID:             "base-oid",
 		EffectiveBaseOID:    "base-oid",
-		TargetOID:           "target-oid",
 		ObjectFormat:        "sha1",
 		ContextPolicyHash:   snapshot.DefaultContextPolicyHash(),
 		CapturedAt:          time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC),
-		BaseEntries:         base,
-		TargetEntries:       target,
+		Base:                snapshot.TreeState{OID: "base-oid", Entries: base},
+		Target:              snapshot.TreeState{OID: "target-oid", Entries: target},
 	}
 	var err error
-	capture.BaseManifestDigest, err = snapshot.ManifestDigest(base)
+	capture.Base.ManifestDigest, err = snapshot.ManifestDigest(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture.TargetManifestDigest, err = snapshot.ManifestDigest(target)
+	capture.Target.ManifestDigest, err = snapshot.ManifestDigest(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,6 +381,41 @@ func TestModelRunOptionsNormalizeCentralizesDefaultsAndCopiesInputs(t *testing.T
 	}
 	if len(redactions) != 3 {
 		t.Fatalf("normalization mutated caller redactions = %#v", redactions)
+	}
+}
+
+func TestNewRunRecordCentralizesCommonProvenance(t *testing.T) {
+	t.Parallel()
+
+	parameters := map[string]any{"temperature": 0.2}
+	redactions := []string{"token"}
+	now := time.Date(2026, time.July, 15, 14, 0, 0, 0, time.UTC)
+	options := ModelRunOptions{
+		Retry:                 RetryPolicy{MaxAttempts: 3},
+		Adapter:               "adapter",
+		Protocol:              "protocol/v1",
+		PromptTemplateVersion: "prompt/v1",
+		Model:                 "model",
+		Parameters:            parameters,
+		Redactions:            redactions,
+	}
+	run := newRunRecord(
+		"run-1", "session-1", "round-1", "snapshot-1", ModelRoleReviewer, "correctness",
+		"manifest-digest", "input-digest", options, now,
+	)
+	if run.Status != RunStatusQueued || run.MaxAttempts != 3 || run.PassName != "correctness" ||
+		run.CreatedAt != now || run.UpdatedAt != now {
+		t.Fatalf("run identity = %#v", run)
+	}
+	if run.Provenance.Adapter != "adapter" || run.Provenance.Protocol != "protocol/v1" ||
+		run.Provenance.PromptTemplateVersion != "prompt/v1" || run.Provenance.Model != "model" ||
+		run.Provenance.InputManifestDigest != "manifest-digest" || run.Provenance.InputDigest != "input-digest" {
+		t.Fatalf("run provenance = %#v", run.Provenance)
+	}
+	run.Provenance.Parameters["top_p"] = 0.9
+	run.Provenance.Redactions[0] = "changed"
+	if _, ok := parameters["top_p"]; ok || redactions[0] != "token" {
+		t.Fatal("newRunRecord reused caller-owned provenance collections")
 	}
 }
 

@@ -307,11 +307,11 @@ func persistSnapshotTx(
 	persisted := Snapshot{
 		ID: snapshotID, RepositoryID: repositoryID, Kind: captureKind(capture),
 		RequestedComparison: capture.RequestedComparison, BaseOID: capture.BaseOID,
-		EffectiveBaseOID: capture.EffectiveBaseOID, TargetOID: capture.TargetOID,
-		MergeBaseOID: capture.MergeBaseOID, IndexOID: capture.IndexOID,
+		EffectiveBaseOID: capture.EffectiveBaseOID, TargetOID: capture.Target.OID,
+		MergeBaseOID: capture.MergeBaseOID, IndexOID: capture.Index.OID,
 		ObjectFormat: capture.ObjectFormat, ContextPolicyHash: capture.ContextPolicyHash,
-		IgnorePolicy: capture.IgnorePolicy, BaseManifestDigest: capture.BaseManifestDigest,
-		TargetManifestDigest: capture.TargetManifestDigest, ManifestDigest: capture.ManifestDigest,
+		IgnorePolicy: capture.IgnorePolicy, BaseManifestDigest: capture.Base.ManifestDigest,
+		TargetManifestDigest: capture.Target.ManifestDigest, ManifestDigest: capture.ManifestDigest,
 		Complete: true, CreatedAt: capture.CapturedAt.UTC(),
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -333,16 +333,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
 			name    string
 			entries []snapshot.Entry
 		}{
-			{name: snapshot.TreeSideHead, entries: capture.HeadEntries},
-			{name: snapshot.TreeSideIndex, entries: capture.IndexEntries},
-			{name: snapshot.TreeSideWorktree, entries: capture.WorktreeEntries},
+			{name: snapshot.TreeSideHead, entries: capture.Head.Entries},
+			{name: snapshot.TreeSideIndex, entries: capture.Index.Entries},
+			{name: snapshot.TreeSideWorktree, entries: capture.Worktree.Entries},
 		} {
 			if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, layer.name, layer.entries); err != nil {
 				return Snapshot{}, err
 			}
 		}
 	} else {
-		if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideBase, capture.BaseEntries); err != nil {
+		if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideBase, capture.Base.Entries); err != nil {
 			return Snapshot{}, err
 		}
 		if err := insertSnapshotEntriesTx(
@@ -350,7 +350,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
 			tx,
 			snapshotID,
 			snapshot.TreeSideTarget,
-			capture.TargetEntries,
+			capture.Target.Entries,
 		); err != nil {
 			return Snapshot{}, err
 		}
@@ -547,9 +547,6 @@ func normalizeCapture(capture snapshot.Capture) (snapshot.Capture, error) {
 	if capture.BaseOID == "" {
 		capture.BaseOID = capture.EffectiveBaseOID
 	}
-	if len(capture.Layers) == 0 {
-		capture.Layers = capture.ManifestLayers()
-	}
 	return capture, nil
 }
 
@@ -557,19 +554,34 @@ func validateCapture(capture snapshot.Capture) error {
 	if err := capture.Validate(); err != nil {
 		return err
 	}
-	baseDigest, err := snapshot.ManifestDigest(capture.BaseEntries)
+	baseDigest, err := snapshot.ManifestDigest(capture.Base.Entries)
 	if err != nil {
 		return err
 	}
-	if baseDigest != capture.BaseManifestDigest {
+	if baseDigest != capture.Base.ManifestDigest {
 		return fmt.Errorf("snapshot capture: base manifest digest does not match entries")
 	}
-	targetDigest, err := snapshot.ManifestDigest(capture.TargetEntries)
+	targetDigest, err := snapshot.ManifestDigest(capture.Target.Entries)
 	if err != nil {
 		return err
 	}
-	if targetDigest != capture.TargetManifestDigest {
+	if targetDigest != capture.Target.ManifestDigest {
 		return fmt.Errorf("snapshot capture: target manifest digest does not match entries")
+	}
+	if capture.ComparisonKind == snapshot.ComparisonWorktree {
+		for side, tree := range map[string]snapshot.TreeState{
+			snapshot.TreeSideHead:     capture.Head,
+			snapshot.TreeSideIndex:    capture.Index,
+			snapshot.TreeSideWorktree: capture.Worktree,
+		} {
+			digest, digestErr := snapshot.ManifestDigest(tree.Entries)
+			if digestErr != nil {
+				return digestErr
+			}
+			if digest != tree.ManifestDigest {
+				return fmt.Errorf("snapshot capture: %s manifest digest does not match entries", side)
+			}
+		}
 	}
 	manifestDigest, err := snapshot.OverallManifestDigest(capture)
 	if err != nil {

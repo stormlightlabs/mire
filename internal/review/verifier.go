@@ -292,38 +292,14 @@ func VerifyCandidate(
 		return VerificationResult{}, fmt.Errorf("verify candidate: create run ID: %w", err)
 	}
 	now := options.Now().UTC()
-	run := VerificationRunRecord{RunRecord: RunRecord{
-		ID: runID, SessionID: change.SessionID, RoundID: options.RoundID, SnapshotID: change.SnapshotID,
-		Role: ModelRoleVerifier, PassName: "candidate-verification", Status: RunStatusQueued,
-		MaxAttempts: options.Retry.MaxAttempts, CreatedAt: now, UpdatedAt: now,
-		Provenance: RunProvenance{
-			Adapter: options.Adapter, Protocol: options.Protocol,
-			PromptTemplateVersion: options.PromptTemplateVersion, Model: options.Model,
-			Parameters: shared.CloneMap(options.Parameters), InputManifestDigest: change.SnapshotDigest,
-			Redactions: append([]string(nil), options.Redactions...),
-		},
-	}, CandidateID: candidate.ID}
-	if options.Store != nil {
-		run, err = options.Store.CreateVerificationRun(ctx, run)
-		if err != nil {
-			return VerificationResult{}, fmt.Errorf("verify candidate: create run: %w", err)
-		}
-	}
-	setRunStatus(&run.RunRecord, RunStatusRunning, now, "")
-
 	artifacts, retrievalDiagnostics := retrieveVerificationArtifacts(ctx, candidate, options)
-	request, err := verifierRequest(change, candidate, artifacts, run, options)
+	request, err := verifierRequest(change, candidate, artifacts, runID, options)
 	if err != nil {
-		if options.Store != nil {
-			if persistErr := options.Store.UpdateVerificationRun(ctx, run); persistErr != nil {
-				return VerificationResult{}, fmt.Errorf("verify candidate: mark run running: %w", persistErr)
-			}
-		}
 		return finishVerification(
 			ctx,
 			change,
 			candidate,
-			run,
+			VerificationRunRecord{},
 			VerificationBlocked,
 			nil,
 			artifacts,
@@ -332,7 +308,21 @@ func VerifyCandidate(
 			&VerificationError{Status: RunStatusFailed, State: VerificationBlocked, Cause: "request_error", Err: err},
 		)
 	}
-	run.Provenance.InputDigest = request.InputDigest
+	run := VerificationRunRecord{
+		RunRecord: newRunRecord(
+			runID, change.SessionID, options.RoundID, change.SnapshotID,
+			ModelRoleVerifier, "candidate-verification", change.SnapshotDigest,
+			request.InputDigest, options.ModelRunOptions, now,
+		),
+		CandidateID: candidate.ID,
+	}
+	if options.Store != nil {
+		run, err = options.Store.CreateVerificationRun(ctx, run)
+		if err != nil {
+			return VerificationResult{}, fmt.Errorf("verify candidate: create run: %w", err)
+		}
+	}
+	setRunStatus(&run.RunRecord, RunStatusRunning, now, "")
 	if options.Store != nil {
 		if err := options.Store.UpdateVerificationRun(ctx, run); err != nil {
 			return VerificationResult{}, fmt.Errorf("verify candidate: mark run running: %w", err)
@@ -494,7 +484,7 @@ func verifierRequest(
 	change ChangeModel,
 	candidate CandidateRecord,
 	artifacts []RetrievedArtifact,
-	run VerificationRunRecord,
+	runID string,
 	options VerifierOptions,
 ) (ModelRequest, error) {
 	changeJSON, err := CanonicalJSON(change)
@@ -526,7 +516,7 @@ func verifierRequest(
 		Parameters map[string]any
 		Candidate  string
 		RunID      string
-	}{ModelRoleVerifier, messages, StructuredOutput{Schema: VerificationSchemaVersion}, options.Model, options.Parameters, candidate.ID, run.ID})
+	}{ModelRoleVerifier, messages, StructuredOutput{Schema: VerificationSchemaVersion}, options.Model, options.Parameters, candidate.ID, runID})
 	if err != nil {
 		return ModelRequest{}, fmt.Errorf("digest verifier request: %w", err)
 	}

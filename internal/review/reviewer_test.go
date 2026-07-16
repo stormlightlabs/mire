@@ -15,22 +15,26 @@ func TestRunReviewPassesRetainsDuplicatesAndSeparatesIncompleteOutcomes(t *testi
 	change := reviewerFixtureChange()
 	valid := CandidateEnvelope{SchemaVersion: ReviewCandidateSchemaVersion, Candidates: []Candidate{
 		{
-			SourceID:   "same-emission",
-			Claim:      "The guard is bypassed.",
-			Impact:     "Invalid input reaches the changed branch.",
-			Category:   "correctness",
-			Severity:   "high",
-			Confidence: 0.8,
-			Anchors:    []Anchor{{HunkID: "src/a.go#hunk"}},
+			SourceID: "same-emission",
+			CandidateContent: CandidateContent{
+				Claim:      "The guard is bypassed.",
+				Impact:     "Invalid input reaches the changed branch.",
+				Category:   "correctness",
+				Severity:   "high",
+				Confidence: 0.8,
+				Anchors:    []Anchor{{HunkID: "src/a.go#hunk"}},
+			},
 		},
 		{
-			SourceID:   "same-emission",
-			Claim:      "The guard is bypassed.",
-			Impact:     "Invalid input reaches the changed branch.",
-			Category:   "correctness",
-			Severity:   "high",
-			Confidence: 0.8,
-			Anchors:    []Anchor{{HunkID: "src/a.go#hunk"}},
+			SourceID: "same-emission",
+			CandidateContent: CandidateContent{
+				Claim:      "The guard is bypassed.",
+				Impact:     "Invalid input reaches the changed branch.",
+				Category:   "correctness",
+				Severity:   "high",
+				Confidence: 0.8,
+				Anchors:    []Anchor{{HunkID: "src/a.go#hunk"}},
+			},
 		},
 	}}
 	validJSON := mustJSON(t, valid)
@@ -150,13 +154,22 @@ func TestRunReviewPassesInvalidCandidateIsDiagnosticNotFinding(t *testing.T) {
 		responses: []reviewerFixtureResponse{
 			{output: mustJSON(t, CandidateEnvelope{SchemaVersion: ReviewCandidateSchemaVersion, Candidates: []Candidate{
 				{
-					Claim:    "valid",
-					Impact:   "impact",
-					Category: "tests",
-					Severity: "low",
-					Anchors:  []Anchor{{HunkID: "src/a.go#hunk"}},
+					CandidateContent: CandidateContent{
+						Claim:    "valid",
+						Impact:   "impact",
+						Category: "tests",
+						Severity: "low",
+						Anchors:  []Anchor{{HunkID: "src/a.go#hunk"}},
+					},
 				},
-				{Claim: "missing anchor", Impact: "impact", Category: "tests", Severity: "low"},
+				{
+					CandidateContent: CandidateContent{
+						Claim:    "missing anchor",
+						Impact:   "impact",
+						Category: "tests",
+						Severity: "low",
+					},
+				},
 			}})},
 		},
 	}

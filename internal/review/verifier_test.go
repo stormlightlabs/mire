@@ -117,27 +117,31 @@ func TestEvidenceFloorIgnoresConfidenceAndAnalyzerSignals(t *testing.T) {
 	candidate.Candidate.Confidence = 0
 	record := VerificationRecord{
 		CandidateID:        candidate.ID,
-		SnapshotID:         change.SnapshotID,
+		ReviewScope:        ReviewScope{SnapshotID: change.SnapshotID},
 		RunID:              "verify-run",
 		State:              VerificationSupported,
 		SuspectedInvariant: "the invariant is violated",
 		RefutationAttempt:  "Tried the valid-input and guard paths.",
 		ConcretePath: []VerificationPathStep{
 			{
-				Summary:        "Input reaches the changed branch.",
-				SnapshotID:     change.SnapshotID,
-				Anchors:        candidate.Candidate.Anchors,
-				ArtifactDigest: "path-digest",
+				EvidenceLocation: EvidenceLocation{
+					Summary:        "Input reaches the changed branch.",
+					SnapshotID:     change.SnapshotID,
+					Anchors:        candidate.Candidate.Anchors,
+					ArtifactDigest: "path-digest",
+				},
 			},
 		},
 		Evidence: []Evidence{
 			{
+				EvidenceLocation: EvidenceLocation{
+					SnapshotID:     change.SnapshotID,
+					Anchors:        candidate.Candidate.Anchors,
+					Summary:        "The guard is absent on the changed path.",
+					ArtifactDigest: "source-digest",
+				},
 				Relation:       EvidenceSupports,
-				SnapshotID:     change.SnapshotID,
-				Anchors:        candidate.Candidate.Anchors,
-				Summary:        "The guard is absent on the changed path.",
 				ProducingRunID: "verify-run",
-				ArtifactDigest: "source-digest",
 				Independent:    true,
 				Concrete:       true,
 			},
@@ -159,27 +163,31 @@ func TestValidateEvidenceFloorBoundaries(t *testing.T) {
 	candidate := verifierFixtureCandidate()
 	valid := VerificationRecord{
 		CandidateID:        candidate.ID,
-		SnapshotID:         change.SnapshotID,
+		ReviewScope:        ReviewScope{SnapshotID: change.SnapshotID},
 		RunID:              "verify-run",
 		State:              VerificationSupported,
 		SuspectedInvariant: "The invariant is violated.",
 		RefutationAttempt:  "Tried to refute the path.",
 		ConcretePath: []VerificationPathStep{
 			{
-				Summary:        "The input reaches the branch.",
-				SnapshotID:     change.SnapshotID,
-				Anchors:        candidate.Candidate.Anchors,
-				ArtifactDigest: "path-digest",
+				EvidenceLocation: EvidenceLocation{
+					Summary:        "The input reaches the branch.",
+					SnapshotID:     change.SnapshotID,
+					Anchors:        candidate.Candidate.Anchors,
+					ArtifactDigest: "path-digest",
+				},
 			},
 		},
 		Evidence: []Evidence{
 			{
+				EvidenceLocation: EvidenceLocation{
+					SnapshotID:     change.SnapshotID,
+					Anchors:        candidate.Candidate.Anchors,
+					Summary:        "The guard is absent.",
+					ArtifactDigest: "source-digest",
+				},
 				Relation:       EvidenceSupports,
-				SnapshotID:     change.SnapshotID,
-				Anchors:        candidate.Candidate.Anchors,
-				Summary:        "The guard is absent.",
 				ProducingRunID: "verify-run",
-				ArtifactDigest: "source-digest",
 				Independent:    true,
 				Concrete:       true,
 			},
@@ -352,13 +360,15 @@ func verifierFixtureCandidate() CandidateRecord {
 		Ordinal:     0,
 		Fingerprint: "candidate-fingerprint",
 		Candidate: Candidate{
-			Claim:      "The changed guard is bypassed.",
-			Impact:     "Invalid input reaches the protected branch.",
-			Category:   "correctness",
-			Severity:   "high",
-			Confidence: 0.99,
-			Anchors: []Anchor{
-				{SnapshotID: "snapshot-1", Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"},
+			CandidateContent: CandidateContent{
+				Claim:      "The changed guard is bypassed.",
+				Impact:     "Invalid input reaches the protected branch.",
+				Category:   "correctness",
+				Severity:   "high",
+				Confidence: 0.99,
+				Anchors: []Anchor{
+					{SnapshotID: "snapshot-1", Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"},
+				},
 			},
 		},
 	}
@@ -372,38 +382,46 @@ func verifierFixtureEnvelope(state VerificationState) VerificationEnvelope {
 		SuspectedInvariant: "The guard must reject invalid input before the changed branch.",
 		ConcretePath: []VerificationPathStep{
 			{
-				Kind:           "control_flow",
-				Summary:        "Invalid input reaches the changed branch.",
-				SnapshotID:     "snapshot-1",
-				Anchors:        []Anchor{anchor},
-				ArtifactDigest: "path-digest",
+				EvidenceLocation: EvidenceLocation{
+					Kind:           "control_flow",
+					Summary:        "Invalid input reaches the changed branch.",
+					SnapshotID:     "snapshot-1",
+					Anchors:        []Anchor{anchor},
+					ArtifactDigest: "path-digest",
+				},
 			},
 		},
 		SupportingEvidence: []Evidence{
 			{
-				Kind:           "source",
-				SnapshotID:     "snapshot-1",
-				Anchors:        []Anchor{anchor},
-				Summary:        "The changed branch has no rejecting guard.",
-				ArtifactDigest: "source-digest",
+				EvidenceLocation: EvidenceLocation{
+					Kind:           "source",
+					SnapshotID:     "snapshot-1",
+					Anchors:        []Anchor{anchor},
+					Summary:        "The changed branch has no rejecting guard.",
+					ArtifactDigest: "source-digest",
+				},
 			},
 		},
 		GuardSearch: []Evidence{
 			{
-				Kind:           "guard",
-				SnapshotID:     "snapshot-1",
-				Anchors:        []Anchor{anchor},
-				Summary:        "No guard protects the branch.",
-				ArtifactDigest: "guard-digest",
+				EvidenceLocation: EvidenceLocation{
+					Kind:           "guard",
+					SnapshotID:     "snapshot-1",
+					Anchors:        []Anchor{anchor},
+					Summary:        "No guard protects the branch.",
+					ArtifactDigest: "guard-digest",
+				},
 			},
 		},
 		TestSearch: []Evidence{
 			{
-				Kind:           "test",
-				SnapshotID:     "snapshot-1",
-				Anchors:        []Anchor{anchor},
-				Summary:        "No test covers invalid input.",
-				ArtifactDigest: "test-digest",
+				EvidenceLocation: EvidenceLocation{
+					Kind:           "test",
+					SnapshotID:     "snapshot-1",
+					Anchors:        []Anchor{anchor},
+					Summary:        "No test covers invalid input.",
+					ArtifactDigest: "test-digest",
+				},
 			},
 		},
 		RefutationAttempt: "Tried to find an input guard and a covering test; neither refuted the path.",

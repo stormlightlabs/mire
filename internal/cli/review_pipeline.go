@@ -238,10 +238,12 @@ func buildTerminalReport(
 					Candidate: review.CandidateRecord{
 						ID: finding.FindingID,
 						Candidate: review.Candidate{
-							Claim:    finding.Claim,
-							Impact:   finding.Impact,
-							Category: finding.Category,
-							Severity: finding.Severity,
+							CandidateContent: review.CandidateContent{
+								Claim:    finding.Claim,
+								Impact:   finding.Impact,
+								Category: finding.Category,
+								Severity: finding.Severity,
+							},
 						},
 					},
 				},
@@ -254,10 +256,12 @@ func buildTerminalReport(
 					Candidate: review.CandidateRecord{
 						ID: finding.FindingID,
 						Candidate: review.Candidate{
-							Claim:    finding.Claim,
-							Impact:   finding.Impact,
-							Category: finding.Category,
-							Severity: finding.Severity,
+							CandidateContent: review.CandidateContent{
+								Claim:    finding.Claim,
+								Impact:   finding.Impact,
+								Category: finding.Category,
+								Severity: finding.Severity,
+							},
 						},
 					},
 				},

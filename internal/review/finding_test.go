@@ -202,20 +202,22 @@ func findingCandidate(change ChangeModel, path string, line int) CandidateRecord
 		Ordinal:     0,
 		Fingerprint: "candidate-fingerprint",
 		Candidate: Candidate{
-			Claim:      "The changed branch accepts invalid input.",
-			Impact:     "Invalid input reaches a state that assumes the guard ran.",
-			Category:   "correctness",
-			Severity:   "high",
-			Confidence: 0.75,
-			Anchors: []Anchor{
-				{
-					SnapshotID: change.SnapshotID,
-					Side:       "target",
-					Path:       path,
-					HunkID:     path + "#hunk",
-					StartLine:  line,
-					EndLine:    line,
-					HunkDigest: "hunk-1",
+			CandidateContent: CandidateContent{
+				Claim:      "The changed branch accepts invalid input.",
+				Impact:     "Invalid input reaches a state that assumes the guard ran.",
+				Category:   "correctness",
+				Severity:   "high",
+				Confidence: 0.75,
+				Anchors: []Anchor{
+					{
+						SnapshotID: change.SnapshotID,
+						Side:       "target",
+						Path:       path,
+						HunkID:     path + "#hunk",
+						StartLine:  line,
+						EndLine:    line,
+						HunkDigest: "hunk-1",
+					},
 				},
 			},
 		},

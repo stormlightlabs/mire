@@ -96,7 +96,7 @@ func TestPlannerPersistenceRejectsUnknownRunAndMissingSession(t *testing.T) {
 	store := NewRepositoryStore(database)
 	t.Cleanup(func() { _ = store.Close() })
 	run := review.RunRecord{
-		SessionID:   "missing",
+		ReviewScope: review.ReviewScope{SessionID: "missing"},
 		Role:        review.ModelRolePlanner,
 		Status:      review.RunStatusQueued,
 		MaxAttempts: 1,

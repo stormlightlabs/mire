@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"strings"
 	"time"
 
@@ -60,9 +59,7 @@ type ChatContext struct {
 // ChatBinding is the canonical session, round, snapshot, and context binding
 // persisted with every chat message and model run.
 type ChatBinding struct {
-	SessionID      string      `json:"session_id"`
-	RoundID        string      `json:"round_id"`
-	SnapshotID     string      `json:"snapshot_id"`
+	ReviewScope
 	SnapshotDigest string      `json:"snapshot_digest"`
 	Context        ChatContext `json:"context"`
 	Digest         string      `json:"digest"`
@@ -71,11 +68,9 @@ type ChatBinding struct {
 // ChatMessage is an immutable timeline entry. A failed model call has no
 // assistant message; its durable ChatRunRecord carries the failure instead.
 type ChatMessage struct {
-	SchemaVersion string        `json:"schema_version"`
-	ID            string        `json:"id"`
-	SessionID     string        `json:"session_id"`
-	RoundID       string        `json:"round_id"`
-	SnapshotID    string        `json:"snapshot_id"`
+	SchemaVersion string `json:"schema_version"`
+	ID            string `json:"id"`
+	ReviewScope
 	Role          MessageRole   `json:"role"`
 	Body          string        `json:"body"`
 	Context       ChatContext   `json:"context"`
@@ -121,13 +116,7 @@ type ChatRunRecord struct {
 // ChatCandidateProposal is a structured candidate suggestion. Persisting it
 // does not create a finding; a separate explicit action must do that.
 type ChatCandidateProposal struct {
-	Claim      string   `json:"claim"`
-	Impact     string   `json:"impact"`
-	Category   string   `json:"category"`
-	Severity   string   `json:"severity"`
-	Confidence float64  `json:"confidence,omitempty"`
-	Anchors    []Anchor `json:"anchors"`
-	Rationale  string   `json:"rationale,omitempty"`
+	CandidateContent
 }
 
 // ChatVerificationRequest is a structured request for an explicit new
@@ -148,11 +137,9 @@ type ChatResponse struct {
 
 // ChatTurnRequest contains one user turn and its explicit immutable context.
 type ChatTurnRequest struct {
-	SessionID  string      `json:"session_id"`
-	RoundID    string      `json:"round_id"`
-	SnapshotID string      `json:"snapshot_id"`
-	Body       string      `json:"body"`
-	Context    ChatContext `json:"context"`
+	ReviewScope
+	Body    string      `json:"body"`
+	Context ChatContext `json:"context"`
 }
 
 // ChatOptions controls bounded chat execution and durable provenance.
@@ -359,10 +346,12 @@ func ValidateChatMessage(message ChatMessage) error {
 	}
 	binding, err := NormalizeChatBinding(
 		ChatBinding{
-			SessionID:  message.SessionID,
-			RoundID:    message.RoundID,
-			SnapshotID: message.SnapshotID,
-			Context:    message.Context,
+			ReviewScope: ReviewScope{
+				SessionID:  message.SessionID,
+				RoundID:    message.RoundID,
+				SnapshotID: message.SnapshotID,
+			},
+			Context: message.Context,
 		},
 	)
 	if err != nil {
@@ -507,21 +496,8 @@ func ValidateChatResponse(response ChatResponse, binding ChatBinding) error {
 	}
 	if response.CandidateProposal != nil {
 		proposal := response.CandidateProposal
-		if strings.TrimSpace(proposal.Claim) == "" || strings.TrimSpace(proposal.Impact) == "" ||
-			strings.TrimSpace(proposal.Category) == "" {
-			return errors.New("chat candidate proposal claim, impact, and category are required")
-		}
-		switch strings.ToLower(strings.TrimSpace(proposal.Severity)) {
-		case "low", "medium", "high", "critical":
-		default:
-			return fmt.Errorf("chat candidate proposal severity %q is unsupported", proposal.Severity)
-		}
-		if math.IsNaN(proposal.Confidence) || math.IsInf(proposal.Confidence, 0) || proposal.Confidence < 0 ||
-			proposal.Confidence > 1 {
-			return errors.New("chat candidate proposal confidence must be between 0 and 1")
-		}
-		if len(proposal.Anchors) == 0 {
-			return errors.New("chat candidate proposal needs at least one anchor")
+		if err := proposal.CandidateContent.validate("chat candidate proposal"); err != nil {
+			return err
 		}
 		for _, anchor := range proposal.Anchors {
 			if anchor.SnapshotID != canonical.SnapshotID {
@@ -589,10 +565,12 @@ func RunChat(ctx context.Context, request ChatTurnRequest, model Model, options 
 	binding, err := options.Store.ValidateChatBinding(
 		ctx,
 		ChatBinding{
-			SessionID:  request.SessionID,
-			RoundID:    request.RoundID,
-			SnapshotID: request.SnapshotID,
-			Context:    request.Context,
+			ReviewScope: ReviewScope{
+				SessionID:  request.SessionID,
+				RoundID:    request.RoundID,
+				SnapshotID: request.SnapshotID,
+			},
+			Context: request.Context,
 		},
 	)
 	if err != nil {
@@ -604,9 +582,17 @@ func RunChat(ctx context.Context, request ChatTurnRequest, model Model, options 
 		return ChatTurnResult{}, fmt.Errorf("run chat: create message ID: %w", err)
 	}
 	userMessage := ChatMessage{
-		SchemaVersion: ChatSchemaVersion, ID: userMessageID, SessionID: binding.SessionID,
-		RoundID: binding.RoundID, SnapshotID: binding.SnapshotID, Role: MessageRoleUser, Body: request.Body,
-		Context: binding.Context, CreatedAt: now,
+		SchemaVersion: ChatSchemaVersion,
+		ID:            userMessageID,
+		ReviewScope: ReviewScope{
+			SessionID:  binding.SessionID,
+			RoundID:    binding.RoundID,
+			SnapshotID: binding.SnapshotID,
+		},
+		Role:      MessageRoleUser,
+		Body:      request.Body,
+		Context:   binding.Context,
+		CreatedAt: now,
 	}
 	userMessage.Digest = ChatMessageDigest(userMessage)
 	userMessage, err = options.Store.SaveChatMessage(persistenceCtx, userMessage)
@@ -767,9 +753,11 @@ func finishChat(
 	assistant := ChatMessage{
 		SchemaVersion: ChatSchemaVersion,
 		ID:            assistantID,
-		SessionID:     run.Run.SessionID,
-		RoundID:       run.Run.RoundID,
-		SnapshotID:    run.Run.SnapshotID,
+		ReviewScope: ReviewScope{
+			SessionID:  run.Run.SessionID,
+			RoundID:    run.Run.RoundID,
+			SnapshotID: run.Run.SnapshotID,
+		},
 		Role:          MessageRoleAssistant,
 		Body:          response.Body,
 		Context:       assistantBinding.Context,

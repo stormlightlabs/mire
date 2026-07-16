@@ -342,7 +342,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
 			}
 		}
 	} else {
-		if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideBase, capture.Base.Entries); err != nil {
+		if err := insertSnapshotEntriesTx(
+			ctx,
+			tx,
+			snapshotID,
+			snapshot.TreeSideBase,
+			capture.Base.Entries,
+		); err != nil {
 			return Snapshot{}, err
 		}
 		if err := insertSnapshotEntriesTx(

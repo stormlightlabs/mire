@@ -59,18 +59,20 @@ func TestFindingLedgerPersistence(t *testing.T) {
 		PassName: "correctness",
 		Ordinal:  0,
 		Candidate: review.Candidate{
-			Claim:      "The changed branch accepts invalid input.",
-			Impact:     "Invalid input reaches a state that assumes the guard ran.",
-			Category:   "correctness",
-			Severity:   "high",
-			Confidence: 0.75,
-			Anchors: []review.Anchor{
-				{
-					SnapshotID: change.SnapshotID,
-					Side:       "target",
-					Path:       "src/a.go",
-					HunkID:     "src/a.go#hunk",
-					HunkDigest: "hunk-1",
+			CandidateContent: review.CandidateContent{
+				Claim:      "The changed branch accepts invalid input.",
+				Impact:     "Invalid input reaches a state that assumes the guard ran.",
+				Category:   "correctness",
+				Severity:   "high",
+				Confidence: 0.75,
+				Anchors: []review.Anchor{
+					{
+						SnapshotID: change.SnapshotID,
+						Side:       "target",
+						Path:       "src/a.go",
+						HunkID:     "src/a.go#hunk",
+						HunkDigest: "hunk-1",
+					},
 				},
 			},
 		},

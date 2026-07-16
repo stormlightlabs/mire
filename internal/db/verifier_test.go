@@ -82,18 +82,22 @@ func TestVerificationPersistsRunEvidenceAndDerivedLaneAcrossRestart(t *testing.T
 		SuspectedInvariant: "The guard must reject invalid input.",
 		ConcretePath: []review.VerificationPathStep{
 			{
-				Summary:        "Invalid input reaches the changed branch.",
-				SnapshotID:     change.SnapshotID,
-				Anchors:        []review.Anchor{anchor},
-				ArtifactDigest: "path-digest",
+				EvidenceLocation: review.EvidenceLocation{
+					Summary:        "Invalid input reaches the changed branch.",
+					SnapshotID:     change.SnapshotID,
+					Anchors:        []review.Anchor{anchor},
+					ArtifactDigest: "path-digest",
+				},
 			},
 		},
 		SupportingEvidence: []review.Evidence{
 			{
-				SnapshotID:     change.SnapshotID,
-				Anchors:        []review.Anchor{anchor},
-				Summary:        "The changed branch lacks a rejecting guard.",
-				ArtifactDigest: "source-digest",
+				EvidenceLocation: review.EvidenceLocation{
+					SnapshotID:     change.SnapshotID,
+					Anchors:        []review.Anchor{anchor},
+					Summary:        "The changed branch lacks a rejecting guard.",
+					ArtifactDigest: "source-digest",
+				},
 			},
 		},
 		RefutationAttempt: "Searched for a guard and a test that would disprove the path.",

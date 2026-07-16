@@ -176,10 +176,8 @@ type RunProvenance struct {
 
 // RunRecord is the durable provider-neutral record for one model run.
 type RunRecord struct {
-	ID          string        `json:"id"`
-	SessionID   string        `json:"session_id"`
-	RoundID     string        `json:"round_id"`
-	SnapshotID  string        `json:"snapshot_id"`
+	ID string `json:"id"`
+	ReviewScope
 	Role        ModelRole     `json:"role"`
 	PassName    string        `json:"pass_name,omitempty"`
 	Status      RunStatus     `json:"status"`
@@ -220,7 +218,7 @@ func newRunRecord(
 ) RunRecord {
 	now = now.UTC()
 	return RunRecord{
-		ID: id, SessionID: sessionID, RoundID: roundID, SnapshotID: snapshotID,
+		ID: id, ReviewScope: ReviewScope{SessionID: sessionID, RoundID: roundID, SnapshotID: snapshotID},
 		Role: role, PassName: passName, Status: RunStatusQueued,
 		MaxAttempts: options.Retry.MaxAttempts, CreatedAt: now, UpdatedAt: now,
 		Provenance: newRunProvenance(options, inputManifestDigest, inputDigest),

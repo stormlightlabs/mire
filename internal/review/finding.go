@@ -62,12 +62,10 @@ type FindingRelationship struct {
 // and human disposition are intentionally separate axes; disposition events
 // are stored independently of this record.
 type FindingRevision struct {
-	SchemaVersion      string                `json:"schema_version"`
-	FindingID          string                `json:"finding_id"`
-	Revision           int                   `json:"revision"`
-	SessionID          string                `json:"session_id"`
-	RoundID            string                `json:"round_id"`
-	SnapshotID         string                `json:"snapshot_id"`
+	SchemaVersion string `json:"schema_version"`
+	FindingID     string `json:"finding_id"`
+	Revision      int    `json:"revision"`
+	ReviewScope
 	Claim              string                `json:"claim"`
 	Invariant          string                `json:"invariant,omitempty"`
 	Impact             string                `json:"impact"`
@@ -207,8 +205,8 @@ func NewFindingRevision(change ChangeModel, candidate CandidateRecord, inputs ..
 	}
 	revision := FindingRevision{
 		SchemaVersion: FindingSchemaVersion, FindingID: options.FindingID, Revision: options.Revision,
-		SessionID: change.SessionID, RoundID: options.RoundID, SnapshotID: change.SnapshotID,
-		Claim: normalizedCandidate.Claim, Invariant: invariant, Impact: normalizedCandidate.Impact,
+		ReviewScope: ReviewScope{SessionID: change.SessionID, RoundID: options.RoundID, SnapshotID: change.SnapshotID},
+		Claim:       normalizedCandidate.Claim, Invariant: invariant, Impact: normalizedCandidate.Impact,
 		Category: normalizedCandidate.Category, Severity: normalizedCandidate.Severity,
 		Confidence: normalizedCandidate.Confidence, Verification: verificationState,
 		VerificationRunID: verificationRunID, VerificationDigest: verificationDigest,

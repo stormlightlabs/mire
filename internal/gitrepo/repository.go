@@ -662,10 +662,26 @@ func captureWorktreeAttempt(
 		RequestedComparison: snapshot.WorktreeComparison,
 		BaseOID:             headOID.String(),
 		EffectiveBaseOID:    headOID.String(),
-		Base:                snapshot.TreeState{OID: headOID.String(), Entries: headEntries, ManifestDigest: headManifestDigest},
-		Target:              snapshot.TreeState{OID: worktreeManifestDigest, Entries: worktreeEntries, ManifestDigest: worktreeManifestDigest},
-		Index:               snapshot.TreeState{OID: indexIdentity, Entries: indexEntries, ManifestDigest: indexManifestDigest},
-		Head:                snapshot.TreeState{OID: headOID.String(), Entries: headEntries, ManifestDigest: headManifestDigest},
+		Base: snapshot.TreeState{
+			OID:            headOID.String(),
+			Entries:        headEntries,
+			ManifestDigest: headManifestDigest,
+		},
+		Target: snapshot.TreeState{
+			OID:            worktreeManifestDigest,
+			Entries:        worktreeEntries,
+			ManifestDigest: worktreeManifestDigest,
+		},
+		Index: snapshot.TreeState{
+			OID:            indexIdentity,
+			Entries:        indexEntries,
+			ManifestDigest: indexManifestDigest,
+		},
+		Head: snapshot.TreeState{
+			OID:            headOID.String(),
+			Entries:        headEntries,
+			ManifestDigest: headManifestDigest,
+		},
 		Worktree: snapshot.TreeState{
 			OID: worktreeManifestDigest, Entries: worktreeEntries, ManifestDigest: worktreeManifestDigest,
 		},

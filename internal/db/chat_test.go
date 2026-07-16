@@ -48,11 +48,9 @@ func TestContextBoundChatPersistsAcrossRestartAndRejectsUnscopedTurns(t *testing
 		t.Fatalf("RegisterDiffAnchors() error = %v", err)
 	}
 	request := review.ChatTurnRequest{
-		SessionID:  session.ID,
-		RoundID:    round.ID,
-		SnapshotID: frozen.ID,
-		Body:       "Explain this change.",
-		Context:    review.ChatContext{References: []review.ChatReference{{DiffAnchor: &anchor}}},
+		ReviewScope: review.ReviewScope{SessionID: session.ID, RoundID: round.ID, SnapshotID: frozen.ID},
+		Body:        "Explain this change.",
+		Context:     review.ChatContext{References: []review.ChatReference{{DiffAnchor: &anchor}}},
 	}
 	model := &dbChatModel{
 		response: review.ChatResponse{
@@ -74,11 +72,9 @@ func TestContextBoundChatPersistsAcrossRestartAndRejectsUnscopedTurns(t *testing
 	_, err = store.SendChatTurn(
 		context.Background(),
 		review.ChatTurnRequest{
-			SessionID:  session.ID,
-			RoundID:    round.ID,
-			SnapshotID: frozen.ID,
-			Body:       "Unscoped",
-			Context:    review.ChatContext{},
+			ReviewScope: review.ReviewScope{SessionID: session.ID, RoundID: round.ID, SnapshotID: frozen.ID},
+			Body:        "Unscoped",
+			Context:     review.ChatContext{},
 		},
 		model,
 		review.ChatOptions{ModelRunOptions: review.ModelRunOptions{Retry: review.RetryPolicy{MaxAttempts: 1}}},
@@ -91,11 +87,9 @@ func TestContextBoundChatPersistsAcrossRestartAndRejectsUnscopedTurns(t *testing
 	_, err = store.SendChatTurn(
 		context.Background(),
 		review.ChatTurnRequest{
-			SessionID:  session.ID,
-			RoundID:    round.ID,
-			SnapshotID: frozen.ID,
-			Body:       "Wrong anchor",
-			Context:    review.ChatContext{References: []review.ChatReference{{DiffAnchor: &wrong}}},
+			ReviewScope: review.ReviewScope{SessionID: session.ID, RoundID: round.ID, SnapshotID: frozen.ID},
+			Body:        "Wrong anchor",
+			Context:     review.ChatContext{References: []review.ChatReference{{DiffAnchor: &wrong}}},
 		},
 		model,
 		review.ChatOptions{ModelRunOptions: review.ModelRunOptions{Retry: review.RetryPolicy{MaxAttempts: 1}}},
@@ -173,17 +167,19 @@ func TestFindingRevisionChatReferenceIsResolvedToActiveRound(t *testing.T) {
 		RunID:    "review-run",
 		PassName: "correctness",
 		Candidate: review.Candidate{
-			Claim:    "The README is misleading.",
-			Impact:   "Users may misunderstand the behavior.",
-			Category: "documentation",
-			Severity: "low",
-			Anchors: []review.Anchor{
-				{
-					SnapshotID: frozen.ID,
-					Side:       snapshot.TreeSideTarget,
-					Path:       "README.md",
-					HunkID:     "README.md#1",
-					HunkDigest: "hunk-1",
+			CandidateContent: review.CandidateContent{
+				Claim:    "The README is misleading.",
+				Impact:   "Users may misunderstand the behavior.",
+				Category: "documentation",
+				Severity: "low",
+				Anchors: []review.Anchor{
+					{
+						SnapshotID: frozen.ID,
+						Side:       snapshot.TreeSideTarget,
+						Path:       "README.md",
+						HunkID:     "README.md#1",
+						HunkDigest: "hunk-1",
+					},
 				},
 			},
 		},
@@ -200,10 +196,8 @@ func TestFindingRevisionChatReferenceIsResolvedToActiveRound(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := review.ChatTurnRequest{
-		SessionID:  session.ID,
-		RoundID:    round.ID,
-		SnapshotID: frozen.ID,
-		Body:       "Challenge this finding.",
+		ReviewScope: review.ReviewScope{SessionID: session.ID, RoundID: round.ID, SnapshotID: frozen.ID},
+		Body:        "Challenge this finding.",
 		Context: review.ChatContext{
 			References: []review.ChatReference{
 				{FindingRevision: &review.FindingRevisionRef{FindingID: finding.FindingID, Revision: finding.Revision}},

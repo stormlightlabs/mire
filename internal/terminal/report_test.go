@@ -59,11 +59,13 @@ func TestRenderSeparatesVerifiedCandidatesAndRefutedAtFixedWidth(t *testing.T) {
 				Candidate: review.CandidateRecord{
 					ID: "candidate-1",
 					Candidate: review.Candidate{
-						Claim:    "A retained candidate needs investigation.",
-						Impact:   "Potential issue.",
-						Category: "correctness",
-						Severity: "medium",
-						Anchors:  []review.Anchor{anchor},
+						CandidateContent: review.CandidateContent{
+							Claim:    "A retained candidate needs investigation.",
+							Impact:   "Potential issue.",
+							Category: "correctness",
+							Severity: "medium",
+							Anchors:  []review.Anchor{anchor},
+						},
 					},
 				},
 				Reason: "inconclusive",
@@ -74,11 +76,13 @@ func TestRenderSeparatesVerifiedCandidatesAndRefutedAtFixedWidth(t *testing.T) {
 				Candidate: review.CandidateRecord{
 					ID: "candidate-2",
 					Candidate: review.Candidate{
-						Claim:    "A refuted hypothesis.",
-						Impact:   "No impact.",
-						Category: "correctness",
-						Severity: "low",
-						Anchors:  []review.Anchor{anchor},
+						CandidateContent: review.CandidateContent{
+							Claim:    "A refuted hypothesis.",
+							Impact:   "No impact.",
+							Category: "correctness",
+							Severity: "low",
+							Anchors:  []review.Anchor{anchor},
+						},
 					},
 				},
 				Reason: "refuted",

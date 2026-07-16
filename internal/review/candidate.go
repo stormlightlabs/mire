@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"strings"
 	"time"
 
@@ -36,14 +35,8 @@ type Anchor struct {
 // reviewer. It is intentionally not a verified finding; later milestones add
 // evidence and adversarial verification.
 type Candidate struct {
-	SourceID   string   `json:"source_id,omitempty"`
-	Claim      string   `json:"claim"`
-	Impact     string   `json:"impact"`
-	Category   string   `json:"category"`
-	Severity   string   `json:"severity"`
-	Confidence float64  `json:"confidence,omitempty"`
-	Anchors    []Anchor `json:"anchors"`
-	Rationale  string   `json:"rationale,omitempty"`
+	SourceID string `json:"source_id,omitempty"`
+	CandidateContent
 }
 
 func (c Candidate) normalize(change ChangeModel) (Candidate, error) {
@@ -51,16 +44,8 @@ func (c Candidate) normalize(change ChangeModel) (Candidate, error) {
 	c.Impact = strings.TrimSpace(c.Impact)
 	c.Category = strings.TrimSpace(c.Category)
 	c.Severity = strings.ToLower(strings.TrimSpace(c.Severity))
-	if c.Claim == "" || c.Impact == "" || c.Category == "" {
-		return Candidate{}, errors.New("candidate claim, impact, and category are required")
-	}
-	switch c.Severity {
-	case "low", "medium", "high", "critical":
-	default:
-		return Candidate{}, fmt.Errorf("candidate severity %q is unsupported", c.Severity)
-	}
-	if math.IsNaN(c.Confidence) || math.IsInf(c.Confidence, 0) || c.Confidence < 0 || c.Confidence > 1 {
-		return Candidate{}, errors.New("candidate confidence must be between 0 and 1")
+	if err := c.CandidateContent.validate("candidate"); err != nil {
+		return Candidate{}, err
 	}
 	hunks := make(map[string]Hunk)
 	paths := make(map[string]bool)
@@ -73,9 +58,6 @@ func (c Candidate) normalize(change ChangeModel) (Candidate, error) {
 		for _, hunk := range file.Hunks {
 			hunks[hunk.ID] = hunk
 		}
-	}
-	if len(c.Anchors) == 0 {
-		return Candidate{}, errors.New("candidate needs at least one snapshot hunk anchor")
 	}
 	for index := range c.Anchors {
 		anchor := &c.Anchors[index]

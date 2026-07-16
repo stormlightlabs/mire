@@ -42,12 +42,14 @@ func TestChatResponseKeepsCandidateAndVerificationAsExplicitProposals(t *testing
 		SchemaVersion: ChatResponseSchemaVersion,
 		Body:          "I found a possible issue.",
 		CandidateProposal: &ChatCandidateProposal{
-			Claim:      "The branch accepts invalid input.",
-			Impact:     "Invalid state can escape.",
-			Category:   "correctness",
-			Severity:   "high",
-			Confidence: 0.8,
-			Anchors:    []Anchor{*binding.Context.Primary.DiffAnchor},
+			CandidateContent: CandidateContent{
+				Claim:      "The branch accepts invalid input.",
+				Impact:     "Invalid state can escape.",
+				Category:   "correctness",
+				Severity:   "high",
+				Confidence: 0.8,
+				Anchors:    []Anchor{*binding.Context.Primary.DiffAnchor},
+			},
 		},
 		VerificationRequest: &ChatVerificationRequest{
 			FindingRevision: FindingRevisionRef{FindingID: "finding-1", Revision: 2},
@@ -68,9 +70,7 @@ func TestRunChatPersistsBindingBeforeModelAndKeepsAssistantOnPrimary(t *testing.
 
 	clock := time.Date(2026, time.July, 15, 18, 0, 0, 0, time.UTC)
 	binding := ChatBinding{
-		SessionID:      "session-1",
-		RoundID:        "round-1",
-		SnapshotID:     "snapshot-1",
+		ReviewScope:    ReviewScope{SessionID: "session-1", RoundID: "round-1", SnapshotID: "snapshot-1"},
 		SnapshotDigest: "manifest-1",
 		Context: ChatContext{
 			References: []ChatReference{
@@ -92,8 +92,13 @@ func TestRunChatPersistsBindingBeforeModelAndKeepsAssistantOnPrimary(t *testing.
 		responses: []ModelResponse{{Output: chatResponseBytes(t, "The selected hunk is safely scoped.")}},
 	}
 	result, err := RunChat(context.Background(), ChatTurnRequest{
-		SessionID: binding.SessionID, RoundID: binding.RoundID, SnapshotID: binding.SnapshotID,
-		Body: "What does this hunk change?", Context: binding.Context,
+		ReviewScope: ReviewScope{
+			SessionID:  binding.SessionID,
+			RoundID:    binding.RoundID,
+			SnapshotID: binding.SnapshotID,
+		},
+		Body:    "What does this hunk change?",
+		Context: binding.Context,
 	}, model, ChatOptions{
 		ModelRunOptions: ModelRunOptions{
 			Retry:    RetryPolicy{MaxAttempts: 1},
@@ -282,9 +287,7 @@ func (model *chatResponseModel) Complete(ctx context.Context, _ ModelRequest) (M
 
 func testChatBinding() ChatBinding {
 	return ChatBinding{
-		SessionID:      "session-1",
-		RoundID:        "round-1",
-		SnapshotID:     "snapshot-1",
+		ReviewScope:    ReviewScope{SessionID: "session-1", RoundID: "round-1", SnapshotID: "snapshot-1"},
 		SnapshotDigest: "manifest-1",
 		Context: ChatContext{
 			References: []ChatReference{
@@ -305,11 +308,13 @@ func testChatBinding() ChatBinding {
 
 func testChatRequest(binding ChatBinding) ChatTurnRequest {
 	return ChatTurnRequest{
-		SessionID:  binding.SessionID,
-		RoundID:    binding.RoundID,
-		SnapshotID: binding.SnapshotID,
-		Body:       "Explain the selected change.",
-		Context:    binding.Context,
+		ReviewScope: ReviewScope{
+			SessionID:  binding.SessionID,
+			RoundID:    binding.RoundID,
+			SnapshotID: binding.SnapshotID,
+		},
+		Body:    "Explain the selected change.",
+		Context: binding.Context,
 	}
 }
 

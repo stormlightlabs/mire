@@ -96,28 +96,44 @@ func (relation EvidenceRelation) Valid() bool {
 
 // Evidence is one immutable, snapshot-bound verifier observation.
 type Evidence struct {
-	ID             string           `json:"id"`
+	ID string `json:"id"`
+	EvidenceLocation
 	Relation       EvidenceRelation `json:"relation"`
-	SnapshotID     string           `json:"snapshot_id"`
-	Anchors        []Anchor         `json:"anchors"`
-	Summary        string           `json:"summary"`
 	ProducingRunID string           `json:"producing_run_id"`
-	ArtifactDigest string           `json:"artifact_digest"`
-	OutputPointer  string           `json:"output_pointer,omitempty"`
-	Kind           string           `json:"kind,omitempty"`
 	Independent    bool             `json:"independent"`
 	Concrete       bool             `json:"concrete"`
 	Material       bool             `json:"material,omitempty"`
 }
 
+// MarshalJSON preserves the historical Evidence field order because evidence
+// contributes to immutable verification and finding digests.
+func (value Evidence) MarshalJSON() ([]byte, error) {
+	type evidenceJSON struct {
+		ID             string           `json:"id"`
+		Relation       EvidenceRelation `json:"relation"`
+		SnapshotID     string           `json:"snapshot_id"`
+		Anchors        []Anchor         `json:"anchors"`
+		Summary        string           `json:"summary"`
+		ProducingRunID string           `json:"producing_run_id"`
+		ArtifactDigest string           `json:"artifact_digest"`
+		OutputPointer  string           `json:"output_pointer,omitempty"`
+		Kind           string           `json:"kind,omitempty"`
+		Independent    bool             `json:"independent"`
+		Concrete       bool             `json:"concrete"`
+		Material       bool             `json:"material,omitempty"`
+	}
+	return json.Marshal(evidenceJSON{
+		ID: value.ID, Relation: value.Relation, SnapshotID: value.SnapshotID,
+		Anchors: value.Anchors, Summary: value.Summary, ProducingRunID: value.ProducingRunID,
+		ArtifactDigest: value.ArtifactDigest, OutputPointer: value.OutputPointer,
+		Kind: value.Kind, Independent: value.Independent, Concrete: value.Concrete,
+		Material: value.Material,
+	})
+}
+
 // VerificationPathStep is one anchored step in the verifier's concrete path.
 type VerificationPathStep struct {
-	Kind           string   `json:"kind,omitempty"`
-	Summary        string   `json:"summary"`
-	SnapshotID     string   `json:"snapshot_id"`
-	Anchors        []Anchor `json:"anchors"`
-	ArtifactDigest string   `json:"artifact_digest"`
-	OutputPointer  string   `json:"output_pointer,omitempty"`
+	EvidenceLocation
 }
 
 // VerificationEnvelope is the strict structured response accepted from a
@@ -150,11 +166,9 @@ type VerificationDiagnostic struct {
 // VerificationRecord is an immutable verification result for one candidate.
 // It intentionally has no writable lane field; callers must use DeriveLane.
 type VerificationRecord struct {
-	ID                 string                   `json:"id"`
-	CandidateID        string                   `json:"candidate_id"`
-	SessionID          string                   `json:"session_id"`
-	RoundID            string                   `json:"round_id"`
-	SnapshotID         string                   `json:"snapshot_id"`
+	ID          string `json:"id"`
+	CandidateID string `json:"candidate_id"`
+	ReviewScope
 	RunID              string                   `json:"run_id"`
 	State              VerificationState        `json:"state"`
 	SuspectedInvariant string                   `json:"suspected_invariant,omitempty"`
@@ -685,11 +699,13 @@ func normalizeVerification(
 		return VerificationRecord{}, err
 	}
 	record := VerificationRecord{
-		ID:                 run.ID + ":verification",
-		CandidateID:        candidate.ID,
-		SessionID:          change.SessionID,
-		RoundID:            run.RoundID,
-		SnapshotID:         change.SnapshotID,
+		ID:          run.ID + ":verification",
+		CandidateID: candidate.ID,
+		ReviewScope: ReviewScope{
+			SessionID:  change.SessionID,
+			RoundID:    run.RoundID,
+			SnapshotID: change.SnapshotID,
+		},
 		RunID:              run.ID,
 		State:              envelope.State,
 		SuspectedInvariant: invariant,
@@ -926,10 +942,19 @@ func finishVerification(
 	run.FinishedAt = now
 	if verification == nil {
 		verification = &VerificationRecord{
-			ID: run.ID + ":verification", CandidateID: candidate.ID, SessionID: change.SessionID,
-			RoundID: run.RoundID, SnapshotID: change.SnapshotID, RunID: run.ID, State: state,
-			RefutationAttempt: "Verifier did not complete a usable refutation attempt.", Diagnostics: diagnostics,
-			RetainedOutput: run.RetainedOutput, CreatedAt: now,
+			ID:          run.ID + ":verification",
+			CandidateID: candidate.ID,
+			ReviewScope: ReviewScope{
+				SessionID:  change.SessionID,
+				RoundID:    run.RoundID,
+				SnapshotID: change.SnapshotID,
+			},
+			RunID:             run.ID,
+			State:             state,
+			RefutationAttempt: "Verifier did not complete a usable refutation attempt.",
+			Diagnostics:       diagnostics,
+			RetainedOutput:    run.RetainedOutput,
+			CreatedAt:         now,
 		}
 		verification.Digest = VerificationDigest(*verification)
 	}

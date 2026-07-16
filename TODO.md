@@ -39,20 +39,20 @@ the change explicitly includes a compatible migration.
   manifest metadata. Derived layer lists should be built deterministically
   instead of allowing the named fields and `Layers` slice to disagree.
 
-- [ ] Extract the common location fields shared by `review.Evidence` and
+- [x] Extract the common location fields shared by `review.Evidence` and
   `review.VerificationPathStep`: `Kind`, `Summary`, `SnapshotID`, `Anchors`,
   `ArtifactDigest`, and `OutputPointer`. Embed a small evidence-location type and
   leave relation, producing run, independence, concreteness, and materiality on
   `Evidence`.
 
-- [ ] Extract the common candidate content shared by `review.Candidate` and
+- [x] Extract the common candidate content shared by `review.Candidate` and
   `review.ChatCandidateProposal`: claim, impact, category, severity, confidence,
   anchors, and rationale. Keep reviewer source identity and chat proposal
   lifecycle behavior outside the shared value. Route both paths through the
   same content validation without allowing a chat proposal to become a finding
   implicitly.
 
-- [ ] Consider a shared review-scope value for the repeated `SessionID`,
+- [x] Consider a shared review-scope value for the repeated `SessionID`,
   `RoundID`, and `SnapshotID` tuple. Candidate users include `RunRecord`,
   `VerificationRecord`, `ChatBinding`, `ChatMessage`, `ChatTurnRequest`, and
   `FindingRevision`. Preserve each field's current JSON tag and required versus

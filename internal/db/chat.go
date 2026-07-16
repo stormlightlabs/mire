@@ -339,10 +339,12 @@ func (store *RepositoryStore) SaveChatMessage(
 	canonicalBinding, err := store.validateStoredChatBinding(
 		ctx,
 		review.ChatBinding{
-			SessionID:  message.SessionID,
-			RoundID:    message.RoundID,
-			SnapshotID: message.SnapshotID,
-			Context:    message.Context,
+			ReviewScope: review.ReviewScope{
+				SessionID:  message.SessionID,
+				RoundID:    message.RoundID,
+				SnapshotID: message.SnapshotID,
+			},
+			Context: message.Context,
 		},
 	)
 	if err != nil {
@@ -662,10 +664,8 @@ func (store *RepositoryStore) SendChatTurn(
 	binding, err := store.ValidateChatBinding(
 		ctx,
 		review.ChatBinding{
-			SessionID:  session.ID,
-			RoundID:    round.ID,
-			SnapshotID: request.SnapshotID,
-			Context:    request.Context,
+			ReviewScope: review.ReviewScope{SessionID: session.ID, RoundID: round.ID, SnapshotID: request.SnapshotID},
+			Context:     request.Context,
 		},
 	)
 	if err != nil {

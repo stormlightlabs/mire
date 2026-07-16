@@ -91,7 +91,12 @@ func Render(output io.Writer, report Report, options Options) error {
 		if _, err := fmt.Fprintln(output); err != nil {
 			return err
 		}
-		if err := writeWrapped(output, "", "Candidates and refuted findings are hidden; rerun with --candidates.", width); err != nil {
+		if err := writeWrapped(
+			output,
+			"",
+			"Candidates and refuted findings are hidden; rerun with --candidates.",
+			width,
+		); err != nil {
 			return err
 		}
 	}
@@ -119,7 +124,12 @@ func renderHeader(output io.Writer, report Report, width int) error {
 		}
 	}
 	if report.IncompleteReason != "" {
-		if err := writeWrapped(output, echo.Error("Incomplete analysis: "), report.IncompleteReason, width); err != nil {
+		if err := writeWrapped(
+			output,
+			echo.Error("Incomplete analysis: "),
+			report.IncompleteReason,
+			width,
+		); err != nil {
 			return err
 		}
 	}
@@ -163,7 +173,12 @@ func renderDiff(output io.Writer, report Report, width int, includeCandidates bo
 			return err
 		}
 		for _, hunk := range file.Hunks {
-			if err := writeWrapped(output, "", fmt.Sprintf("@@ -%d,%d +%d,%d @@", hunk.OldStart, hunk.OldLines, hunk.NewStart, hunk.NewLines), width); err != nil {
+			if err := writeWrapped(
+				output,
+				"",
+				fmt.Sprintf("@@ -%d,%d +%d,%d @@", hunk.OldStart, hunk.OldLines, hunk.NewStart, hunk.NewLines),
+				width,
+			); err != nil {
 				return err
 			}
 			if hunk.Binary {
@@ -191,14 +206,24 @@ func renderDiff(output io.Writer, report Report, width int, includeCandidates bo
 			if includeCandidates {
 				for _, candidate := range report.Candidates {
 					if hasHunk(candidate.Candidate.Candidate.Anchors, hunk.ID) {
-						if err := renderCandidateAnchorComment(output, review.FindingLaneCandidate, candidate.Candidate, width); err != nil {
+						if err := renderCandidateAnchorComment(
+							output,
+							review.FindingLaneCandidate,
+							candidate.Candidate,
+							width,
+						); err != nil {
 							return err
 						}
 					}
 				}
 				for _, candidate := range report.Refuted {
 					if hasHunk(candidate.Candidate.Candidate.Anchors, hunk.ID) {
-						if err := renderCandidateAnchorComment(output, review.FindingLaneRefuted, candidate.Candidate, width); err != nil {
+						if err := renderCandidateAnchorComment(
+							output,
+							review.FindingLaneRefuted,
+							candidate.Candidate,
+							width,
+						); err != nil {
 							return err
 						}
 					}
@@ -258,7 +283,12 @@ func renderAnchorComment(output io.Writer, lane review.FindingLane, finding revi
 	return writeWrapped(output, echo.Muted("  ! ")+echo.Label(string(lane))+": ", finding.Claim+" ["+anchor+"]", width)
 }
 
-func renderCandidateAnchorComment(output io.Writer, lane review.FindingLane, candidate review.CandidateRecord, width int) error {
+func renderCandidateAnchorComment(
+	output io.Writer,
+	lane review.FindingLane,
+	candidate review.CandidateRecord,
+	width int,
+) error {
 	anchor := "hunk"
 	if len(candidate.Candidate.Anchors) > 0 {
 		value := candidate.Candidate.Anchors[0]
@@ -270,7 +300,12 @@ func renderCandidateAnchorComment(output io.Writer, lane review.FindingLane, can
 			anchor += ":" + strconv.Itoa(value.StartLine)
 		}
 	}
-	return writeWrapped(output, echo.Muted("  ! ")+echo.Label(string(lane))+": ", candidate.Candidate.Claim+" ["+anchor+"]", width)
+	return writeWrapped(
+		output,
+		echo.Muted("  ! ")+echo.Label(string(lane))+": ",
+		candidate.Candidate.Claim+" ["+anchor+"]",
+		width,
+	)
 }
 
 func renderFindings(output io.Writer, report Report, width int) error {
@@ -306,7 +341,12 @@ func renderFinding(output io.Writer, finding FindingView, width int) error {
 	if err := writeWrapped(output, "  Impact: ", revision.Impact, width); err != nil {
 		return err
 	}
-	if err := writeWrapped(output, "  Category: ", revision.Category+"; verification="+string(revision.Verification), width); err != nil {
+	if err := writeWrapped(
+		output,
+		"  Category: ",
+		revision.Category+"; verification="+string(revision.Verification),
+		width,
+	); err != nil {
 		return err
 	}
 	return nil
@@ -325,7 +365,12 @@ func renderCandidates(output io.Writer, title string, values []CandidateView, wi
 	}
 	for _, value := range values {
 		candidate := value.Candidate
-		if err := writeWrapped(output, echo.Label("- "), fmt.Sprintf("%s (%s)", candidate.ID, candidate.Candidate.Severity), width); err != nil {
+		if err := writeWrapped(
+			output,
+			echo.Label("- "),
+			fmt.Sprintf("%s (%s)", candidate.ID, candidate.Candidate.Severity),
+			width,
+		); err != nil {
 			return err
 		}
 		if err := writeWrapped(output, "  Claim: ", candidate.Candidate.Claim, width); err != nil {
@@ -371,12 +416,22 @@ func renderCoverage(output io.Writer, report Report, width int) error {
 		}
 	}
 	for _, failure := range report.Coverage.Failures {
-		if err := writeWrapped(output, echo.Error("! coverage: "), failure.PassName+": "+failure.Message, width); err != nil {
+		if err := writeWrapped(
+			output,
+			echo.Error("! coverage: "),
+			failure.PassName+": "+failure.Message,
+			width,
+		); err != nil {
 			return err
 		}
 	}
 	for _, exclusion := range report.Coverage.Exclusions {
-		if err := writeWrapped(output, echo.Muted("! omitted: "), exclusion.PassName+": "+exclusion.Reason, width); err != nil {
+		if err := writeWrapped(
+			output,
+			echo.Muted("! omitted: "),
+			exclusion.PassName+": "+exclusion.Reason,
+			width,
+		); err != nil {
 			return err
 		}
 	}
@@ -385,7 +440,9 @@ func renderCoverage(output io.Writer, report Report, width int) error {
 			return err
 		}
 	}
-	if len(report.Diagnostics) == 0 && len(report.Coverage.Failures) == 0 && len(report.Coverage.Exclusions) == 0 && len(report.Coverage.Gaps) == 0 && report.IncompleteReason == "" {
+	if len(report.Diagnostics) == 0 && len(report.Coverage.Failures) == 0 && len(report.Coverage.Exclusions) == 0 &&
+		len(report.Coverage.Gaps) == 0 &&
+		report.IncompleteReason == "" {
 		return writeWrapped(output, "", "No incomplete-analysis diagnostics.", width)
 	}
 	return nil

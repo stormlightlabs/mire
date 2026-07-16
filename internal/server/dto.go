@@ -46,7 +46,14 @@ func mapSession(session *db.Session) *sessionDTO {
 	if session == nil {
 		return nil
 	}
-	return &sessionDTO{session.ID, session.RepositoryID, session.RepositoryName, session.Title, session.CreatedAt.UTC().Format(time.RFC3339Nano), session.CurrentRoundID}
+	return &sessionDTO{
+		session.ID,
+		session.RepositoryID,
+		session.RepositoryName,
+		session.Title,
+		session.CreatedAt.UTC().Format(time.RFC3339Nano),
+		session.CurrentRoundID,
+	}
 }
 
 func mapSessions(sessions []db.Session) []*sessionDTO {
@@ -58,7 +65,16 @@ func mapSessions(sessions []db.Session) []*sessionDTO {
 }
 
 func makeRoundDTO(round db.Round) roundDTO {
-	return roundDTO{round.ID, round.SessionID, round.SnapshotID, round.Number, string(round.Status), shared.Revision(round.UpdatedAt), round.CreatedAt.UTC().Format(time.RFC3339Nano), round.UpdatedAt.UTC().Format(time.RFC3339Nano)}
+	return roundDTO{
+		round.ID,
+		round.SessionID,
+		round.SnapshotID,
+		round.Number,
+		string(round.Status),
+		shared.Revision(round.UpdatedAt),
+		round.CreatedAt.UTC().Format(time.RFC3339Nano),
+		round.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
 }
 
 func mapRounds(rounds []db.Round) []roundDTO {
@@ -76,7 +92,8 @@ func makeOperationDTO(operation db.Operation) operationDTO {
 		operation.Failure,
 		shared.Revision(operation.UpdatedAt), operation.CreatedAt.UTC().Format(time.RFC3339Nano),
 		operation.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		shared.OptionalTime(operation.StartedAt), shared.OptionalTime(operation.FinishedAt)}
+		shared.OptionalTime(operation.StartedAt), shared.OptionalTime(operation.FinishedAt),
+	}
 }
 
 func mapOperations(operations []db.Operation) []operationDTO {
@@ -88,5 +105,11 @@ func mapOperations(operations []db.Operation) []operationDTO {
 }
 
 func makeDivergenceDTO(report snapshot.DivergenceReport) map[string]any {
-	return map[string]any{"snapshot_id": report.SnapshotID, "status": report.Status, "affected_paths": report.AffectedPaths, "affected_refs": report.AffectedRefs, "message": report.Message}
+	return map[string]any{
+		"snapshot_id":    report.SnapshotID,
+		"status":         report.Status,
+		"affected_paths": report.AffectedPaths,
+		"affected_refs":  report.AffectedRefs,
+		"message":        report.Message,
+	}
 }

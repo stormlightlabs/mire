@@ -60,14 +60,23 @@ func newShowCommand(state *commandContext) *cobra.Command {
 			}
 			reports := make([]echo.RoundReport, 0, len(rounds))
 			for _, round := range rounds {
-				report := snapshot.DivergenceReport{Status: snapshot.DivergenceUnavailable, Message: "Round has no captured snapshot."}
+				report := snapshot.DivergenceReport{
+					Status:  snapshot.DivergenceUnavailable,
+					Message: "Round has no captured snapshot.",
+				}
 				var persisted db.Snapshot
 				if round.SnapshotID != "" {
 					persisted, err = store.GetSnapshot(command.Context(), round.SnapshotID)
 					if err != nil {
 						return fmt.Errorf("show: load snapshot %q: %w", round.SnapshotID, err)
 					}
-					report, err = gitrepo.CheckDivergence(command.Context(), identity.CanonicalIdentity, store, persisted, objectStore)
+					report, err = gitrepo.CheckDivergence(
+						command.Context(),
+						identity.CanonicalIdentity,
+						store,
+						persisted,
+						objectStore,
+					)
 					if err != nil {
 						return fmt.Errorf("show: check round %d divergence: %w", round.Number, err)
 					}
@@ -101,12 +110,24 @@ func newShowCommand(state *commandContext) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("show: initialize private object store: %w", err)
 			}
-			report, err := buildTerminalReport(command.Context(), store, session, selectedRound, persisted, capture, objectStore)
+			report, err := buildTerminalReport(
+				command.Context(),
+				store,
+				session,
+				selectedRound,
+				persisted,
+				capture,
+				objectStore,
+			)
 			if err != nil {
 				return fmt.Errorf("show: assemble terminal report: %w", err)
 			}
 			sortReportViews(&report)
-			return terminal.Render(command.OutOrStdout(), report, terminal.Options{Width: width, Candidates: candidates})
+			return terminal.Render(
+				command.OutOrStdout(),
+				report,
+				terminal.Options{Width: width, Candidates: candidates},
+			)
 		},
 	}
 	command.Flags().IntVar(&width, "width", terminal.DefaultWidth, "report width in terminal columns")

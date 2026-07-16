@@ -244,7 +244,11 @@ func (s *Server) serveStatic(response http.ResponseWriter, request *http.Request
 		return
 	}
 	if _, err := fs.Stat(s.staticFiles, "index.html"); errors.Is(err, fs.ErrNotExist) {
-		writeError(response, http.StatusServiceUnavailable, errors.New("web assets are not built; run pnpm --dir app build"))
+		writeError(
+			response,
+			http.StatusServiceUnavailable,
+			errors.New("web assets are not built; run pnpm --dir app build"),
+		)
 		return
 	}
 	cleanPath := strings.TrimPrefix(path.Clean(request.URL.Path), "/")
@@ -310,7 +314,12 @@ func (s *Server) serveAPI(response http.ResponseWriter, request *http.Request) {
 	}
 	parts := strings.Split(strings.TrimPrefix(request.URL.Path, apiPrefix+"/"), "/")
 	for _, part := range parts {
-		if !identifierPattern.MatchString(part) && part != "bootstrap" && part != "sessions" && part != "events" && part != "rounds" && part != "operations" && part != "divergence" && part != "reviews" && part != "cancel" {
+		if !identifierPattern.MatchString(part) && part != "bootstrap" && part != "sessions" && part != "events" &&
+			part != "rounds" &&
+			part != "operations" &&
+			part != "divergence" &&
+			part != "reviews" &&
+			part != "cancel" {
 			writeError(response, http.StatusNotFound, errors.New("invalid API path"))
 			return
 		}
@@ -388,7 +397,11 @@ func (s *Server) handleSessions(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	if request.Method == http.MethodGet {
-		s.writeJSON(response, http.StatusOK, map[string]any{"schema_version": schemaVersion, "sessions": mapSessions(sessions)})
+		s.writeJSON(
+			response,
+			http.StatusOK,
+			map[string]any{"schema_version": schemaVersion, "sessions": mapSessions(sessions)},
+		)
 		return
 	}
 	if request.Method != http.MethodPost {
@@ -425,7 +438,13 @@ func (s *Server) handleSessions(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	body, _ := json.Marshal(map[string]any{"schema_version": schemaVersion, "session": mapSession(&session)})
-	result := idempotencyResult{method: request.Method, path: request.URL.Path, status: http.StatusCreated, body: body, location: apiPrefix + "/sessions/" + session.ID}
+	result := idempotencyResult{
+		method:   request.Method,
+		path:     request.URL.Path,
+		status:   http.StatusCreated,
+		body:     body,
+		location: apiPrefix + "/sessions/" + session.ID,
+	}
 	s.rememberIdempotency(key, result)
 	writeStoredResult(response, result)
 }
@@ -455,7 +474,10 @@ func (s *Server) handleSession(response http.ResponseWriter, request *http.Reque
 		return
 	}
 	s.writeJSON(response, http.StatusOK, map[string]any{
-		"schema_version": schemaVersion, "session": mapSession(&session), "rounds": mapRounds(rounds), "operations": mapOperations(operations),
+		"schema_version": schemaVersion,
+		"session":        mapSession(&session),
+		"rounds":         mapRounds(rounds),
+		"operations":     mapOperations(operations),
 	})
 }
 
@@ -496,7 +518,13 @@ func (s *Server) handleCreateRound(response http.ResponseWriter, request *http.R
 		return
 	}
 	body, _ := json.Marshal(map[string]any{"schema_version": schemaVersion, "round": makeRoundDTO(round)})
-	result := idempotencyResult{method: request.Method, path: request.URL.Path, status: http.StatusAccepted, body: body, location: apiPrefix + "/sessions/" + sessionID}
+	result := idempotencyResult{
+		method:   request.Method,
+		path:     request.URL.Path,
+		status:   http.StatusAccepted,
+		body:     body,
+		location: apiPrefix + "/sessions/" + sessionID,
+	}
 	s.rememberIdempotency(key, result)
 	writeStoredResult(response, result)
 }
@@ -543,7 +571,13 @@ func (s *Server) handleReview(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	body, _ := json.Marshal(map[string]any{"schema_version": schemaVersion, "operation": makeOperationDTO(operation)})
-	result := idempotencyResult{method: request.Method, path: request.URL.Path, status: http.StatusAccepted, body: body, location: apiPrefix + "/operations/" + operation.ID}
+	result := idempotencyResult{
+		method:   request.Method,
+		path:     request.URL.Path,
+		status:   http.StatusAccepted,
+		body:     body,
+		location: apiPrefix + "/operations/" + operation.ID,
+	}
 	s.rememberIdempotency(key, result)
 	writeStoredResult(response, result)
 }
@@ -567,7 +601,11 @@ func (s *Server) handleOperation(response http.ResponseWriter, request *http.Req
 		writeError(response, http.StatusNotFound, err)
 		return
 	}
-	s.writeJSON(response, http.StatusOK, map[string]any{"schema_version": schemaVersion, "operation": makeOperationDTO(operation)})
+	s.writeJSON(
+		response,
+		http.StatusOK,
+		map[string]any{"schema_version": schemaVersion, "operation": makeOperationDTO(operation)},
+	)
 }
 
 func (s *Server) handleCancel(response http.ResponseWriter, request *http.Request, operationID string) {
@@ -608,7 +646,11 @@ func (s *Server) handleCancel(response http.ResponseWriter, request *http.Reques
 		writeStoreError(response, err)
 		return
 	}
-	s.writeJSON(response, http.StatusAccepted, map[string]any{"schema_version": schemaVersion, "operation": makeOperationDTO(operation)})
+	s.writeJSON(
+		response,
+		http.StatusAccepted,
+		map[string]any{"schema_version": schemaVersion, "operation": makeOperationDTO(operation)},
+	)
 }
 
 func (s *Server) handleDivergence(response http.ResponseWriter, request *http.Request, roundID string) {
@@ -631,7 +673,14 @@ func (s *Server) handleDivergence(response http.ResponseWriter, request *http.Re
 		return
 	}
 	if round.SnapshotID == "" {
-		s.writeJSON(response, http.StatusOK, map[string]any{"schema_version": schemaVersion, "divergence": map[string]any{"status": "unavailable", "message": "Round has no captured snapshot."}})
+		s.writeJSON(
+			response,
+			http.StatusOK,
+			map[string]any{
+				"schema_version": schemaVersion,
+				"divergence":     map[string]any{"status": "unavailable", "message": "Round has no captured snapshot."},
+			},
+		)
 		return
 	}
 	frozen, err := s.store.GetSnapshot(request.Context(), round.SnapshotID)
@@ -658,7 +707,11 @@ func (s *Server) handleDivergence(response http.ResponseWriter, request *http.Re
 		writeError(response, http.StatusInternalServerError, err)
 		return
 	}
-	s.writeJSON(response, http.StatusOK, map[string]any{"schema_version": schemaVersion, "divergence": makeDivergenceDTO(report)})
+	s.writeJSON(
+		response,
+		http.StatusOK,
+		map[string]any{"schema_version": schemaVersion, "divergence": makeDivergenceDTO(report)},
+	)
 }
 
 func (s *Server) handleEvents(response http.ResponseWriter, request *http.Request) {
@@ -709,9 +762,15 @@ func (s *Server) handleEvents(response http.ResponseWriter, request *http.Reques
 		}
 		for _, activity := range activities {
 			event := map[string]any{
-				"schema_version": schemaVersion, "activity_id": activity.ID, "session_id": activity.SessionID,
-				"operation_id": activity.OperationID, "round_id": activity.RoundID, "event_kind": activity.Kind,
-				"status": activity.Status, "message": activity.Message, "created_at": activity.CreatedAt.UTC().Format(time.RFC3339Nano),
+				"schema_version": schemaVersion,
+				"activity_id":    activity.ID,
+				"session_id":     activity.SessionID,
+				"operation_id":   activity.OperationID,
+				"round_id":       activity.RoundID,
+				"event_kind":     activity.Kind,
+				"status":         activity.Status,
+				"message":        activity.Message,
+				"created_at":     activity.CreatedAt.UTC().Format(time.RFC3339Nano),
 			}
 			encoded, _ := json.Marshal(event)
 			_, _ = fmt.Fprintf(response, "id: %d\nevent: activity\ndata: %s\n\n", activity.ID, encoded)
@@ -739,7 +798,11 @@ func (s *Server) repositoryIdentity(ctx context.Context) (db.RepositoryIdentity,
 	if err != nil {
 		return db.RepositoryIdentity{}, fmt.Errorf("discover current repository: %w", err)
 	}
-	return db.RepositoryIdentity{CanonicalIdentity: identity.CanonicalIdentity, DisplayName: identity.DisplayName, DiscoveredGitDir: identity.DiscoveredGitDir}, nil
+	return db.RepositoryIdentity{
+		CanonicalIdentity: identity.CanonicalIdentity,
+		DisplayName:       identity.DisplayName,
+		DiscoveredGitDir:  identity.DiscoveredGitDir,
+	}, nil
 }
 
 func (s *Server) ensureCurrentRepository(session db.Session) error {
@@ -830,9 +893,14 @@ func writeError(response http.ResponseWriter, status int, err error) {
 
 func writeStoreError(response http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, db.ErrSessionNotFound), errors.Is(err, db.ErrRoundNotFound), errors.Is(err, db.ErrOperationNotFound), errors.Is(err, db.ErrSnapshotNotFound):
+	case errors.Is(err, db.ErrSessionNotFound),
+		errors.Is(err, db.ErrRoundNotFound),
+		errors.Is(err, db.ErrOperationNotFound),
+		errors.Is(err, db.ErrSnapshotNotFound):
 		writeError(response, http.StatusNotFound, err)
-	case errors.Is(err, db.ErrOperationActive), errors.Is(err, db.ErrOperationAlreadyOwned), errors.Is(err, db.ErrOperationNotAcquirable):
+	case errors.Is(err, db.ErrOperationActive),
+		errors.Is(err, db.ErrOperationAlreadyOwned),
+		errors.Is(err, db.ErrOperationNotAcquirable):
 		writeError(response, http.StatusConflict, err)
 	default:
 		writeError(response, http.StatusBadRequest, err)

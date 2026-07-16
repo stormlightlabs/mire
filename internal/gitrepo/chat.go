@@ -12,7 +12,13 @@ import (
 // CheckChatDivergenceForSession returns the durable chat timeline together
 // with a read-time stale marker relative to the live repository. The stored
 // messages and their frozen snapshot bindings are never rewritten.
-func CheckChatDivergenceForSession(ctx context.Context, directory string, store *db.RepositoryStore, sessionID string, objectStore *snapshot.ObjectStore) (review.ChatTimeline, error) {
+func CheckChatDivergenceForSession(
+	ctx context.Context,
+	directory string,
+	store *db.RepositoryStore,
+	sessionID string,
+	objectStore *snapshot.ObjectStore,
+) (review.ChatTimeline, error) {
 	if store == nil {
 		return review.ChatTimeline{}, fmt.Errorf("check chat divergence: store is nil")
 	}

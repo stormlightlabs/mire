@@ -230,7 +230,11 @@ func (router *Router) roleConfig(role review.ModelRole) (RoleConfig, error) {
 	if alias, ok := router.config.Roles[role]; ok {
 		roleConfig, found := router.config.Aliases[alias]
 		if !found {
-			return RoleConfig{}, fmt.Errorf("read model configuration: role %q references unknown alias %q", role, alias)
+			return RoleConfig{}, fmt.Errorf(
+				"read model configuration: role %q references unknown alias %q",
+				role,
+				alias,
+			)
 		}
 		return normalizeRoleConfig(roleConfig)
 	}
@@ -295,7 +299,8 @@ func normalizeRoleConfig(config RoleConfig) (RoleConfig, error) {
 	if config.Retry.MaxDelay < config.Retry.InitialDelay {
 		config.Retry.MaxDelay = config.Retry.InitialDelay
 	}
-	if config.Budget.MaxOutputBytes < 0 || config.Budget.MaxInputTokens < 0 || config.Budget.MaxOutputTokens < 0 || config.Budget.MaxTotalTokens < 0 {
+	if config.Budget.MaxOutputBytes < 0 || config.Budget.MaxInputTokens < 0 || config.Budget.MaxOutputTokens < 0 ||
+		config.Budget.MaxTotalTokens < 0 {
 		return RoleConfig{}, errors.New("model budgets cannot be negative")
 	}
 	for capability, status := range config.Capabilities {

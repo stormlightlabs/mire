@@ -68,7 +68,11 @@ func newSessionsDeleteCommand(state *commandContext) *cobra.Command {
 			}
 			defer closeStore()
 
-			if err := store.DeleteSessionForRepository(command.Context(), repository.CanonicalIdentity, sessionID); err != nil {
+			if err := store.DeleteSessionForRepository(
+				command.Context(),
+				repository.CanonicalIdentity,
+				sessionID,
+			); err != nil {
 				if errors.Is(err, db.ErrSessionNotFound) {
 					return fmt.Errorf("delete session %q: session does not exist", sessionID)
 				}

@@ -24,9 +24,11 @@ const (
 )
 
 var (
-	secretAssignmentPattern = regexp.MustCompile(`(?i)(authorization|api[-_ ]?key|token|secret|password)\s*[:=]\s*[^\s,;]+`)
-	bearerPattern           = regexp.MustCompile(`(?i)\bBearer\s+[^\s,;]+`)
-	apiKeyPattern           = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]+\b`)
+	secretAssignmentPattern = regexp.MustCompile(
+		`(?i)(authorization|api[-_ ]?key|token|secret|password)\s*[:=]\s*[^\s,;]+`,
+	)
+	bearerPattern = regexp.MustCompile(`(?i)\bBearer\s+[^\s,;]+`)
+	apiKeyPattern = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]+\b`)
 )
 
 // ProviderError is a sanitized provider or HTTP failure. It intentionally
@@ -108,12 +110,25 @@ func (err *MalformedStreamError) Error() string {
 	if err == nil {
 		return ""
 	}
-	return fmt.Sprintf("%s streaming response is malformed at event %d: %s", err.Provider, err.Event, sanitizeText(err.Reason, ""))
+	return fmt.Sprintf(
+		"%s streaming response is malformed at event %d: %s",
+		err.Provider,
+		err.Event,
+		sanitizeText(err.Reason, ""),
+	)
 }
 
 type transportParser func(io.Reader) (review.ModelResponse, error)
 
-func execute(ctx context.Context, client *http.Client, provider Provider, operation, endpoint, body, secret string, headers http.Header, config RoleConfig, parse transportParser) (review.ModelResponse, error) {
+func execute(
+	ctx context.Context,
+	client *http.Client,
+	provider Provider,
+	operation, endpoint, body, secret string,
+	headers http.Header,
+	config RoleConfig,
+	parse transportParser,
+) (review.ModelResponse, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -153,7 +168,14 @@ func execute(ctx context.Context, client *http.Client, provider Provider, operat
 		}
 
 		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-			providerErr := decodeProviderError(provider, operation, response.StatusCode, response.Header, response.Body, secret)
+			providerErr := decodeProviderError(
+				provider,
+				operation,
+				response.StatusCode,
+				response.Header,
+				response.Body,
+				secret,
+			)
 			_ = response.Body.Close()
 			if providerErr.Retryable && attempt < config.Retry.MaxAttempts {
 				if err := waitRetry(callCtx, config.Retry, attempt, providerErr.RetryAfter); err != nil {
@@ -168,7 +190,12 @@ func execute(ctx context.Context, client *http.Client, provider Provider, operat
 		closeErr := response.Body.Close()
 		if parseErr != nil {
 			if closeErr != nil {
-				return review.ModelResponse{}, fmt.Errorf("parse %s response: %w; close response: %v", provider, parseErr, closeErr)
+				return review.ModelResponse{}, fmt.Errorf(
+					"parse %s response: %w; close response: %v",
+					provider,
+					parseErr,
+					closeErr,
+				)
 			}
 			return review.ModelResponse{}, parseErr
 		}
@@ -225,7 +252,14 @@ func enforceUsageBudget(usage review.Usage, budget Budget) error {
 	return nil
 }
 
-func decodeProviderError(provider Provider, operation string, status int, headers http.Header, body io.Reader, secret string) *ProviderError {
+func decodeProviderError(
+	provider Provider,
+	operation string,
+	status int,
+	headers http.Header,
+	body io.Reader,
+	secret string,
+) *ProviderError {
 	data, _ := io.ReadAll(io.LimitReader(body, maxProviderErrorBytes))
 	var envelope struct {
 		Error   json.RawMessage `json:"error"`
@@ -256,13 +290,25 @@ func decodeProviderError(provider Provider, operation string, status int, header
 	if message == "" {
 		message = http.StatusText(status)
 	}
-	return &ProviderError{Provider: provider, Operation: operation, StatusCode: status,
-		Code: sanitizeText(envelope.Code, secret), Type: sanitizeText(envelope.Type, secret),
-		Message: sanitizeText(message, secret), Retryable: retryableStatus(status), RetryAfter: parseRetryAfter(headers)}
+	return &ProviderError{
+		Provider:   provider,
+		Operation:  operation,
+		StatusCode: status,
+		Code:       sanitizeText(envelope.Code, secret),
+		Type:       sanitizeText(envelope.Type, secret),
+		Message: sanitizeText(
+			message,
+			secret,
+		),
+		Retryable:  retryableStatus(status),
+		RetryAfter: parseRetryAfter(headers),
+	}
 }
 
 func retryableStatus(status int) bool {
-	return status == http.StatusRequestTimeout || status == http.StatusConflict || status == http.StatusTooEarly || status == http.StatusTooManyRequests || status >= 500
+	return status == http.StatusRequestTimeout || status == http.StatusConflict || status == http.StatusTooEarly ||
+		status == http.StatusTooManyRequests ||
+		status >= 500
 }
 
 func parseRetryAfter(headers http.Header) time.Duration {
@@ -283,7 +329,8 @@ func parseRetryAfter(headers http.Header) time.Duration {
 
 func endpoint(baseURL, path string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" ||
+		parsed.Fragment != "" {
 		return "", errors.New("model base URL must be an absolute URL without credentials, query, or fragment")
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
@@ -375,7 +422,11 @@ func readSSE(reader io.Reader, provider Provider, callback func(int, sseEvent) e
 		return &MalformedStreamError{Provider: provider, Event: eventNumber + 1, Reason: "unexpected SSE field"}
 	}
 	if err := scanner.Err(); err != nil {
-		return &MalformedStreamError{Provider: provider, Event: eventNumber + 1, Reason: "SSE frame exceeds the configured parser limit or could not be read"}
+		return &MalformedStreamError{
+			Provider: provider,
+			Event:    eventNumber + 1,
+			Reason:   "SSE frame exceeds the configured parser limit or could not be read",
+		}
 	}
 	if err := dispatch(); err != nil {
 		return err

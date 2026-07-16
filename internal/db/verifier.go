@@ -26,7 +26,10 @@ var (
 // CreateVerificationRun persists one queued verifier run for a retained
 // candidate. The candidate and run are bound to the same session, round, and
 // snapshot before any model work starts.
-func (store *RepositoryStore) CreateVerificationRun(ctx context.Context, run review.VerificationRunRecord) (review.VerificationRunRecord, error) {
+func (store *RepositoryStore) CreateVerificationRun(
+	ctx context.Context,
+	run review.VerificationRunRecord,
+) (review.VerificationRunRecord, error) {
 	if err := store.validate(); err != nil {
 		return review.VerificationRunRecord{}, err
 	}
@@ -50,13 +53,20 @@ func (store *RepositoryStore) CreateVerificationRun(ctx context.Context, run rev
 SELECT session_id, round_id, snapshot_id
 FROM review_candidates WHERE id = ?`, run.CandidateID).Scan(&candidateSession, &candidateRound, &candidateSnapshot)
 	if errors.Is(err, sql.ErrNoRows) {
-		return review.VerificationRunRecord{}, fmt.Errorf("create verification run: %w: %q", ErrReviewCandidateNotFound, run.CandidateID)
+		return review.VerificationRunRecord{}, fmt.Errorf(
+			"create verification run: %w: %q",
+			ErrReviewCandidateNotFound,
+			run.CandidateID,
+		)
 	}
 	if err != nil {
 		return review.VerificationRunRecord{}, fmt.Errorf("create verification run: read candidate: %w", err)
 	}
-	if candidateSession != run.SessionID || (run.RoundID != "" && candidateRound != run.RoundID) || (run.SnapshotID != "" && candidateSnapshot != run.SnapshotID) {
-		return review.VerificationRunRecord{}, errors.New("create verification run: candidate provenance does not match run")
+	if candidateSession != run.SessionID || (run.RoundID != "" && candidateRound != run.RoundID) ||
+		(run.SnapshotID != "" && candidateSnapshot != run.SnapshotID) {
+		return review.VerificationRunRecord{}, errors.New(
+			"create verification run: candidate provenance does not match run",
+		)
 	}
 	if run.RoundID == "" {
 		run.RoundID = candidateRound
@@ -116,7 +126,8 @@ func (store *RepositoryStore) UpdateVerificationRun(ctx context.Context, run rev
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if run.Role != review.ModelRoleVerifier || !run.Status.Valid() || strings.TrimSpace(run.ID) == "" || strings.TrimSpace(run.CandidateID) == "" {
+	if run.Role != review.ModelRoleVerifier || !run.Status.Valid() || strings.TrimSpace(run.ID) == "" ||
+		strings.TrimSpace(run.CandidateID) == "" {
 		return errors.New("update verification run: run identity or status is invalid")
 	}
 	parameters, usage, redactions, err := encodeRunFields(run.RunRecord)
@@ -139,11 +150,18 @@ FROM verification_runs WHERE id = ?`, run.ID).Scan(&current, &candidateID, &sess
 	if err != nil {
 		return fmt.Errorf("read verification run %q: %w", run.ID, err)
 	}
-	if candidateID != run.CandidateID || sessionID != run.SessionID || roundID != run.RoundID || snapshotID != run.SnapshotID {
+	if candidateID != run.CandidateID || sessionID != run.SessionID || roundID != run.RoundID ||
+		snapshotID != run.SnapshotID {
 		return errors.New("update verification run: immutable candidate provenance changed")
 	}
 	inputDigestChanged := current != string(review.RunStatusQueued) && inputDigest != run.Provenance.InputDigest
-	if adapter != run.Provenance.Adapter || protocol != run.Provenance.Protocol || promptTemplateVersion != run.Provenance.PromptTemplateVersion || model != run.Provenance.Model || existingParameters != parameters || inputManifestDigest != run.Provenance.InputManifestDigest || inputDigestChanged || existingRedactions != redactions {
+	if adapter != run.Provenance.Adapter || protocol != run.Provenance.Protocol ||
+		promptTemplateVersion != run.Provenance.PromptTemplateVersion ||
+		model != run.Provenance.Model ||
+		existingParameters != parameters ||
+		inputManifestDigest != run.Provenance.InputManifestDigest ||
+		inputDigestChanged ||
+		existingRedactions != redactions {
 		return errors.New("update verification run: immutable run provenance changed")
 	}
 	if !review.RunStatus(current).CanTransitionTo(run.Status) {
@@ -169,7 +187,10 @@ WHERE id = ?`,
 }
 
 // GetVerificationRun returns the authoritative persisted verifier run.
-func (store *RepositoryStore) GetVerificationRun(ctx context.Context, runID string) (review.VerificationRunRecord, error) {
+func (store *RepositoryStore) GetVerificationRun(
+	ctx context.Context,
+	runID string,
+) (review.VerificationRunRecord, error) {
 	if err := store.validate(); err != nil {
 		return review.VerificationRunRecord{}, err
 	}
@@ -192,14 +213,21 @@ func (store *RepositoryStore) GetVerificationRun(ctx context.Context, runID stri
 
 // ListVerificationRuns returns all verifier provenance records for a round in
 // stable creation order.
-func (store *RepositoryStore) ListVerificationRuns(ctx context.Context, roundID string) ([]review.VerificationRunRecord, error) {
+func (store *RepositoryStore) ListVerificationRuns(
+	ctx context.Context,
+	roundID string,
+) ([]review.VerificationRunRecord, error) {
 	if err := store.validate(); err != nil {
 		return nil, err
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := store.database.QueryContext(ctx, verificationRunQuery+` WHERE round_id = ? ORDER BY created_at ASC, id ASC`, strings.TrimSpace(roundID))
+	rows, err := store.database.QueryContext(
+		ctx,
+		verificationRunQuery+` WHERE round_id = ? ORDER BY created_at ASC, id ASC`,
+		strings.TrimSpace(roundID),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list verification runs: %w", err)
 	}
@@ -227,7 +255,8 @@ func (store *RepositoryStore) SaveVerification(ctx context.Context, verification
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if strings.TrimSpace(verification.ID) == "" || strings.TrimSpace(verification.CandidateID) == "" || strings.TrimSpace(verification.RunID) == "" {
+	if strings.TrimSpace(verification.ID) == "" || strings.TrimSpace(verification.CandidateID) == "" ||
+		strings.TrimSpace(verification.RunID) == "" {
 		return errors.New("save verification: IDs are required")
 	}
 	if !verification.State.Valid() || verification.State == review.VerificationNotRun {
@@ -249,7 +278,9 @@ FROM verification_runs WHERE id = ?`, verification.RunID).Scan(&runSession, &run
 	if runStatus == string(review.RunStatusQueued) || runStatus == string(review.RunStatusRunning) {
 		return errors.New("save verification: run is not terminal")
 	}
-	if runSession != verification.SessionID || runRound != verification.RoundID || runSnapshot != verification.SnapshotID || runCandidate != verification.CandidateID {
+	if runSession != verification.SessionID || runRound != verification.RoundID ||
+		runSnapshot != verification.SnapshotID ||
+		runCandidate != verification.CandidateID {
 		return errors.New("save verification: record provenance does not match run")
 	}
 	data, err := json.Marshal(verification)
@@ -275,7 +306,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, verification.ID, verification.SessionID,
 }
 
 // GetVerification returns one immutable verification record.
-func (store *RepositoryStore) GetVerification(ctx context.Context, verificationID string) (review.VerificationRecord, error) {
+func (store *RepositoryStore) GetVerification(
+	ctx context.Context,
+	verificationID string,
+) (review.VerificationRecord, error) {
 	if err := store.validate(); err != nil {
 		return review.VerificationRecord{}, err
 	}
@@ -286,22 +320,34 @@ func (store *RepositoryStore) GetVerification(ctx context.Context, verificationI
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return scanVerification(store.database.QueryRowContext(ctx, `SELECT verification_json FROM verifications WHERE id = ?`, verificationID), verificationID)
+	return scanVerification(
+		store.database.QueryRowContext(ctx, `SELECT verification_json FROM verifications WHERE id = ?`, verificationID),
+		verificationID,
+	)
 }
 
 // ListVerifications returns immutable verification records for a round in
 // creation order.
-func (store *RepositoryStore) ListVerifications(ctx context.Context, roundID string) ([]review.VerificationRecord, error) {
+func (store *RepositoryStore) ListVerifications(
+	ctx context.Context,
+	roundID string,
+) ([]review.VerificationRecord, error) {
 	return store.listVerifications(ctx, `round_id = ?`, roundID)
 }
 
 // ListCandidateVerifications returns all verification attempts for a candidate.
-func (store *RepositoryStore) ListCandidateVerifications(ctx context.Context, candidateID string) ([]review.VerificationRecord, error) {
+func (store *RepositoryStore) ListCandidateVerifications(
+	ctx context.Context,
+	candidateID string,
+) ([]review.VerificationRecord, error) {
 	return store.listVerifications(ctx, `candidate_id = ?`, candidateID)
 }
 
 // GetLatestVerification returns the newest immutable attempt for a candidate.
-func (store *RepositoryStore) GetLatestVerification(ctx context.Context, candidateID string) (review.VerificationRecord, error) {
+func (store *RepositoryStore) GetLatestVerification(
+	ctx context.Context,
+	candidateID string,
+) (review.VerificationRecord, error) {
 	if err := store.validate(); err != nil {
 		return review.VerificationRecord{}, err
 	}
@@ -321,14 +367,21 @@ WHERE candidate_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`, candidateID).
 	return decodeVerificationData(data, "latest verification")
 }
 
-func (store *RepositoryStore) listVerifications(ctx context.Context, predicate, value string) ([]review.VerificationRecord, error) {
+func (store *RepositoryStore) listVerifications(
+	ctx context.Context,
+	predicate, value string,
+) ([]review.VerificationRecord, error) {
 	if err := store.validate(); err != nil {
 		return nil, err
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := store.database.QueryContext(ctx, `SELECT verification_json FROM verifications WHERE `+predicate+` ORDER BY created_at ASC, id ASC`, value)
+	rows, err := store.database.QueryContext(
+		ctx,
+		`SELECT verification_json FROM verifications WHERE `+predicate+` ORDER BY created_at ASC, id ASC`,
+		value,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list verifications: %w", err)
 	}

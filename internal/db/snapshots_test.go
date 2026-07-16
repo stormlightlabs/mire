@@ -32,7 +32,12 @@ func TestCreateCapturedSessionPersists(t *testing.T) {
 		DisplayName:       "snapshot",
 		DiscoveredGitDir:  "/workspaces/snapshot/.git",
 	}
-	session, round, persisted, err := store.CreateCapturedSession(context.Background(), identity, "Captured review", capture)
+	session, round, persisted, err := store.CreateCapturedSession(
+		context.Background(),
+		identity,
+		"Captured review",
+		capture,
+	)
 	if err != nil {
 		t.Fatalf("CreateCapturedSession() error = %v", err)
 	}
@@ -72,7 +77,12 @@ func TestCreateCapturedSessionPersists(t *testing.T) {
 		t.Fatalf("stored changes = %#v", changes)
 	}
 
-	if _, _, _, err := store.CreateCapturedSession(context.Background(), identity, "Should roll back", capture); err == nil {
+	if _, _, _, err := store.CreateCapturedSession(
+		context.Background(),
+		identity,
+		"Should roll back",
+		capture,
+	); err == nil {
 		t.Fatal("duplicate captured session succeeded, want transaction failure")
 	}
 	var sessions, snapshots int
@@ -99,7 +109,15 @@ func TestAppendCapturedRoundPreserves(t *testing.T) {
 		t.Fatalf("OpenState() error = %v", err)
 	}
 	defer database.Close()
-	ids := []string{"repository-id", "session-id", "snapshot-one", "round-one", "snapshot-two", "round-two", "cancel-operation"}
+	ids := []string{
+		"repository-id",
+		"session-id",
+		"snapshot-one",
+		"round-one",
+		"snapshot-two",
+		"round-two",
+		"cancel-operation",
+	}
 	store := NewRepositoryStore(database, WithIDGenerator(func() (string, error) {
 		if len(ids) == 0 {
 			return "", errors.New("test IDs exhausted")
@@ -108,7 +126,11 @@ func TestAppendCapturedRoundPreserves(t *testing.T) {
 		ids = ids[1:]
 		return id, nil
 	}))
-	identity := RepositoryIdentity{CanonicalIdentity: "/workspaces/append", DisplayName: "append", DiscoveredGitDir: "/workspaces/append/.git"}
+	identity := RepositoryIdentity{
+		CanonicalIdentity: "/workspaces/append",
+		DisplayName:       "append",
+		DiscoveredGitDir:  "/workspaces/append/.git",
+	}
 	firstCapture := testCapture(t)
 	session, firstRound, _, err := store.CreateCapturedSession(ctx, identity, "Review", firstCapture)
 	if err != nil {
@@ -160,13 +182,25 @@ func TestAppendCapturedRoundPreserves(t *testing.T) {
 		t.Fatalf("GetSession() after cancellation error = %v", err)
 	}
 	if restoredSession.CurrentRoundID != firstRound.ID {
-		t.Fatalf("current round after cancellation = %q, want predecessor %q", restoredSession.CurrentRoundID, firstRound.ID)
+		t.Fatalf(
+			"current round after cancellation = %q, want predecessor %q",
+			restoredSession.CurrentRoundID,
+			firstRound.ID,
+		)
 	}
 
 	other := identity
 	other.CanonicalIdentity = "/workspaces/other"
 	other.DiscoveredGitDir = "/workspaces/other/.git"
-	if _, _, _, err := store.AppendCapturedRound(ctx, session.ID, other, firstCapture); !errors.Is(err, ErrSessionRepositoryMismatch) {
+	if _, _, _, err := store.AppendCapturedRound(
+		ctx,
+		session.ID,
+		other,
+		firstCapture,
+	); !errors.Is(
+		err,
+		ErrSessionRepositoryMismatch,
+	) {
 		t.Fatalf("AppendCapturedRound(other repository) error = %v, want ErrSessionRepositoryMismatch", err)
 	}
 	var snapshots int
@@ -181,16 +215,24 @@ func TestAppendCapturedRoundPreserves(t *testing.T) {
 func testCapture(t *testing.T) snapshot.Capture {
 	t.Helper()
 	baseEntries := []snapshot.Entry{
-		{Path: "README.md", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: 4,
-			ContentDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", GitOID: "base-readme"},
-		{Path: "old.txt", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: 3,
-			ContentDigest: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", GitOID: "base-old"},
+		{
+			Path: "README.md", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: 4,
+			ContentDigest: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", GitOID: "base-readme",
+		},
+		{
+			Path: "old.txt", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: 3,
+			ContentDigest: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", GitOID: "base-old",
+		},
 	}
 	targetEntries := []snapshot.Entry{
-		{Path: "README.md", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: 5,
-			ContentDigest: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", GitOID: "target-readme"},
-		{Path: "new.txt", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: 3,
-			ContentDigest: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", GitOID: "target-old"},
+		{
+			Path: "README.md", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: 5,
+			ContentDigest: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", GitOID: "target-readme",
+		},
+		{
+			Path: "new.txt", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: 3,
+			ContentDigest: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", GitOID: "target-old",
+		},
 	}
 	capture := snapshot.Capture{
 		RequestedComparison: "base..target",

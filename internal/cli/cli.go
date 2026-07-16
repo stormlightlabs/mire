@@ -15,11 +15,9 @@ import (
 	"github.com/stormlightlabs/mire/internal/snapshot"
 )
 
-var (
-	// [ErrNotGitRepository] is returned when a current-repository
-	// operation is requested outside a Git worktree.
-	ErrNotGitRepository = errors.New("not inside a Git repository")
-)
+// [ErrNotGitRepository] is returned when a current-repository
+// operation is requested outside a Git worktree.
+var ErrNotGitRepository = errors.New("not inside a Git repository")
 
 // Config wires process dependencies into the CLI.
 //

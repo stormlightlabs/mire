@@ -13,25 +13,40 @@ func TestVerifyCandidateDerivesEvidenceLanes(t *testing.T) {
 	change := verifierFixtureChange()
 	candidate := verifierFixtureCandidate()
 	valid := verifierFixtureEnvelope(VerificationSupported)
-	result, err := VerifyCandidate(context.Background(), change, candidate, verifierFixtureModel{output: mustJSON(t, valid)}, VerifierOptions{
-		Retry: RetryPolicy{MaxAttempts: 1},
-		Now:   func() time.Time { return time.Date(2026, time.July, 15, 15, 0, 0, 0, time.UTC) },
-	})
+	result, err := VerifyCandidate(
+		context.Background(),
+		change,
+		candidate,
+		verifierFixtureModel{output: mustJSON(t, valid)},
+		VerifierOptions{
+			ModelRunOptions: ModelRunOptions{
+				Retry: RetryPolicy{MaxAttempts: 1},
+				Now:   func() time.Time { return time.Date(2026, time.July, 15, 15, 0, 0, 0, time.UTC) },
+			},
+		},
+	)
 	if err != nil {
 		t.Fatalf("VerifyCandidate() error = %v", err)
 	}
 	if result.Lane != FindingLaneVerified || !EvidenceFloorSatisfied(change, candidate, result.Verification) {
 		t.Fatalf("result = %#v, want verified lane", result)
 	}
-	if result.Verification.Evidence[0].OutputPointer == "" || result.Verification.Evidence[0].ProducingRunID != result.Run.ID {
+	if result.Verification.Evidence[0].OutputPointer == "" ||
+		result.Verification.Evidence[0].ProducingRunID != result.Run.ID {
 		t.Fatalf("evidence provenance = %#v", result.Verification.Evidence)
 	}
 
 	unsupported := valid
 	unsupported.SupportingEvidence = nil
-	candidateResult, err := VerifyCandidate(context.Background(), change, candidate, verifierFixtureModel{output: mustJSON(t, unsupported)}, VerifierOptions{
-		Retry: RetryPolicy{MaxAttempts: 1},
-	})
+	candidateResult, err := VerifyCandidate(
+		context.Background(),
+		change,
+		candidate,
+		verifierFixtureModel{output: mustJSON(t, unsupported)},
+		VerifierOptions{
+			ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 1}},
+		},
+	)
 	if err != nil {
 		t.Fatalf("VerifyCandidate() without support error = %v", err)
 	}
@@ -39,9 +54,15 @@ func TestVerifyCandidateDerivesEvidenceLanes(t *testing.T) {
 		t.Fatalf("lane = %q, want candidate", candidateResult.Lane)
 	}
 
-	refuted, err := VerifyCandidate(context.Background(), change, candidate, verifierFixtureModel{output: mustJSON(t, verifierFixtureEnvelope(VerificationRefuted))}, VerifierOptions{
-		Retry: RetryPolicy{MaxAttempts: 1},
-	})
+	refuted, err := VerifyCandidate(
+		context.Background(),
+		change,
+		candidate,
+		verifierFixtureModel{output: mustJSON(t, verifierFixtureEnvelope(VerificationRefuted))},
+		VerifierOptions{
+			ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 1}},
+		},
+	)
 	if err != nil {
 		t.Fatalf("refuted VerifyCandidate() error = %v", err)
 	}
@@ -55,13 +76,14 @@ func TestVerifyCandidateKeepsBlockedWorkAuditable(t *testing.T) {
 
 	change := verifierFixtureChange()
 	result, err := VerifyCandidate(context.Background(), change, verifierFixtureCandidate(), nil, VerifierOptions{
-		Retry: RetryPolicy{MaxAttempts: 1},
+		ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 1}},
 	})
 	if err == nil {
 		t.Fatal("VerifyCandidate() error = nil, want blocked model error")
 	}
 	var verificationErr *VerificationError
-	if !errors.As(err, &verificationErr) || verificationErr.State != VerificationBlocked || result.Verification.State != VerificationBlocked {
+	if !errors.As(err, &verificationErr) || verificationErr.State != VerificationBlocked ||
+		result.Verification.State != VerificationBlocked {
 		t.Fatalf("error=%v result=%#v, want blocked verification", err, result)
 	}
 	if result.Lane != FindingLaneCandidate || result.Run.Status != RunStatusFailed {
@@ -94,10 +116,32 @@ func TestEvidenceFloorIgnoresConfidenceAndAnalyzerSignals(t *testing.T) {
 	candidate := verifierFixtureCandidate()
 	candidate.Candidate.Confidence = 0
 	record := VerificationRecord{
-		CandidateID: candidate.ID, SnapshotID: change.SnapshotID, RunID: "verify-run", State: VerificationSupported,
-		SuspectedInvariant: "the invariant is violated", RefutationAttempt: "Tried the valid-input and guard paths.",
-		ConcretePath: []VerificationPathStep{{Summary: "Input reaches the changed branch.", SnapshotID: change.SnapshotID, Anchors: candidate.Candidate.Anchors, ArtifactDigest: "path-digest"}},
-		Evidence:     []Evidence{{Relation: EvidenceSupports, SnapshotID: change.SnapshotID, Anchors: candidate.Candidate.Anchors, Summary: "The guard is absent on the changed path.", ProducingRunID: "verify-run", ArtifactDigest: "source-digest", Independent: true, Concrete: true}},
+		CandidateID:        candidate.ID,
+		SnapshotID:         change.SnapshotID,
+		RunID:              "verify-run",
+		State:              VerificationSupported,
+		SuspectedInvariant: "the invariant is violated",
+		RefutationAttempt:  "Tried the valid-input and guard paths.",
+		ConcretePath: []VerificationPathStep{
+			{
+				Summary:        "Input reaches the changed branch.",
+				SnapshotID:     change.SnapshotID,
+				Anchors:        candidate.Candidate.Anchors,
+				ArtifactDigest: "path-digest",
+			},
+		},
+		Evidence: []Evidence{
+			{
+				Relation:       EvidenceSupports,
+				SnapshotID:     change.SnapshotID,
+				Anchors:        candidate.Candidate.Anchors,
+				Summary:        "The guard is absent on the changed path.",
+				ProducingRunID: "verify-run",
+				ArtifactDigest: "source-digest",
+				Independent:    true,
+				Concrete:       true,
+			},
+		},
 	}
 	if err := ValidateEvidenceFloor(change, candidate, record); err != nil {
 		t.Fatalf("ValidateEvidenceFloor() error = %v", err)
@@ -114,31 +158,89 @@ func TestValidateEvidenceFloorBoundaries(t *testing.T) {
 	change := verifierFixtureChange()
 	candidate := verifierFixtureCandidate()
 	valid := VerificationRecord{
-		CandidateID: candidate.ID, SnapshotID: change.SnapshotID, RunID: "verify-run", State: VerificationSupported,
-		SuspectedInvariant: "The invariant is violated.", RefutationAttempt: "Tried to refute the path.",
-		ConcretePath: []VerificationPathStep{{Summary: "The input reaches the branch.", SnapshotID: change.SnapshotID, Anchors: candidate.Candidate.Anchors, ArtifactDigest: "path-digest"}},
-		Evidence:     []Evidence{{Relation: EvidenceSupports, SnapshotID: change.SnapshotID, Anchors: candidate.Candidate.Anchors, Summary: "The guard is absent.", ProducingRunID: "verify-run", ArtifactDigest: "source-digest", Independent: true, Concrete: true}},
+		CandidateID:        candidate.ID,
+		SnapshotID:         change.SnapshotID,
+		RunID:              "verify-run",
+		State:              VerificationSupported,
+		SuspectedInvariant: "The invariant is violated.",
+		RefutationAttempt:  "Tried to refute the path.",
+		ConcretePath: []VerificationPathStep{
+			{
+				Summary:        "The input reaches the branch.",
+				SnapshotID:     change.SnapshotID,
+				Anchors:        candidate.Candidate.Anchors,
+				ArtifactDigest: "path-digest",
+			},
+		},
+		Evidence: []Evidence{
+			{
+				Relation:       EvidenceSupports,
+				SnapshotID:     change.SnapshotID,
+				Anchors:        candidate.Candidate.Anchors,
+				Summary:        "The guard is absent.",
+				ProducingRunID: "verify-run",
+				ArtifactDigest: "source-digest",
+				Independent:    true,
+				Concrete:       true,
+			},
+		},
 	}
 	tests := []struct {
 		name   string
 		mutate func(*CandidateRecord, *VerificationRecord)
 	}{
-		{name: "wrong state", mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.State = VerificationInconclusive }},
-		{name: "missing claim", mutate: func(candidate *CandidateRecord, _ *VerificationRecord) { candidate.Candidate.Claim = "" }},
-		{name: "missing impact", mutate: func(candidate *CandidateRecord, _ *VerificationRecord) { candidate.Candidate.Impact = "" }},
-		{name: "missing snapshot", mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.SnapshotID = "" }},
+		{
+			name:   "wrong state",
+			mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.State = VerificationInconclusive },
+		},
+		{
+			name:   "missing claim",
+			mutate: func(candidate *CandidateRecord, _ *VerificationRecord) { candidate.Candidate.Claim = "" },
+		},
+		{
+			name:   "missing impact",
+			mutate: func(candidate *CandidateRecord, _ *VerificationRecord) { candidate.Candidate.Impact = "" },
+		},
+		{
+			name:   "missing snapshot",
+			mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.SnapshotID = "" },
+		},
 		{name: "missing run", mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.RunID = "" }},
-		{name: "missing invariant", mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.SuspectedInvariant = "" }},
-		{name: "missing refutation", mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.RefutationAttempt = "" }},
-		{name: "missing path", mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.ConcretePath = nil }},
+		{
+			name:   "missing invariant",
+			mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.SuspectedInvariant = "" },
+		},
+		{
+			name:   "missing refutation",
+			mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.RefutationAttempt = "" },
+		},
+		{
+			name:   "missing path",
+			mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.ConcretePath = nil },
+		},
 		{name: "non-supporting evidence", mutate: func(_ *CandidateRecord, record *VerificationRecord) {
 			record.Evidence[0].Relation = EvidenceContextualizes
 		}},
-		{name: "missing summary", mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.Evidence[0].Summary = "" }},
-		{name: "missing artifact", mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.Evidence[0].ArtifactDigest = "" }},
-		{name: "missing anchor", mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.Evidence[0].Anchors = nil }},
-		{name: "dependent evidence", mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.Evidence[0].Independent = false }},
-		{name: "non-concrete evidence", mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.Evidence[0].Concrete = false }},
+		{
+			name:   "missing summary",
+			mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.Evidence[0].Summary = "" },
+		},
+		{
+			name:   "missing artifact",
+			mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.Evidence[0].ArtifactDigest = "" },
+		},
+		{
+			name:   "missing anchor",
+			mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.Evidence[0].Anchors = nil },
+		},
+		{
+			name:   "dependent evidence",
+			mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.Evidence[0].Independent = false },
+		},
+		{
+			name:   "non-concrete evidence",
+			mutate: func(_ *CandidateRecord, record *VerificationRecord) { record.Evidence[0].Concrete = false },
+		},
 		{name: "unknown anchor", mutate: func(_ *CandidateRecord, record *VerificationRecord) {
 			record.Evidence[0].Anchors[0].HunkID = "missing-hunk"
 		}},
@@ -170,16 +272,27 @@ func TestVerifyCandidateBoundsRetrievalAndRepairsMalformedOutput(t *testing.T) {
 		{output: mustJSON(t, verifierFixtureEnvelope(VerificationSupported))},
 	}}
 	retriever := SnapshotRetrieverFunc(func(_ context.Context, request RetrievalRequest) ([]RetrievedArtifact, error) {
-		return []RetrievedArtifact{{Kind: request.Kind, Path: request.Path, Relation: request.Relation, Content: request.Kind}}, nil
+		return []RetrievedArtifact{
+			{Kind: request.Kind, Path: request.Path, Relation: request.Relation, Content: request.Kind},
+		}, nil
 	})
 	result, err := VerifyCandidate(context.Background(), change, verifierFixtureCandidate(), model, VerifierOptions{
-		Retry: RetryPolicy{MaxAttempts: 2, RepairAttempts: 1}, Budget: PassBudget{MaxArtifacts: 1}, Retriever: retriever,
+		ModelRunOptions: ModelRunOptions{
+			Retry: RetryPolicy{MaxAttempts: 2, RepairAttempts: 1},
+		},
+		Budget:    PassBudget{MaxArtifacts: 1},
+		Retriever: retriever,
 	})
 	if err != nil {
 		t.Fatalf("VerifyCandidate() error = %v", err)
 	}
-	if result.Lane != FindingLaneVerified || len(result.Verification.Diagnostics) == 0 || len(model.requests) != 2 || !model.requests[1].Repair {
-		t.Fatalf("result=%#v requests=%#v, want repaired verified result with retrieval diagnostic", result, model.requests)
+	if result.Lane != FindingLaneVerified || len(result.Verification.Diagnostics) == 0 || len(model.requests) != 2 ||
+		!model.requests[1].Repair {
+		t.Fatalf(
+			"result=%#v requests=%#v, want repaired verified result with retrieval diagnostic",
+			result,
+			model.requests,
+		)
 	}
 	if result.Run.Provenance.InputDigest == "" || result.Run.Provenance.OutputDigest == "" {
 		t.Fatalf("run provenance = %#v", result.Run.Provenance)
@@ -197,38 +310,103 @@ func TestRunCandidateVerificationsKeepsEachResult(t *testing.T) {
 	first := verifierFixtureCandidate()
 	second := verifierFixtureCandidate()
 	second.ID = "candidate-2"
-	result, err := RunCandidateVerifications(context.Background(), change, []CandidateRecord{first, second}, model, VerifierOptions{Retry: RetryPolicy{MaxAttempts: 1}})
+	result, err := RunCandidateVerifications(
+		context.Background(),
+		change,
+		[]CandidateRecord{first, second},
+		model,
+		VerifierOptions{ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 1}}},
+	)
 	if err != nil {
 		t.Fatalf("RunCandidateVerifications() error = %v", err)
 	}
-	if len(result.Results) != 2 || result.Results[0].Lane != FindingLaneVerified || result.Results[1].Lane != FindingLaneRefuted {
+	if len(result.Results) != 2 || result.Results[0].Lane != FindingLaneVerified ||
+		result.Results[1].Lane != FindingLaneRefuted {
 		t.Fatalf("batch result = %#v", result)
 	}
 }
 
 func verifierFixtureChange() ChangeModel {
 	return ChangeModel{
-		SchemaVersion: "mire/v1/change-model", SessionID: "session-1", SnapshotID: "snapshot-1", SnapshotDigest: "manifest-1", Digest: "change-1",
-		Files: []FileChange{{Status: "modified", TargetPath: "src/a.go", Patch: "change", Hunks: []Hunk{{ID: "src/a.go#hunk", Available: true, Digest: "hunk-1"}}}},
+		SchemaVersion:  "mire/v1/change-model",
+		SessionID:      "session-1",
+		SnapshotID:     "snapshot-1",
+		SnapshotDigest: "manifest-1",
+		Digest:         "change-1",
+		Files: []FileChange{
+			{
+				Status:     "modified",
+				TargetPath: "src/a.go",
+				Patch:      "change",
+				Hunks:      []Hunk{{ID: "src/a.go#hunk", Available: true, Digest: "hunk-1"}},
+			},
+		},
 	}
 }
 
 func verifierFixtureCandidate() CandidateRecord {
-	return CandidateRecord{ID: "candidate-1", RunID: "review-run-1", PassName: "correctness", Ordinal: 0, Fingerprint: "candidate-fingerprint", Candidate: Candidate{
-		Claim: "The changed guard is bypassed.", Impact: "Invalid input reaches the protected branch.", Category: "correctness", Severity: "high", Confidence: 0.99,
-		Anchors: []Anchor{{SnapshotID: "snapshot-1", Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"}},
-	}}
+	return CandidateRecord{
+		ID:          "candidate-1",
+		RunID:       "review-run-1",
+		PassName:    "correctness",
+		Ordinal:     0,
+		Fingerprint: "candidate-fingerprint",
+		Candidate: Candidate{
+			Claim:      "The changed guard is bypassed.",
+			Impact:     "Invalid input reaches the protected branch.",
+			Category:   "correctness",
+			Severity:   "high",
+			Confidence: 0.99,
+			Anchors: []Anchor{
+				{SnapshotID: "snapshot-1", Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"},
+			},
+		},
+	}
 }
 
 func verifierFixtureEnvelope(state VerificationState) VerificationEnvelope {
 	anchor := Anchor{SnapshotID: "snapshot-1", Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"}
 	return VerificationEnvelope{
-		SchemaVersion: VerificationSchemaVersion, State: state, SuspectedInvariant: "The guard must reject invalid input before the changed branch.",
-		ConcretePath:       []VerificationPathStep{{Kind: "control_flow", Summary: "Invalid input reaches the changed branch.", SnapshotID: "snapshot-1", Anchors: []Anchor{anchor}, ArtifactDigest: "path-digest"}},
-		SupportingEvidence: []Evidence{{Kind: "source", SnapshotID: "snapshot-1", Anchors: []Anchor{anchor}, Summary: "The changed branch has no rejecting guard.", ArtifactDigest: "source-digest"}},
-		GuardSearch:        []Evidence{{Kind: "guard", SnapshotID: "snapshot-1", Anchors: []Anchor{anchor}, Summary: "No guard protects the branch.", ArtifactDigest: "guard-digest"}},
-		TestSearch:         []Evidence{{Kind: "test", SnapshotID: "snapshot-1", Anchors: []Anchor{anchor}, Summary: "No test covers invalid input.", ArtifactDigest: "test-digest"}},
-		RefutationAttempt:  "Tried to find an input guard and a covering test; neither refuted the path.",
+		SchemaVersion:      VerificationSchemaVersion,
+		State:              state,
+		SuspectedInvariant: "The guard must reject invalid input before the changed branch.",
+		ConcretePath: []VerificationPathStep{
+			{
+				Kind:           "control_flow",
+				Summary:        "Invalid input reaches the changed branch.",
+				SnapshotID:     "snapshot-1",
+				Anchors:        []Anchor{anchor},
+				ArtifactDigest: "path-digest",
+			},
+		},
+		SupportingEvidence: []Evidence{
+			{
+				Kind:           "source",
+				SnapshotID:     "snapshot-1",
+				Anchors:        []Anchor{anchor},
+				Summary:        "The changed branch has no rejecting guard.",
+				ArtifactDigest: "source-digest",
+			},
+		},
+		GuardSearch: []Evidence{
+			{
+				Kind:           "guard",
+				SnapshotID:     "snapshot-1",
+				Anchors:        []Anchor{anchor},
+				Summary:        "No guard protects the branch.",
+				ArtifactDigest: "guard-digest",
+			},
+		},
+		TestSearch: []Evidence{
+			{
+				Kind:           "test",
+				SnapshotID:     "snapshot-1",
+				Anchors:        []Anchor{anchor},
+				Summary:        "No test covers invalid input.",
+				ArtifactDigest: "test-digest",
+			},
+		},
+		RefutationAttempt: "Tried to find an input guard and a covering test; neither refuted the path.",
 	}
 }
 

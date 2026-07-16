@@ -2,8 +2,13 @@ set shell := ["zsh", "-cu"]
 
 default: verify
 
-fmt:
-    go fmt ./...
+fumpt:
+    gofumpt -l -w .
+
+wrap-lines:
+    golines -w . -m 120
+
+fmt: fumpt wrap-lines
 
 test:
     go test ./...

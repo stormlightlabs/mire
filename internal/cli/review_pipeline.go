@@ -23,7 +23,16 @@ type reviewExecution struct {
 	IncompleteReason string
 }
 
-func executeReview(ctx context.Context, store *db.RepositoryStore, session db.Session, round db.Round, persisted db.Snapshot, capture snapshot.Capture, objectStore *snapshot.ObjectStore, configured review.Model) (reviewExecution, error) {
+func executeReview(
+	ctx context.Context,
+	store *db.RepositoryStore,
+	session db.Session,
+	round db.Round,
+	persisted db.Snapshot,
+	capture snapshot.Capture,
+	objectStore *snapshot.ObjectStore,
+	configured review.Model,
+) (reviewExecution, error) {
 	change, err := assembleChangeModel(ctx, session.ID, persisted.ID, capture, objectStore)
 	if err != nil {
 		return reviewExecution{}, err
@@ -34,7 +43,7 @@ func executeReview(ctx context.Context, store *db.RepositoryStore, session db.Se
 	}
 	execution := reviewExecution{Change: change}
 	planner, plannerErr := review.RunPlanner(ctx, change, model, review.PlannerOptions{
-		Retry: review.DefaultRetryPolicy, RoundID: round.ID, Store: store,
+		ModelRunOptions: review.ModelRunOptions{Retry: review.DefaultRetryPolicy}, RoundID: round.ID, Store: store,
 	})
 	if plannerErr != nil || planner.Plan == nil {
 		execution.IncompleteReason = "The review plan could not be completed."
@@ -46,8 +55,13 @@ func executeReview(ctx context.Context, store *db.RepositoryStore, session db.Se
 	}
 
 	reviewer, reviewerErr := review.RunReviewPasses(ctx, change, model, review.ReviewerOpts{
-		Retry: review.DefaultRetryPolicy, RoundID: round.ID, Passes: planner.Plan.Passes,
-		Retriever: snapshotRetriever{capture: capture, objectStore: objectStore}, Store: store,
+		ModelRunOptions: review.ModelRunOptions{
+			Retry: review.DefaultRetryPolicy,
+		},
+		RoundID:   round.ID,
+		Passes:    planner.Plan.Passes,
+		Retriever: snapshotRetriever{capture: capture, objectStore: objectStore},
+		Store:     store,
 	})
 	execution.Coverage = reviewer.Coverage
 	execution.Passes = append([]review.PassCoverage(nil), reviewer.Coverage.Passes...)
@@ -57,10 +71,16 @@ func executeReview(ctx context.Context, store *db.RepositoryStore, session db.Se
 	}
 
 	if len(reviewer.Candidates) > 0 {
-		verification, verificationErr := review.RunCandidateVerifications(ctx, change, reviewer.Candidates, model, review.VerifierOptions{
-			Retry: review.DefaultRetryPolicy, RoundID: round.ID,
-			Retriever: snapshotRetriever{capture: capture, objectStore: objectStore}, Store: store,
-		})
+		verification, verificationErr := review.RunCandidateVerifications(
+			ctx,
+			change,
+			reviewer.Candidates,
+			model,
+			review.VerifierOptions{
+				ModelRunOptions: review.ModelRunOptions{Retry: review.DefaultRetryPolicy}, RoundID: round.ID,
+				Retriever: snapshotRetriever{capture: capture, objectStore: objectStore}, Store: store,
+			},
+		)
 		if verificationErr != nil && execution.IncompleteReason == "" {
 			execution.IncompleteReason = "One or more candidate verifications did not complete."
 		}
@@ -83,7 +103,12 @@ func executeReview(ctx context.Context, store *db.RepositoryStore, session db.Se
 	return execution, nil
 }
 
-func assembleChangeModel(ctx context.Context, sessionID, snapshotID string, capture snapshot.Capture, objectStore *snapshot.ObjectStore) (review.ChangeModel, error) {
+func assembleChangeModel(
+	ctx context.Context,
+	sessionID, snapshotID string,
+	capture snapshot.Capture,
+	objectStore *snapshot.ObjectStore,
+) (review.ChangeModel, error) {
 	return review.Assemble(ctx, review.Input{
 		SessionID: sessionID, SnapshotID: snapshotID, Snapshot: capture,
 		Content: func(ctx context.Context, digest string) ([]byte, error) {
@@ -104,7 +129,15 @@ func assembleChangeModel(ctx context.Context, sessionID, snapshotID string, capt
 	})
 }
 
-func buildTerminalReport(ctx context.Context, store *db.RepositoryStore, session db.Session, round db.Round, persisted db.Snapshot, capture snapshot.Capture, objectStore *snapshot.ObjectStore) (terminal.Report, error) {
+func buildTerminalReport(
+	ctx context.Context,
+	store *db.RepositoryStore,
+	session db.Session,
+	round db.Round,
+	persisted db.Snapshot,
+	capture snapshot.Capture,
+	objectStore *snapshot.ObjectStore,
+) (terminal.Report, error) {
 	report := terminal.Report{
 		SessionID: session.ID, RoundID: round.ID, SnapshotID: persisted.ID,
 		SnapshotKind: persisted.Kind, RequestedComparison: persisted.RequestedComparison,
@@ -169,11 +202,20 @@ func buildTerminalReport(ctx context.Context, store *db.RepositoryStore, session
 			lane = review.FindingLaneCandidate
 		}
 		if hasFinding && lane == review.FindingLaneVerified {
-			report.Findings = append(report.Findings, terminal.FindingView{Revision: finding, Lane: lane, Candidate: &candidate, Verification: &verification})
+			report.Findings = append(
+				report.Findings,
+				terminal.FindingView{Revision: finding, Lane: lane, Candidate: &candidate, Verification: &verification},
+			)
 		} else if lane == review.FindingLaneRefuted {
-			report.Refuted = append(report.Refuted, terminal.CandidateView{Candidate: candidate, Reason: string(verification.State)})
+			report.Refuted = append(
+				report.Refuted,
+				terminal.CandidateView{Candidate: candidate, Reason: string(verification.State)},
+			)
 		} else {
-			report.Candidates = append(report.Candidates, terminal.CandidateView{Candidate: candidate, Reason: string(verification.State)})
+			report.Candidates = append(
+				report.Candidates,
+				terminal.CandidateView{Candidate: candidate, Reason: string(verification.State)},
+			)
 		}
 	}
 	for _, finding := range findings {
@@ -184,11 +226,42 @@ func buildTerminalReport(ctx context.Context, store *db.RepositoryStore, session
 		// renderer conservatively keeps them out of the verified lane unless the
 		// immutable revision itself records supporting verification evidence.
 		if finding.Verification == review.VerificationSupported && len(finding.Evidence) > 0 {
-			report.Findings = append(report.Findings, terminal.FindingView{Revision: finding, Lane: review.FindingLaneVerified})
+			report.Findings = append(
+				report.Findings,
+				terminal.FindingView{Revision: finding, Lane: review.FindingLaneVerified},
+			)
 		} else if finding.Verification == review.VerificationRefuted {
-			report.Refuted = append(report.Refuted, terminal.CandidateView{Reason: string(finding.Verification), Candidate: review.CandidateRecord{ID: finding.FindingID, Candidate: review.Candidate{Claim: finding.Claim, Impact: finding.Impact, Category: finding.Category, Severity: finding.Severity}}})
+			report.Refuted = append(
+				report.Refuted,
+				terminal.CandidateView{
+					Reason: string(finding.Verification),
+					Candidate: review.CandidateRecord{
+						ID: finding.FindingID,
+						Candidate: review.Candidate{
+							Claim:    finding.Claim,
+							Impact:   finding.Impact,
+							Category: finding.Category,
+							Severity: finding.Severity,
+						},
+					},
+				},
+			)
 		} else {
-			report.Candidates = append(report.Candidates, terminal.CandidateView{Reason: string(finding.Verification), Candidate: review.CandidateRecord{ID: finding.FindingID, Candidate: review.Candidate{Claim: finding.Claim, Impact: finding.Impact, Category: finding.Category, Severity: finding.Severity}}})
+			report.Candidates = append(
+				report.Candidates,
+				terminal.CandidateView{
+					Reason: string(finding.Verification),
+					Candidate: review.CandidateRecord{
+						ID: finding.FindingID,
+						Candidate: review.Candidate{
+							Claim:    finding.Claim,
+							Impact:   finding.Impact,
+							Category: finding.Category,
+							Severity: finding.Severity,
+						},
+					},
+				},
+			)
 		}
 	}
 	if round.Status == db.RoundStatusIncomplete && report.IncompleteReason == "" {
@@ -205,7 +278,18 @@ func captureFromStore(ctx context.Context, store *db.RepositoryStore, persisted 
 		}
 		result := make([]snapshot.Entry, 0, len(entries))
 		for _, entry := range entries {
-			result = append(result, snapshot.Entry{Path: entry.Path, Kind: entry.Kind, Mode: entry.Mode, Size: entry.Size, ContentDigest: entry.ContentDigest, GitOID: entry.GitOID, SymlinkTarget: entry.SymlinkTarget})
+			result = append(
+				result,
+				snapshot.Entry{
+					Path:          entry.Path,
+					Kind:          entry.Kind,
+					Mode:          entry.Mode,
+					Size:          entry.Size,
+					ContentDigest: entry.ContentDigest,
+					GitOID:        entry.GitOID,
+					SymlinkTarget: entry.SymlinkTarget,
+				},
+			)
 		}
 		return result, nil
 	}
@@ -216,7 +300,16 @@ func captureFromStore(ctx context.Context, store *db.RepositoryStore, persisted 
 		}
 		result := make([]snapshot.Change, 0, len(changes))
 		for _, change := range changes {
-			result = append(result, snapshot.Change{Status: change.Status, BasePath: change.BasePath, TargetPath: change.TargetPath, BaseDigest: change.BaseDigest, TargetDigest: change.TargetDigest})
+			result = append(
+				result,
+				snapshot.Change{
+					Status:       change.Status,
+					BasePath:     change.BasePath,
+					TargetPath:   change.TargetPath,
+					BaseDigest:   change.BaseDigest,
+					TargetDigest: change.TargetDigest,
+				},
+			)
 		}
 		return result, nil
 	}
@@ -239,13 +332,25 @@ func captureFromStore(ctx context.Context, store *db.RepositoryStore, persisted 
 		return snapshot.Capture{}, fmt.Errorf("read snapshot changes: %w", err)
 	}
 	capture := snapshot.Capture{
-		ComparisonKind: persisted.Kind, RequestedComparison: persisted.RequestedComparison,
-		BaseOID: persisted.BaseOID, EffectiveBaseOID: persisted.EffectiveBaseOID, TargetOID: persisted.TargetOID,
-		MergeBaseOID: persisted.MergeBaseOID, IndexOID: persisted.IndexOID, WorktreeOID: persisted.TargetOID,
-		ObjectFormat: persisted.ObjectFormat, ContextPolicyHash: persisted.ContextPolicyHash, IgnorePolicy: persisted.IgnorePolicy,
-		CapturedAt: persisted.CreatedAt, BaseEntries: base, TargetEntries: target, Changes: changes,
-		BaseManifestDigest: persisted.BaseManifestDigest, TargetManifestDigest: persisted.TargetManifestDigest,
-		ManifestDigest: persisted.ManifestDigest, Layers: make([]snapshot.Layer, 0, len(persisted.Layers)),
+		ComparisonKind:       persisted.Kind,
+		RequestedComparison:  persisted.RequestedComparison,
+		BaseOID:              persisted.BaseOID,
+		EffectiveBaseOID:     persisted.EffectiveBaseOID,
+		TargetOID:            persisted.TargetOID,
+		MergeBaseOID:         persisted.MergeBaseOID,
+		IndexOID:             persisted.IndexOID,
+		WorktreeOID:          persisted.TargetOID,
+		ObjectFormat:         persisted.ObjectFormat,
+		ContextPolicyHash:    persisted.ContextPolicyHash,
+		IgnorePolicy:         persisted.IgnorePolicy,
+		CapturedAt:           persisted.CreatedAt,
+		BaseEntries:          base,
+		TargetEntries:        target,
+		Changes:              changes,
+		BaseManifestDigest:   persisted.BaseManifestDigest,
+		TargetManifestDigest: persisted.TargetManifestDigest,
+		ManifestDigest:       persisted.ManifestDigest,
+		Layers:               make([]snapshot.Layer, 0, len(persisted.Layers)),
 	}
 	if persisted.Kind == snapshot.ComparisonWorktree {
 		capture.HeadEntries = append([]snapshot.Entry(nil), base...)
@@ -260,11 +365,17 @@ func captureFromStore(ctx context.Context, store *db.RepositoryStore, persisted 
 			if layer.Layer == snapshot.TreeSideIndex {
 				capture.IndexManifestDigest = layer.ManifestDigest
 			}
-			capture.Layers = append(capture.Layers, snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest})
+			capture.Layers = append(
+				capture.Layers,
+				snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest},
+			)
 		}
 	} else {
 		for _, layer := range persisted.Layers {
-			capture.Layers = append(capture.Layers, snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest})
+			capture.Layers = append(
+				capture.Layers,
+				snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest},
+			)
 		}
 	}
 	if len(capture.Layers) == 0 {
@@ -281,7 +392,10 @@ type snapshotRetriever struct {
 	objectStore *snapshot.ObjectStore
 }
 
-func (retriever snapshotRetriever) Retrieve(ctx context.Context, request review.RetrievalRequest) ([]review.RetrievedArtifact, error) {
+func (retriever snapshotRetriever) Retrieve(
+	ctx context.Context,
+	request review.RetrievalRequest,
+) ([]review.RetrievedArtifact, error) {
 	pathName := strings.TrimSpace(request.Path)
 	if pathName == "" || retriever.objectStore == nil {
 		return nil, nil
@@ -303,7 +417,17 @@ func (retriever snapshotRetriever) Retrieve(ctx context.Context, request review.
 		if closeErr != nil {
 			return nil, closeErr
 		}
-		return []review.RetrievedArtifact{{Kind: request.Kind, Path: pathName, Relation: request.Relation, HunkIDs: append([]string(nil), request.HunkIDs...), Digest: entry.ContentDigest, Size: int64(len(data)), Content: string(data)}}, nil
+		return []review.RetrievedArtifact{
+			{
+				Kind:     request.Kind,
+				Path:     pathName,
+				Relation: request.Relation,
+				HunkIDs:  append([]string(nil), request.HunkIDs...),
+				Digest:   entry.ContentDigest,
+				Size:     int64(len(data)),
+				Content:  string(data),
+			},
+		}, nil
 	}
 	return nil, nil
 }
@@ -312,8 +436,14 @@ func sortReportViews(report *terminal.Report) {
 	sort.SliceStable(report.Findings, func(i, j int) bool {
 		return report.Findings[i].Revision.FindingID < report.Findings[j].Revision.FindingID
 	})
-	sort.SliceStable(report.Candidates, func(i, j int) bool { return report.Candidates[i].Candidate.ID < report.Candidates[j].Candidate.ID })
-	sort.SliceStable(report.Refuted, func(i, j int) bool { return report.Refuted[i].Candidate.ID < report.Refuted[j].Candidate.ID })
+	sort.SliceStable(
+		report.Candidates,
+		func(i, j int) bool { return report.Candidates[i].Candidate.ID < report.Candidates[j].Candidate.ID },
+	)
+	sort.SliceStable(
+		report.Refuted,
+		func(i, j int) bool { return report.Refuted[i].Candidate.ID < report.Refuted[j].Candidate.ID },
+	)
 }
 
 func errorMessage(err error, fallback string) string {

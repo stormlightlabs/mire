@@ -25,7 +25,11 @@ type OpenAICompatible struct {
 }
 
 // NewOpenAICompat creates an OpenAI-compatible adapter without resolving the configured credential.
-func NewOpenAICompat(config RoleConfig, credentials CredentialResolver, client *http.Client) (*OpenAICompatible, error) {
+func NewOpenAICompat(
+	config RoleConfig,
+	credentials CredentialResolver,
+	client *http.Client,
+) (*OpenAICompatible, error) {
 	normalized, err := normalizeRoleConfig(config)
 	if err != nil {
 		return nil, err
@@ -50,12 +54,20 @@ func (adapter *OpenAICompatible) Metadata() review.ModelMetadata {
 	if adapter == nil {
 		return review.ModelMetadata{}
 	}
-	return review.ModelMetadata{Adapter: string(ProviderOpenAICompatible), Protocol: openAIProtocolVersion, Model: adapter.config.Model, Redactions: []string{"credential"}}
+	return review.ModelMetadata{
+		Adapter:    string(ProviderOpenAICompatible),
+		Protocol:   openAIProtocolVersion,
+		Model:      adapter.config.Model,
+		Redactions: []string{"credential"},
+	}
 }
 
 // Complete translates a provider-neutral request to Chat Completions and
 // translates either a JSON response or SSE stream back to ModelResponse.
-func (adapter *OpenAICompatible) Complete(ctx context.Context, request review.ModelRequest) (review.ModelResponse, error) {
+func (adapter *OpenAICompatible) Complete(
+	ctx context.Context,
+	request review.ModelRequest,
+) (review.ModelResponse, error) {
 	if adapter == nil {
 		return review.ModelResponse{}, errors.New("complete OpenAI-compatible model: adapter is nil")
 	}
@@ -94,7 +106,11 @@ func (adapter *OpenAICompatible) Complete(ctx context.Context, request review.Mo
 	for index, tool := range request.Tools {
 		converted, convertErr := convertOpenAITool(tool)
 		if convertErr != nil {
-			return review.ModelResponse{}, fmt.Errorf("complete OpenAI-compatible model: tool %d: %w", index, convertErr)
+			return review.ModelResponse{}, fmt.Errorf(
+				"complete OpenAI-compatible model: tool %d: %w",
+				index,
+				convertErr,
+			)
 		}
 		tools = append(tools, converted)
 	}
@@ -102,7 +118,13 @@ func (adapter *OpenAICompatible) Complete(ctx context.Context, request review.Mo
 		payload["tools"] = tools
 	}
 	if request.Repair && strings.TrimSpace(request.PreviousOutput) != "" {
-		payload["messages"] = append(messages, openAIMessage{Role: "user", Content: "The previous structured response was invalid. Repair it and return only valid JSON. Previous response:\n" + request.PreviousOutput})
+		payload["messages"] = append(
+			messages,
+			openAIMessage{
+				Role:    "user",
+				Content: "The previous structured response was invalid. Repair it and return only valid JSON. Previous response:\n" + request.PreviousOutput,
+			},
+		)
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -121,12 +143,23 @@ func (adapter *OpenAICompatible) Complete(ctx context.Context, request review.Mo
 	if credential != "" {
 		headers.Set("Authorization", "Bearer "+credential)
 	}
-	return execute(ctx, adapter.client, ProviderOpenAICompatible, "chat completions", requestURL, string(body), credential, headers, adapter.config, func(reader io.Reader) (review.ModelResponse, error) {
-		if adapter.config.Stream {
-			return parseOpenAIStream(reader, adapter.config.Budget)
-		}
-		return parseOpenAIResponse(reader, adapter.config.Budget)
-	})
+	return execute(
+		ctx,
+		adapter.client,
+		ProviderOpenAICompatible,
+		"chat completions",
+		requestURL,
+		string(body),
+		credential,
+		headers,
+		adapter.config,
+		func(reader io.Reader) (review.ModelResponse, error) {
+			if adapter.config.Stream {
+				return parseOpenAIStream(reader, adapter.config.Budget)
+			}
+			return parseOpenAIResponse(reader, adapter.config.Budget)
+		},
+	)
 }
 
 // DetectCapabilities reports guaranteed protocol support and leaves optional
@@ -140,7 +173,8 @@ func (adapter *OpenAICompatible) DetectCapabilities(ctx context.Context) (Capabi
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	report := CapabilityReport{Provider: ProviderOpenAICompatible, BaseURL: adapter.config.BaseURL, Model: adapter.config.Model,
+	report := CapabilityReport{
+		Provider: ProviderOpenAICompatible, BaseURL: adapter.config.BaseURL, Model: adapter.config.Model,
 		Features: map[Capability]CapabilityStatus{
 			CapabilityChatCompletions: CapabilitySupported,
 			CapabilityStreaming:       CapabilityUnknown,
@@ -148,7 +182,8 @@ func (adapter *OpenAICompatible) DetectCapabilities(ctx context.Context) (Capabi
 			CapabilityToolUse:         CapabilityUnknown,
 			CapabilityUsage:           CapabilityUnknown,
 			CapabilityModelListing:    CapabilityUnknown,
-		}, CheckedAt: time.Now().UTC()}
+		}, CheckedAt: time.Now().UTC(),
+	}
 	for capability, status := range adapter.config.Capabilities {
 		report.Features[capability] = status
 	}
@@ -180,10 +215,20 @@ func (adapter *OpenAICompatible) DetectCapabilities(ctx context.Context) (Capabi
 	}
 	defer response.Body.Close()
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		providerErr := decodeProviderError(ProviderOpenAICompatible, "capability probe", response.StatusCode, response.Header, response.Body, credential)
+		providerErr := decodeProviderError(
+			ProviderOpenAICompatible,
+			"capability probe",
+			response.StatusCode,
+			response.Header,
+			response.Body,
+			credential,
+		)
 		if response.StatusCode == http.StatusNotFound || response.StatusCode == http.StatusMethodNotAllowed {
 			report.Features[CapabilityModelListing] = CapabilityUnsupported
-			report.Limitations = append(report.Limitations, "The endpoint does not expose the optional /models capability probe.")
+			report.Limitations = append(
+				report.Limitations,
+				"The endpoint does not expose the optional /models capability probe.",
+			)
 			return report, nil
 		}
 		return report, providerErr
@@ -193,7 +238,10 @@ func (adapter *OpenAICompatible) DetectCapabilities(ctx context.Context) (Capabi
 		return report, fmt.Errorf("read capability response: %w", readErr)
 	}
 	report.Features[CapabilityModelListing] = CapabilitySupported
-	report.Limitations = append(report.Limitations, "Streaming, tools, and structured output remain endpoint/model-specific and were not inferred from /models.")
+	report.Limitations = append(
+		report.Limitations,
+		"Streaming, tools, and structured output remain endpoint/model-specific and were not inferred from /models.",
+	)
 	return report, nil
 }
 
@@ -240,7 +288,10 @@ func convertOpenAITool(tool review.ToolDefinition) (openAIToolPayload, error) {
 		return openAIToolPayload{}, errors.New("tool input schema is not valid JSON")
 	}
 	raw = json.RawMessage(schema)
-	return openAIToolPayload{Type: "function", Function: openAIFunction{Name: tool.Name, Description: tool.Description, Parameters: raw}}, nil
+	return openAIToolPayload{
+		Type:     "function",
+		Function: openAIFunction{Name: tool.Name, Description: tool.Description, Parameters: raw},
+	}, nil
 }
 
 func parseOpenAIResponse(reader io.Reader, budget Budget) (review.ModelResponse, error) {
@@ -261,29 +312,57 @@ func parseOpenAIResponse(reader io.Reader, budget Budget) (review.ModelResponse,
 		Usage openAIUsage `json:"usage"`
 	}
 	if err := decoder.Decode(&envelope); err != nil {
-		return review.ModelResponse{}, &MalformedResponseError{Provider: ProviderOpenAICompatible, Operation: "chat completions", Reason: "invalid JSON"}
+		return review.ModelResponse{}, &MalformedResponseError{
+			Provider:  ProviderOpenAICompatible,
+			Operation: "chat completions",
+			Reason:    "invalid JSON",
+		}
 	}
 	if err := requireJSONEOF(decoder); err != nil {
-		return review.ModelResponse{}, &MalformedResponseError{Provider: ProviderOpenAICompatible, Operation: "chat completions", Reason: "trailing JSON"}
+		return review.ModelResponse{}, &MalformedResponseError{
+			Provider:  ProviderOpenAICompatible,
+			Operation: "chat completions",
+			Reason:    "trailing JSON",
+		}
 	}
 	if len(envelope.Error) > 0 && string(envelope.Error) != "null" {
-		return review.ModelResponse{}, &MalformedResponseError{Provider: ProviderOpenAICompatible, Operation: "chat completions", Reason: "provider returned an error payload with a success status"}
+		return review.ModelResponse{}, &MalformedResponseError{
+			Provider:  ProviderOpenAICompatible,
+			Operation: "chat completions",
+			Reason:    "provider returned an error payload with a success status",
+		}
 	}
 	if len(envelope.Choices) == 0 {
-		return review.ModelResponse{}, &MalformedResponseError{Provider: ProviderOpenAICompatible, Operation: "chat completions", Reason: "response contains no choices"}
+		return review.ModelResponse{}, &MalformedResponseError{
+			Provider:  ProviderOpenAICompatible,
+			Operation: "chat completions",
+			Reason:    "response contains no choices",
+		}
 	}
 	choice := envelope.Choices[0]
 	text, err := contentText(choice.Message.Content)
 	if err != nil {
-		return review.ModelResponse{}, &MalformedResponseError{Provider: ProviderOpenAICompatible, Operation: "chat completions", Reason: "message content has an unsupported shape"}
+		return review.ModelResponse{}, &MalformedResponseError{
+			Provider:  ProviderOpenAICompatible,
+			Operation: "chat completions",
+			Reason:    "message content has an unsupported shape",
+		}
 	}
 	if text == "" && len(choice.Message.ToolCalls) > 0 {
 		text = choice.Message.ToolCalls[0].Function.Arguments
 	}
 	if budget.MaxOutputBytes > 0 && len(text) > budget.MaxOutputBytes {
-		return review.ModelResponse{}, &BudgetError{Kind: "output bytes", Value: int64(len(text)), Limit: int64(budget.MaxOutputBytes)}
+		return review.ModelResponse{}, &BudgetError{
+			Kind:  "output bytes",
+			Value: int64(len(text)),
+			Limit: int64(budget.MaxOutputBytes),
+		}
 	}
-	return review.ModelResponse{Output: []byte(text), Usage: envelope.Usage.normalize(), FinishReason: normalizeFinishReason(choice.FinishReason)}, nil
+	return review.ModelResponse{
+		Output:       []byte(text),
+		Usage:        envelope.Usage.normalize(),
+		FinishReason: normalizeFinishReason(choice.FinishReason),
+	}, nil
 }
 
 func parseOpenAIStream(reader io.Reader, budget Budget) (review.ModelResponse, error) {
@@ -314,24 +393,42 @@ func parseOpenAIStream(reader io.Reader, budget Budget) (review.ModelResponse, e
 			Usage *openAIUsage `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			return &MalformedStreamError{Provider: ProviderOpenAICompatible, Event: eventNumber, Reason: "event data is not valid JSON"}
+			return &MalformedStreamError{
+				Provider: ProviderOpenAICompatible,
+				Event:    eventNumber,
+				Reason:   "event data is not valid JSON",
+			}
 		}
 		if len(chunk.Error) > 0 && string(chunk.Error) != "null" {
-			return &ProviderError{Provider: ProviderOpenAICompatible, Operation: "chat completions stream", StatusCode: http.StatusOK, Message: "provider returned a stream error", Retryable: false}
+			return &ProviderError{
+				Provider:   ProviderOpenAICompatible,
+				Operation:  "chat completions stream",
+				StatusCode: http.StatusOK,
+				Message:    "provider returned a stream error",
+				Retryable:  false,
+			}
 		}
 		if chunk.Usage != nil {
 			usage = chunk.Usage.normalize()
 		}
 		if len(chunk.Choices) == 0 {
 			if chunk.Usage == nil {
-				return &MalformedStreamError{Provider: ProviderOpenAICompatible, Event: eventNumber, Reason: "event contains neither a choice nor usage"}
+				return &MalformedStreamError{
+					Provider: ProviderOpenAICompatible,
+					Event:    eventNumber,
+					Reason:   "event contains neither a choice nor usage",
+				}
 			}
 			return nil
 		}
 		choice := chunk.Choices[0]
 		text, err := contentText(choice.Delta.Content)
 		if err != nil {
-			return &MalformedStreamError{Provider: ProviderOpenAICompatible, Event: eventNumber, Reason: "content delta has an unsupported shape"}
+			return &MalformedStreamError{
+				Provider: ProviderOpenAICompatible,
+				Event:    eventNumber,
+				Reason:   "content delta has an unsupported shape",
+			}
 		}
 		output.WriteString(text)
 		for _, toolCall := range choice.Delta.ToolCalls {
@@ -341,20 +438,32 @@ func parseOpenAIStream(reader io.Reader, budget Budget) (review.ModelResponse, e
 			finishReason = *choice.FinishReason
 		}
 		if budget.MaxOutputBytes > 0 && output.Len()+toolArguments.Len() > budget.MaxOutputBytes {
-			return &BudgetError{Kind: "output bytes", Value: int64(output.Len() + toolArguments.Len()), Limit: int64(budget.MaxOutputBytes)}
+			return &BudgetError{
+				Kind:  "output bytes",
+				Value: int64(output.Len() + toolArguments.Len()),
+				Limit: int64(budget.MaxOutputBytes),
+			}
 		}
 		return nil
 	}); err != nil {
 		return review.ModelResponse{}, err
 	}
 	if !seenDone {
-		return review.ModelResponse{}, &MalformedStreamError{Provider: ProviderOpenAICompatible, Event: 0, Reason: "stream ended before [DONE]"}
+		return review.ModelResponse{}, &MalformedStreamError{
+			Provider: ProviderOpenAICompatible,
+			Event:    0,
+			Reason:   "stream ended before [DONE]",
+		}
 	}
 	result := output.String()
 	if result == "" {
 		result = toolArguments.String()
 	}
-	return review.ModelResponse{Output: []byte(result), Usage: usage, FinishReason: normalizeFinishReason(finishReason)}, nil
+	return review.ModelResponse{
+		Output:       []byte(result),
+		Usage:        usage,
+		FinishReason: normalizeFinishReason(finishReason),
+	}, nil
 }
 
 type openAIUsage struct {

@@ -77,7 +77,9 @@ func (store *RepositoryStore) CreateReviewRun(ctx context.Context, run review.Ru
 	if err != nil {
 		return review.RunRecord{}, err
 	}
-	_, err = store.database.ExecContext(ctx, `
+	_, err = store.database.ExecContext(
+		ctx,
+		`
 INSERT INTO review_runs (
     id, session_id, round_id, snapshot_id, role, pass_name, status, attempt,
     max_attempts, error, adapter, protocol, prompt_template_version, model,
@@ -86,12 +88,35 @@ INSERT INTO review_runs (
     updated_at, started_at, finished_at
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
-		run.ID, run.SessionID, run.RoundID, run.SnapshotID, run.Role, run.PassName, run.Status,
-		run.Attempt, run.MaxAttempts, run.Error, run.Provenance.Adapter, run.Provenance.Protocol,
-		run.Provenance.PromptTemplateVersion, run.Provenance.Model, parameters,
-		run.Provenance.InputManifestDigest, run.Provenance.InputDigest, run.Provenance.OutputDigest,
-		usage, run.Provenance.FinishReason, redactions, run.Provenance.TerminationCause,
-		shared.TimestampString(now), shared.TimestampString(run.UpdatedAt), shared.TimestampString(run.StartedAt), shared.TimestampString(run.FinishedAt))
+		run.ID,
+		run.SessionID,
+		run.RoundID,
+		run.SnapshotID,
+		run.Role,
+		run.PassName,
+		run.Status,
+		run.Attempt,
+		run.MaxAttempts,
+		run.Error,
+		run.Provenance.Adapter,
+		run.Provenance.Protocol,
+		run.Provenance.PromptTemplateVersion,
+		run.Provenance.Model,
+		parameters,
+		run.Provenance.InputManifestDigest,
+		run.Provenance.InputDigest,
+		run.Provenance.OutputDigest,
+		usage,
+		run.Provenance.FinishReason,
+		redactions,
+		run.Provenance.TerminationCause,
+		shared.TimestampString(
+			now,
+		),
+		shared.TimestampString(run.UpdatedAt),
+		shared.TimestampString(run.StartedAt),
+		shared.TimestampString(run.FinishedAt),
+	)
 	if err != nil {
 		return review.RunRecord{}, fmt.Errorf("insert review run: %w", err)
 	}
@@ -117,7 +142,9 @@ func (store *RepositoryStore) UpdateReviewRun(ctx context.Context, run review.Ru
 	if err != nil {
 		return err
 	}
-	result, err := store.database.ExecContext(ctx, `
+	result, err := store.database.ExecContext(
+		ctx,
+		`
 UPDATE review_runs SET status = ?, attempt = ?, max_attempts = ?, error = ?,
     pass_name = ?, adapter = ?, protocol = ?, prompt_template_version = ?,
     model = ?, parameters_json = ?, input_manifest_digest = ?, input_digest = ?,
@@ -125,12 +152,30 @@ UPDATE review_runs SET status = ?, attempt = ?, max_attempts = ?, error = ?,
     termination_cause = ?, updated_at = ?, started_at = NULLIF(?, ''),
     finished_at = NULLIF(?, '')
 WHERE id = ?`,
-		run.Status, run.Attempt, run.MaxAttempts, run.Error, run.PassName,
-		run.Provenance.Adapter, run.Provenance.Protocol, run.Provenance.PromptTemplateVersion,
-		run.Provenance.Model, parameters, run.Provenance.InputManifestDigest,
-		run.Provenance.InputDigest, run.Provenance.OutputDigest, usage,
-		run.Provenance.FinishReason, redactions, run.Provenance.TerminationCause,
-		shared.TimestampString(run.UpdatedAt), shared.TimestampString(run.StartedAt), shared.TimestampString(run.FinishedAt), run.ID)
+		run.Status,
+		run.Attempt,
+		run.MaxAttempts,
+		run.Error,
+		run.PassName,
+		run.Provenance.Adapter,
+		run.Provenance.Protocol,
+		run.Provenance.PromptTemplateVersion,
+		run.Provenance.Model,
+		parameters,
+		run.Provenance.InputManifestDigest,
+		run.Provenance.InputDigest,
+		run.Provenance.OutputDigest,
+		usage,
+		run.Provenance.FinishReason,
+		redactions,
+		run.Provenance.TerminationCause,
+		shared.TimestampString(
+			run.UpdatedAt,
+		),
+		shared.TimestampString(run.StartedAt),
+		shared.TimestampString(run.FinishedAt),
+		run.ID,
+	)
 	if err != nil {
 		return fmt.Errorf("update review run %q: %w", run.ID, err)
 	}
@@ -176,7 +221,11 @@ func (store *RepositoryStore) ListReviewRuns(ctx context.Context, roundID string
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := store.database.QueryContext(ctx, reviewRunQuery+` WHERE round_id = ? ORDER BY created_at ASC, id ASC`, strings.TrimSpace(roundID))
+	rows, err := store.database.QueryContext(
+		ctx,
+		reviewRunQuery+` WHERE round_id = ? ORDER BY created_at ASC, id ASC`,
+		strings.TrimSpace(roundID),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list review runs: %w", err)
 	}
@@ -198,7 +247,10 @@ func (store *RepositoryStore) ListReviewRuns(ctx context.Context, roundID string
 // ListReviewArtifacts returns all immutable retrieval descriptors for a round.
 // Content is retained for explicit bundle evidence files; callers exporting a
 // canonical projection should use the descriptor fields only.
-func (store *RepositoryStore) ListReviewArtifacts(ctx context.Context, roundID string) ([]review.RetrievedArtifact, error) {
+func (store *RepositoryStore) ListReviewArtifacts(
+	ctx context.Context,
+	roundID string,
+) ([]review.RetrievedArtifact, error) {
 	if err := store.validate(); err != nil {
 		return nil, err
 	}
@@ -259,11 +311,13 @@ func (store *RepositoryStore) SaveReviewPass(ctx context.Context, result review.
 		}
 	}
 	if result.Run.ID != "" {
-		if result.Run.Role != review.ModelRoleReviewer || result.Run.SessionID != pass.SessionID || result.Run.PassName != pass.Name {
+		if result.Run.Role != review.ModelRoleReviewer || result.Run.SessionID != pass.SessionID ||
+			result.Run.PassName != pass.Name {
 			return errors.New("save review pass: run does not belong to pass")
 		}
 		var runCount int
-		if err := store.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM review_runs WHERE id = ? AND session_id = ?`, result.Run.ID, pass.SessionID).Scan(&runCount); err != nil {
+		if err := store.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM review_runs WHERE id = ? AND session_id = ?`, result.Run.ID, pass.SessionID).
+			Scan(&runCount); err != nil {
 			return fmt.Errorf("validate review pass run: %w", err)
 		}
 		if runCount != 1 {
@@ -295,20 +349,36 @@ func (store *RepositoryStore) SaveReviewPass(ctx context.Context, result review.
 		return fmt.Errorf("begin review pass transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(
+		ctx,
+		`
 INSERT INTO review_passes (
     id, session_id, round_id, snapshot_id, run_id, name, status, applicable,
     reason, candidate_count, pass_json, diagnostics_json, created_at,
     started_at, finished_at
 )
 VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
-		result.PassID, pass.SessionID, pass.RoundID, pass.SnapshotID, result.Run.ID, pass.Name,
-		pass.Status, shared.BoolInt(pass.Applicable), pass.Reason, len(result.Candidates), passJSON,
-		diagnosticsJSON, shared.TimestampString(now), shared.TimestampString(pass.StartedAt), shared.TimestampString(pass.FinishedAt)); err != nil {
+		result.PassID,
+		pass.SessionID,
+		pass.RoundID,
+		pass.SnapshotID,
+		result.Run.ID,
+		pass.Name,
+		pass.Status,
+		shared.BoolInt(pass.Applicable),
+		pass.Reason,
+		len(result.Candidates),
+		passJSON,
+		diagnosticsJSON,
+		shared.TimestampString(now),
+		shared.TimestampString(pass.StartedAt),
+		shared.TimestampString(pass.FinishedAt),
+	); err != nil {
 		return fmt.Errorf("insert review pass: %w", err)
 	}
 	for _, candidate := range result.Candidates {
-		if candidate.ID == "" || candidate.RunID != result.Run.ID || candidate.PassName != pass.Name || candidate.Ordinal < 0 {
+		if candidate.ID == "" || candidate.RunID != result.Run.ID || candidate.PassName != pass.Name ||
+			candidate.Ordinal < 0 {
 			return errors.New("save review pass: candidate identity does not match pass")
 		}
 		candidateJSON, err := json.Marshal(candidate.Candidate)
@@ -327,7 +397,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, candidate.ID, pass.SessionID, pass.Ro
 		}
 	}
 	for _, artifact := range result.Artifacts {
-		if artifact.ID == "" || artifact.RunID != result.Run.ID || artifact.PassName != pass.Name || artifact.Digest == "" || artifact.Size < 0 {
+		if artifact.ID == "" || artifact.RunID != result.Run.ID || artifact.PassName != pass.Name ||
+			artifact.Digest == "" ||
+			artifact.Size < 0 {
 			return errors.New("save review pass: artifact identity is incomplete")
 		}
 		hunkIDs, err := json.Marshal(artifact.HunkIDs)
@@ -374,7 +446,8 @@ func (store *RepositoryStore) GetReviewCoverage(ctx context.Context, roundID str
 		ctx = context.Background()
 	}
 	var data, expectedDigest string
-	err := store.database.QueryRowContext(ctx, `SELECT coverage_digest, coverage_json FROM review_coverage WHERE round_id = ?`, roundID).Scan(&expectedDigest, &data)
+	err := store.database.QueryRowContext(ctx, `SELECT coverage_digest, coverage_json FROM review_coverage WHERE round_id = ?`, roundID).
+		Scan(&expectedDigest, &data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return review.ReviewCoverage{}, fmt.Errorf("%w: %q", ErrReviewCoverageNotFound, roundID)
 	}
@@ -399,7 +472,11 @@ func (store *RepositoryStore) ListReviewPasses(ctx context.Context, roundID stri
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := store.database.QueryContext(ctx, `SELECT pass_json FROM review_passes WHERE round_id = ? ORDER BY name ASC, id ASC`, roundID)
+	rows, err := store.database.QueryContext(
+		ctx,
+		`SELECT pass_json FROM review_passes WHERE round_id = ? ORDER BY name ASC, id ASC`,
+		roundID,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list review passes: %w", err)
 	}
@@ -424,7 +501,10 @@ func (store *RepositoryStore) ListReviewPasses(ctx context.Context, roundID stri
 
 // ListReviewDiagnostics returns the durable diagnostics emitted by all passes
 // in a round, ordered by pass and diagnostic identity.
-func (store *RepositoryStore) ListReviewDiagnostics(ctx context.Context, roundID string) ([]review.ReviewDiagnostic, error) {
+func (store *RepositoryStore) ListReviewDiagnostics(
+	ctx context.Context,
+	roundID string,
+) ([]review.ReviewDiagnostic, error) {
 	if err := store.validate(); err != nil {
 		return nil, err
 	}
@@ -458,7 +538,10 @@ WHERE round_id = ? ORDER BY name ASC, id ASC`, roundID)
 
 // ListReviewCandidates returns every retained candidate for a round. No
 // correlation or presentation filtering is performed by this query.
-func (store *RepositoryStore) ListReviewCandidates(ctx context.Context, roundID string) ([]review.CandidateRecord, error) {
+func (store *RepositoryStore) ListReviewCandidates(
+	ctx context.Context,
+	roundID string,
+) ([]review.CandidateRecord, error) {
 	if err := store.validate(); err != nil {
 		return nil, err
 	}
@@ -476,7 +559,15 @@ FROM review_candidates WHERE round_id = ? ORDER BY created_at ASC, id ASC`, roun
 	for rows.Next() {
 		var candidate review.CandidateRecord
 		var data, created string
-		if err := rows.Scan(&candidate.ID, &candidate.RunID, &candidate.PassName, &candidate.Ordinal, &candidate.Fingerprint, &data, &created); err != nil {
+		if err := rows.Scan(
+			&candidate.ID,
+			&candidate.RunID,
+			&candidate.PassName,
+			&candidate.Ordinal,
+			&candidate.Fingerprint,
+			&data,
+			&created,
+		); err != nil {
 			return nil, fmt.Errorf("list review candidates: %w", err)
 		}
 		if err := json.Unmarshal([]byte(data), &candidate.Candidate); err != nil {

@@ -18,7 +18,11 @@ func TestFindingLedgerPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := NewRepositoryStore(database, WithClock(clock))
-	identity := RepositoryIdentity{CanonicalIdentity: "/workspaces/finding-ledger", DisplayName: "finding-ledger", DiscoveredGitDir: "/workspaces/finding-ledger/.git"}
+	identity := RepositoryIdentity{
+		CanonicalIdentity: "/workspaces/finding-ledger",
+		DisplayName:       "finding-ledger",
+		DiscoveredGitDir:  "/workspaces/finding-ledger/.git",
+	}
 	session, err := store.CreateSession(context.Background(), identity, "Finding ledger")
 	if err != nil {
 		t.Fatal(err)
@@ -28,13 +32,49 @@ func TestFindingLedgerPersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	change := review.ChangeModel{
-		SchemaVersion: "mire/v1/change-model", SessionID: session.ID, SnapshotID: "snapshot-1", SnapshotDigest: "manifest-1", Digest: "change-1",
-		Files: []review.FileChange{{Status: "modified", TargetPath: "src/a.go", TargetDigest: "blob-1", Hunks: []review.Hunk{{ID: "src/a.go#hunk", Digest: "hunk-1", Available: true, Lines: []string{"@@ -1 +1 @@\n", "-old\n", "+new\n"}}}}},
+		SchemaVersion:  "mire/v1/change-model",
+		SessionID:      session.ID,
+		SnapshotID:     "snapshot-1",
+		SnapshotDigest: "manifest-1",
+		Digest:         "change-1",
+		Files: []review.FileChange{
+			{
+				Status:       "modified",
+				TargetPath:   "src/a.go",
+				TargetDigest: "blob-1",
+				Hunks: []review.Hunk{
+					{
+						ID:        "src/a.go#hunk",
+						Digest:    "hunk-1",
+						Available: true,
+						Lines:     []string{"@@ -1 +1 @@\n", "-old\n", "+new\n"},
+					},
+				},
+			},
+		},
 	}
-	candidate := review.CandidateRecord{ID: "candidate-1", RunID: "review-run-1", PassName: "correctness", Ordinal: 0, Candidate: review.Candidate{
-		Claim: "The changed branch accepts invalid input.", Impact: "Invalid input reaches a state that assumes the guard ran.", Category: "correctness", Severity: "high", Confidence: 0.75,
-		Anchors: []review.Anchor{{SnapshotID: change.SnapshotID, Side: "target", Path: "src/a.go", HunkID: "src/a.go#hunk", HunkDigest: "hunk-1"}},
-	}}
+	candidate := review.CandidateRecord{
+		ID:       "candidate-1",
+		RunID:    "review-run-1",
+		PassName: "correctness",
+		Ordinal:  0,
+		Candidate: review.Candidate{
+			Claim:      "The changed branch accepts invalid input.",
+			Impact:     "Invalid input reaches a state that assumes the guard ran.",
+			Category:   "correctness",
+			Severity:   "high",
+			Confidence: 0.75,
+			Anchors: []review.Anchor{
+				{
+					SnapshotID: change.SnapshotID,
+					Side:       "target",
+					Path:       "src/a.go",
+					HunkID:     "src/a.go#hunk",
+					HunkDigest: "hunk-1",
+				},
+			},
+		},
+	}
 	finding, err := review.NewFindingRevision(change, candidate, round.ID, clock)
 	if err != nil {
 		t.Fatal(err)
@@ -74,10 +114,19 @@ func TestFindingLedgerPersistence(t *testing.T) {
 		t.Fatalf("current disposition = %#v", current)
 	}
 
-	if err := store.SavePresentation(context.Background(), review.PresentationRecord{FindingID: finding.FindingID, Body: "Reject invalid input."}); err != nil {
+	if err := store.SavePresentation(
+		context.Background(),
+		review.PresentationRecord{FindingID: finding.FindingID, Body: "Reject invalid input."},
+	); err != nil {
 		t.Fatalf("SavePresentation(first) error = %v", err)
 	}
-	if err := store.SavePresentation(context.Background(), review.PresentationRecord{FindingID: finding.FindingID, Body: "Reject invalid input before the changed branch."}); err != nil {
+	if err := store.SavePresentation(
+		context.Background(),
+		review.PresentationRecord{
+			FindingID: finding.FindingID,
+			Body:      "Reject invalid input before the changed branch.",
+		},
+	); err != nil {
 		t.Fatalf("SaveCommentRevision(second) error = %v", err)
 	}
 	presentations, err := store.ListPresentations(context.Background(), finding.FindingID)
@@ -94,7 +143,12 @@ func TestFindingLedgerPersistence(t *testing.T) {
 	if err := store.SaveFindingRevision(context.Background(), mutated); err == nil {
 		t.Fatal("SaveFindingRevision() succeeded when rewriting an immutable revision")
 	}
-	if loadedAgain, err := store.GetFindingRevision(context.Background(), finding.FindingID, finding.Revision); err != nil || loadedAgain.Claim != finding.Claim {
+	if loadedAgain, err := store.GetFindingRevision(
+		context.Background(),
+		finding.FindingID,
+		finding.Revision,
+	); err != nil ||
+		loadedAgain.Claim != finding.Claim {
 		t.Fatalf("finding was changed by rejected rewrite: %#v, %v", loadedAgain, err)
 	}
 

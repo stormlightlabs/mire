@@ -130,11 +130,16 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 	}
 
 	var current int
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&current); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).
+		Scan(&current); err != nil {
 		return fmt.Errorf("read migration version: %w", err)
 	}
 	if current > LatestMigrationVersion() {
-		return fmt.Errorf("database schema version %d is newer than this binary supports (latest %d)", current, LatestMigrationVersion())
+		return fmt.Errorf(
+			"database schema version %d is newer than this binary supports (latest %d)",
+			current,
+			LatestMigrationVersion(),
+		)
 	}
 
 	for _, migration := range migrations {
@@ -144,7 +149,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 		if _, err := tx.ExecContext(ctx, migration.SQL); err != nil {
 			return fmt.Errorf("apply migration %d (%s): %w", migration.Version, migration.Name, err)
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := tx.ExecContext(
+			ctx,
 			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
 			migration.Version,
 			shared.TimestampString(time.Now()),

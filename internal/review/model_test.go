@@ -19,12 +19,32 @@ func TestAssembleIsDeterministicAndSnapshotBound(t *testing.T) {
 	targetContent := []byte("package api\n\nfunc New() {}\n\nfunc Added() {}\n")
 	baseDigest := digestBytes(baseContent)
 	targetDigest := digestBytes(targetContent)
-	baseEntries := []snapshot.Entry{{Path: "api/api.go", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: int64(len(baseContent)), ContentDigest: baseDigest, GitOID: "base-api"}}
-	targetEntries := []snapshot.Entry{{Path: "api/api.go", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: int64(len(targetContent)), ContentDigest: targetDigest, GitOID: "target-api"}}
+	baseEntries := []snapshot.Entry{
+		{
+			Path:          "api/api.go",
+			Kind:          snapshot.EntryKindFile,
+			Mode:          0o100644,
+			Size:          int64(len(baseContent)),
+			ContentDigest: baseDigest,
+			GitOID:        "base-api",
+		},
+	}
+	targetEntries := []snapshot.Entry{
+		{
+			Path:          "api/api.go",
+			Kind:          snapshot.EntryKindFile,
+			Mode:          0o100644,
+			Size:          int64(len(targetContent)),
+			ContentDigest: targetDigest,
+			GitOID:        "target-api",
+		},
+	}
 	capture := makeCapture(t, baseEntries, targetEntries)
 	content := map[string][]byte{baseDigest: baseContent, targetDigest: targetContent}
 	input := Input{
-		SessionID: "session-1", SnapshotID: "snapshot-1", Snapshot: capture,
+		SessionID:  "session-1",
+		SnapshotID: "snapshot-1",
+		Snapshot:   capture,
 		Content: func(_ context.Context, digest string) ([]byte, error) {
 			value, ok := content[digest]
 			if !ok {
@@ -32,12 +52,37 @@ func TestAssembleIsDeterministicAndSnapshotBound(t *testing.T) {
 			}
 			return value, nil
 		},
-		Request: ReviewRequest{Prompt: "Expose the new API safely.", Rules: []PolicyRule{{Key: "repository_write", Value: "allow"}}},
-		Git:     PinnedGit{Commits: []PinnedCommit{{OID: "target-oid", Message: "Add API", Parents: []string{"base-oid"}}}},
+		Request: ReviewRequest{
+			Prompt: "Expose the new API safely.",
+			Rules:  []PolicyRule{{Key: "repository_write", Value: "allow"}},
+		},
+		Git: PinnedGit{
+			Commits: []PinnedCommit{{OID: "target-oid", Message: "Add API", Parents: []string{"base-oid"}}},
+		},
 		Guidance: []Guidance{
-			{ID: "base-policy", Path: "AGENTS.md", Kind: GuidancePolicy, Tier: PolicyTierBasePolicy, Content: "review_depth=full", Rules: []PolicyRule{{Key: "review_depth", Value: "full"}}},
-			{ID: "base-doc", Path: "docs/architecture.md", Kind: GuidanceArchitecture, Tier: PolicyTierBaseDocumentation, Content: "The API is public."},
-			{ID: "target-policy", Path: "AGENTS.md", Kind: GuidanceTargetPolicy, Tier: PolicyTierTargetEvidence, Content: "repository_write=allow", Rules: []PolicyRule{{Key: "repository_write", Value: "allow"}}},
+			{
+				ID:      "base-policy",
+				Path:    "AGENTS.md",
+				Kind:    GuidancePolicy,
+				Tier:    PolicyTierBasePolicy,
+				Content: "review_depth=full",
+				Rules:   []PolicyRule{{Key: "review_depth", Value: "full"}},
+			},
+			{
+				ID:      "base-doc",
+				Path:    "docs/architecture.md",
+				Kind:    GuidanceArchitecture,
+				Tier:    PolicyTierBaseDocumentation,
+				Content: "The API is public.",
+			},
+			{
+				ID:      "target-policy",
+				Path:    "AGENTS.md",
+				Kind:    GuidanceTargetPolicy,
+				Tier:    PolicyTierTargetEvidence,
+				Content: "repository_write=allow",
+				Rules:   []PolicyRule{{Key: "repository_write", Value: "allow"}},
+			},
 		},
 	}
 	first, err := Assemble(context.Background(), input)
@@ -79,15 +124,37 @@ func TestAssembleIsDeterministicAndSnapshotBound(t *testing.T) {
 	}
 
 	content[targetDigest] = []byte("tampered\n")
-	if _, err := Assemble(context.Background(), input); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+	if _, err := Assemble(
+		context.Background(),
+		input,
+	); err == nil ||
+		!strings.Contains(err.Error(), "digest mismatch") {
 		t.Fatalf("tampered content error = %v", err)
 	}
 }
 
 func TestPolicyPrecedencePathScopeAndConflicts(t *testing.T) {
 	t.Parallel()
-	base := []snapshot.Entry{{Path: "src/a.go", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: 1, ContentDigest: digestBytes([]byte("a")), GitOID: "a"}}
-	target := []snapshot.Entry{{Path: "src/a.go", Kind: snapshot.EntryKindFile, Mode: 0o100644, Size: 1, ContentDigest: digestBytes([]byte("b")), GitOID: "b"}}
+	base := []snapshot.Entry{
+		{
+			Path:          "src/a.go",
+			Kind:          snapshot.EntryKindFile,
+			Mode:          0o100644,
+			Size:          1,
+			ContentDigest: digestBytes([]byte("a")),
+			GitOID:        "a",
+		},
+	}
+	target := []snapshot.Entry{
+		{
+			Path:          "src/a.go",
+			Kind:          snapshot.EntryKindFile,
+			Mode:          0o100644,
+			Size:          1,
+			ContentDigest: digestBytes([]byte("b")),
+			GitOID:        "b",
+		},
+	}
 	capture := makeCapture(t, base, target)
 	model, err := Assemble(context.Background(), Input{
 		Snapshot: capture,
@@ -99,8 +166,26 @@ func TestPolicyPrecedencePathScopeAndConflicts(t *testing.T) {
 		},
 		Request: ReviewRequest{Rules: []PolicyRule{{Key: "review_depth", Value: "private", Scope: "src/*"}}},
 		Guidance: []Guidance{
-			{ID: "general", Path: "AGENTS.md", Kind: GuidancePolicy, Tier: PolicyTierBasePolicy, Rules: []PolicyRule{{Key: "review_depth", Value: "base"}, {Key: "review_order", Value: "alphabetical", Scope: "src/*"}}},
-			{ID: "specific", Path: "AGENTS.md", Kind: GuidancePolicy, Tier: PolicyTierBasePolicy, Rules: []PolicyRule{{Key: "review_depth", Value: "specific", Scope: "src/*"}, {Key: "review_order", Value: "risk", Scope: "src/*"}}},
+			{
+				ID:   "general",
+				Path: "AGENTS.md",
+				Kind: GuidancePolicy,
+				Tier: PolicyTierBasePolicy,
+				Rules: []PolicyRule{
+					{Key: "review_depth", Value: "base"},
+					{Key: "review_order", Value: "alphabetical", Scope: "src/*"},
+				},
+			},
+			{
+				ID:   "specific",
+				Path: "AGENTS.md",
+				Kind: GuidancePolicy,
+				Tier: PolicyTierBasePolicy,
+				Rules: []PolicyRule{
+					{Key: "review_depth", Value: "specific", Scope: "src/*"},
+					{Key: "review_order", Value: "risk", Scope: "src/*"},
+				},
+			},
 		},
 	})
 	if err != nil {
@@ -117,8 +202,16 @@ func TestPolicyPrecedencePathScopeAndConflicts(t *testing.T) {
 	}
 
 	noBase, err := Assemble(context.Background(), Input{
-		Snapshot:       capture,
-		Guidance:       []Guidance{{ID: "target", Path: "AGENTS.md", Kind: GuidanceTargetPolicy, Tier: PolicyTierTargetEvidence, Rules: []PolicyRule{{Key: "initial_scope", Value: "target"}}}},
+		Snapshot: capture,
+		Guidance: []Guidance{
+			{
+				ID:    "target",
+				Path:  "AGENTS.md",
+				Kind:  GuidanceTargetPolicy,
+				Tier:  PolicyTierTargetEvidence,
+				Rules: []PolicyRule{{Key: "initial_scope", Value: "target"}},
+			},
+		},
 		NoBaseRevision: true,
 	})
 	if err != nil {
@@ -137,9 +230,30 @@ func TestAssembleRejectsUntrustedOrMismatchedInputs(t *testing.T) {
 		input Input
 		want  string
 	}{
-		{name: "pinned git mismatch", input: Input{Snapshot: capture, Git: PinnedGit{TargetOID: "other"}}, want: "pinned Git metadata does not match"},
-		{name: "earlier round session mismatch", input: Input{SessionID: "current", Snapshot: capture, EarlierRound: &EarlierRound{SessionID: "other", RoundID: "round"}}, want: "another session"},
-		{name: "guidance digest mismatch", input: Input{Snapshot: capture, Guidance: []Guidance{{Path: "AGENTS.md", Kind: GuidancePolicy, Tier: PolicyTierBasePolicy, Content: "x", Digest: "bad"}}}, want: "guidance"},
+		{
+			name:  "pinned git mismatch",
+			input: Input{Snapshot: capture, Git: PinnedGit{TargetOID: "other"}},
+			want:  "pinned Git metadata does not match",
+		},
+		{
+			name: "earlier round session mismatch",
+			input: Input{
+				SessionID:    "current",
+				Snapshot:     capture,
+				EarlierRound: &EarlierRound{SessionID: "other", RoundID: "round"},
+			},
+			want: "another session",
+		},
+		{
+			name: "guidance digest mismatch",
+			input: Input{
+				Snapshot: capture,
+				Guidance: []Guidance{
+					{Path: "AGENTS.md", Kind: GuidancePolicy, Tier: PolicyTierBasePolicy, Content: "x", Digest: "bad"},
+				},
+			},
+			want: "guidance",
+		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -153,7 +267,18 @@ func TestAssembleRejectsUntrustedOrMismatchedInputs(t *testing.T) {
 
 func makeCapture(t *testing.T, base, target []snapshot.Entry) snapshot.Capture {
 	t.Helper()
-	capture := snapshot.Capture{ComparisonKind: snapshot.ComparisonTwoDot, RequestedComparison: "base..target", BaseOID: "base-oid", EffectiveBaseOID: "base-oid", TargetOID: "target-oid", ObjectFormat: "sha1", ContextPolicyHash: snapshot.DefaultContextPolicyHash(), CapturedAt: time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC), BaseEntries: base, TargetEntries: target}
+	capture := snapshot.Capture{
+		ComparisonKind:      snapshot.ComparisonTwoDot,
+		RequestedComparison: "base..target",
+		BaseOID:             "base-oid",
+		EffectiveBaseOID:    "base-oid",
+		TargetOID:           "target-oid",
+		ObjectFormat:        "sha1",
+		ContextPolicyHash:   snapshot.DefaultContextPolicyHash(),
+		CapturedAt:          time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC),
+		BaseEntries:         base,
+		TargetEntries:       target,
+	}
 	var err error
 	capture.BaseManifestDigest, err = snapshot.ManifestDigest(base)
 	if err != nil {
@@ -211,4 +336,63 @@ func countContextKind(artifacts []ContextArtifact, kind string) int {
 		}
 	}
 	return count
+}
+
+func TestModelRunOptionsNormalizeCentralizesDefaultsAndCopiesInputs(t *testing.T) {
+	t.Parallel()
+
+	parameters := map[string]any{"temperature": 0.2}
+	redactions := []string{"credential", "request", "credential"}
+	model := modelRunOptionsMetadataModel{value: ModelMetadata{
+		Adapter:    " provider-adapter ",
+		Protocol:   " provider-protocol/v1 ",
+		Model:      " provider-model ",
+		Redactions: []string{"provider-secret", "credential"},
+	}}
+	normalized := (ModelRunOptions{
+		Retry:   RetryPolicy{RepairAttempts: -1},
+		Adapter: " ", Protocol: " ", PromptTemplateVersion: " ", Model: " ",
+		Parameters: parameters, Redactions: redactions,
+	}).normalize(model, "mire/v1/test-prompt")
+
+	wantRetry := RetryPolicy{
+		MaxAttempts:    DefaultRetryPolicy.MaxAttempts,
+		Timeout:        DefaultRetryPolicy.Timeout,
+		MaxOutputBytes: DefaultRetryPolicy.MaxOutputBytes,
+	}
+	if normalized.Retry != wantRetry {
+		t.Fatalf("normalized retry = %#v, want %#v", normalized.Retry, wantRetry)
+	}
+	if normalized.Adapter != "provider-adapter" || normalized.Protocol != "provider-protocol/v1" ||
+		normalized.Model != "provider-model" ||
+		normalized.PromptTemplateVersion != "mire/v1/test-prompt" {
+		t.Fatalf("normalized metadata = %#v", normalized)
+	}
+	if normalized.Now == nil || normalized.Now().IsZero() {
+		t.Fatal("normalized clock is missing or returned zero time")
+	}
+	wantRedactions := []string{"credential", "request", "provider-secret"}
+	if strings.Join(normalized.Redactions, ",") != strings.Join(wantRedactions, ",") {
+		t.Fatalf("normalized redactions = %#v, want %#v", normalized.Redactions, wantRedactions)
+	}
+
+	normalized.Parameters["top_p"] = 0.9
+	if _, ok := parameters["top_p"]; ok {
+		t.Fatal("normalization reused the caller's parameter map")
+	}
+	if len(redactions) != 3 {
+		t.Fatalf("normalization mutated caller redactions = %#v", redactions)
+	}
+}
+
+type modelRunOptionsMetadataModel struct {
+	value ModelMetadata
+}
+
+func (model modelRunOptionsMetadataModel) Complete(context.Context, ModelRequest) (ModelResponse, error) {
+	return ModelResponse{}, nil
+}
+
+func (model modelRunOptionsMetadataModel) Metadata() ModelMetadata {
+	return model.value
 }

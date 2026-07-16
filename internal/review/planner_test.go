@@ -13,9 +13,14 @@ func TestRunPlannerFixtureProducesExplainablePlan(t *testing.T) {
 
 	change := plannerFixtureChange()
 	result, err := RunPlanner(context.Background(), change, NewFixtureModel(change), PlannerOptions{
-		Retry:   RetryPolicy{MaxAttempts: 2, RepairAttempts: 1},
-		Adapter: "fixture", Protocol: "fixture/v1", PromptTemplateVersion: "test-template",
-		Model: "fixture-model", Now: func() time.Time { return time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC) },
+		ModelRunOptions: ModelRunOptions{
+			Retry:                 RetryPolicy{MaxAttempts: 2, RepairAttempts: 1},
+			Adapter:               "fixture",
+			Protocol:              "fixture/v1",
+			PromptTemplateVersion: "test-template",
+			Model:                 "fixture-model",
+			Now:                   func() time.Time { return time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC) },
+		},
 	})
 	if err != nil {
 		t.Fatalf("RunPlanner() error = %v", err)
@@ -46,13 +51,20 @@ func TestRunPlannerUsesOptionalModelMetadataForProvenance(t *testing.T) {
 	change := plannerFixtureChange()
 	model := metadataFixtureModel{
 		Model: NewFixtureModel(change),
-		Value: ModelMetadata{Adapter: "fixture-adapter", Protocol: "fixture-protocol/v1", Model: "fixture-model", Redactions: []string{"credential"}},
+		Value: ModelMetadata{
+			Adapter:    "fixture-adapter",
+			Protocol:   "fixture-protocol/v1",
+			Model:      "fixture-model",
+			Redactions: []string{"credential"},
+		},
 	}
 	result, err := RunPlanner(context.Background(), change, model, PlannerOptions{})
 	if err != nil {
 		t.Fatalf("RunPlanner() error = %v", err)
 	}
-	if result.Run.Provenance.Adapter != "fixture-adapter" || result.Run.Provenance.Protocol != "fixture-protocol/v1" || result.Run.Provenance.Model != "fixture-model" || len(result.Run.Provenance.Redactions) != 1 {
+	if result.Run.Provenance.Adapter != "fixture-adapter" || result.Run.Provenance.Protocol != "fixture-protocol/v1" ||
+		result.Run.Provenance.Model != "fixture-model" ||
+		len(result.Run.Provenance.Redactions) != 1 {
 		t.Fatalf("provenance = %#v", result.Run.Provenance)
 	}
 }
@@ -64,7 +76,7 @@ func TestRunPlannerRepairsMalformedStructuredOutputWithinBound(t *testing.T) {
 	fixture := NewFixtureModel(change)
 	fixture.Responses = []FixtureResponse{{Output: []byte(`{"schema_version":`)}}
 	result, err := RunPlanner(context.Background(), change, fixture, PlannerOptions{
-		Retry: RetryPolicy{MaxAttempts: 2, RepairAttempts: 1},
+		ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 2, RepairAttempts: 1}},
 	})
 	if err != nil {
 		t.Fatalf("RunPlanner() error = %v", err)
@@ -81,13 +93,14 @@ func TestRunPlannerLeavesInvalidOutputAsVisibleFailure(t *testing.T) {
 	fixture := NewFixtureModel(change)
 	fixture.Responses = []FixtureResponse{{Output: []byte("not-json")}, {Output: []byte("still-not-json")}}
 	result, err := RunPlanner(context.Background(), change, fixture, PlannerOptions{
-		Retry: RetryPolicy{MaxAttempts: 2, RepairAttempts: 1},
+		ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 2, RepairAttempts: 1}},
 	})
 	var plannerErr *PlannerError
 	if !errors.As(err, &plannerErr) || plannerErr.Status != RunStatusFailed {
 		t.Fatalf("error = %v, want failed PlannerError", err)
 	}
-	if result.Plan != nil || result.Run.Status != RunStatusFailed || result.Run.Provenance.TerminationCause != "invalid_structured_output" {
+	if result.Plan != nil || result.Run.Status != RunStatusFailed ||
+		result.Run.Provenance.TerminationCause != "invalid_structured_output" {
 		t.Fatalf("result = %#v", result)
 	}
 	if !strings.Contains(result.Run.Error, "decode review plan") {
@@ -101,36 +114,56 @@ func TestRunPlannerCancellationAndOutputBudgetAreDurableStatuses(t *testing.T) {
 	change := plannerFixtureChange()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	result, err := RunPlanner(ctx, change, NewFixtureModel(change), PlannerOptions{Retry: RetryPolicy{MaxAttempts: 2}})
+	result, err := RunPlanner(
+		ctx,
+		change,
+		NewFixtureModel(change),
+		PlannerOptions{ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 2}}},
+	)
 	var plannerErr *PlannerError
-	if !errors.As(err, &plannerErr) || plannerErr.Status != RunStatusCancelled || result.Run.Status != RunStatusCancelled {
+	if !errors.As(err, &plannerErr) || plannerErr.Status != RunStatusCancelled ||
+		result.Run.Status != RunStatusCancelled {
 		t.Fatalf("cancellation result=%#v error=%v", result, err)
 	}
 
 	fixture := NewFixtureModel(change)
 	result, err = RunPlanner(context.Background(), change, fixture, PlannerOptions{
-		Retry: RetryPolicy{MaxAttempts: 1, MaxOutputBytes: 1},
+		ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 1, MaxOutputBytes: 1}},
 	})
-	if !errors.As(err, &plannerErr) || plannerErr.Status != RunStatusBudgetExhausted || result.Run.Status != RunStatusBudgetExhausted {
+	if !errors.As(err, &plannerErr) || plannerErr.Status != RunStatusBudgetExhausted ||
+		result.Run.Status != RunStatusBudgetExhausted {
 		t.Fatalf("budget result=%#v error=%v", result, err)
 	}
 
 	fixture = NewFixtureModel(change)
 	fixture.Delay = 50 * time.Millisecond
 	result, err = RunPlanner(context.Background(), change, fixture, PlannerOptions{
-		Retry: RetryPolicy{MaxAttempts: 1, Timeout: time.Millisecond},
+		ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 1, Timeout: time.Millisecond}},
 	})
-	if !errors.As(err, &plannerErr) || plannerErr.Status != RunStatusTimedOut || result.Run.Status != RunStatusTimedOut {
+	if !errors.As(err, &plannerErr) || plannerErr.Status != RunStatusTimedOut ||
+		result.Run.Status != RunStatusTimedOut {
 		t.Fatalf("timeout result=%#v error=%v", result, err)
 	}
 }
 
 func plannerFixtureChange() ChangeModel {
 	return ChangeModel{
-		SchemaVersion: "mire/v1/change-model", SessionID: "session-1", SnapshotID: "snapshot-1",
-		SnapshotDigest: "manifest-digest", Digest: "change-model-digest",
-		Files:    []FileChange{{Status: "modified", TargetPath: "src/a.go", Hunks: []Hunk{{ID: "src/a.go#hunk", Available: true}}}},
-		Surfaces: []AffectedSurface{{Kind: SurfaceContracts, Evidence: []SurfaceEvidence{{Kind: SurfaceContracts, Path: "src/a.go", HunkIDs: []string{"src/a.go#hunk"}}}}},
+		SchemaVersion:  "mire/v1/change-model",
+		SessionID:      "session-1",
+		SnapshotID:     "snapshot-1",
+		SnapshotDigest: "manifest-digest",
+		Digest:         "change-model-digest",
+		Files: []FileChange{
+			{Status: "modified", TargetPath: "src/a.go", Hunks: []Hunk{{ID: "src/a.go#hunk", Available: true}}},
+		},
+		Surfaces: []AffectedSurface{
+			{
+				Kind: SurfaceContracts,
+				Evidence: []SurfaceEvidence{
+					{Kind: SurfaceContracts, Path: "src/a.go", HunkIDs: []string{"src/a.go#hunk"}},
+				},
+			},
+		},
 	}
 }
 

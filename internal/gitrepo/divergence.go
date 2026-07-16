@@ -14,7 +14,13 @@ import (
 // CheckDivergence compares a persisted snapshot with the current repository.
 // It reports live Git problems as unavailable or unsupported statuses so a
 // caller never has to mistake an inconclusive check for an unchanged round.
-func CheckDivergence(ctx context.Context, directory string, store *db.RepositoryStore, frozen db.Snapshot, objectStore *snapshot.ObjectStore) (snapshot.DivergenceReport, error) {
+func CheckDivergence(
+	ctx context.Context,
+	directory string,
+	store *db.RepositoryStore,
+	frozen db.Snapshot,
+	objectStore *snapshot.ObjectStore,
+) (snapshot.DivergenceReport, error) {
 	if strings.TrimSpace(frozen.ID) == "" {
 		return snapshot.DivergenceReport{}, fmt.Errorf("check divergence: snapshot ID is empty")
 	}
@@ -45,8 +51,13 @@ func CheckDivergence(ctx context.Context, directory string, store *db.Repository
 	}
 	if objectFormat != frozen.ObjectFormat {
 		return snapshot.DivergenceReport{
-			SnapshotID: frozen.ID, Status: snapshot.DivergenceUnsupported,
-			Message: fmt.Sprintf("Live Git object format %q differs from frozen format %q.", objectFormat, frozen.ObjectFormat),
+			SnapshotID: frozen.ID,
+			Status:     snapshot.DivergenceUnsupported,
+			Message: fmt.Sprintf(
+				"Live Git object format %q differs from frozen format %q.",
+				objectFormat,
+				frozen.ObjectFormat,
+			),
 		}, nil
 	}
 
@@ -55,15 +66,25 @@ func CheckDivergence(ctx context.Context, directory string, store *db.Repository
 	}
 	baseRevision, targetRevision, _, err := parseComparisonRange(frozen.RequestedComparison)
 	if err != nil {
-		return snapshot.DivergenceReport{SnapshotID: frozen.ID, Status: snapshot.DivergenceUnsupported, Message: "Frozen comparison syntax is unsupported."}, nil
+		return snapshot.DivergenceReport{
+			SnapshotID: frozen.ID,
+			Status:     snapshot.DivergenceUnsupported,
+			Message:    "Frozen comparison syntax is unsupported.",
+		}, nil
 	}
 	baseOID, err := resolveCommitRevision(repository.Git, baseRevision)
 	if err != nil {
-		return unavailableReport(frozen.ID, fmt.Sprintf("Unable to resolve the frozen base revision %q: %v.", baseRevision, err)), nil
+		return unavailableReport(
+			frozen.ID,
+			fmt.Sprintf("Unable to resolve the frozen base revision %q: %v.", baseRevision, err),
+		), nil
 	}
 	targetOID, err := resolveCommitRevision(repository.Git, targetRevision)
 	if err != nil {
-		return unavailableReport(frozen.ID, fmt.Sprintf("Unable to resolve the frozen target revision %q: %v.", targetRevision, err)), nil
+		return unavailableReport(
+			frozen.ID,
+			fmt.Sprintf("Unable to resolve the frozen target revision %q: %v.", targetRevision, err),
+		), nil
 	}
 	mergeBaseOID := ""
 	if kind == snapshot.ComparisonThreeDot {
@@ -100,7 +121,14 @@ func CheckDivergence(ctx context.Context, directory string, store *db.Repository
 	if store != nil && objectStore != nil {
 		current, captureErr := CaptureRange(ctx, directory, frozen.RequestedComparison, objectStore)
 		if captureErr == nil {
-			report.AffectedPaths = changedPaths(ctx, store, frozen, current, snapshot.TreeSideBase, snapshot.TreeSideTarget)
+			report.AffectedPaths = changedPaths(
+				ctx,
+				store,
+				frozen,
+				current,
+				snapshot.TreeSideBase,
+				snapshot.TreeSideTarget,
+			)
 		} else if !errors.Is(captureErr, context.Canceled) && !errors.Is(captureErr, context.DeadlineExceeded) {
 			report.Message += fmt.Sprintf(" Changed paths could not be determined: %v.", captureErr)
 		}
@@ -108,7 +136,13 @@ func CheckDivergence(ctx context.Context, directory string, store *db.Repository
 	return report, nil
 }
 
-func checkWorktreeDivergence(ctx context.Context, repository *Repository, store *db.RepositoryStore, frozen db.Snapshot, objectStore *snapshot.ObjectStore) (snapshot.DivergenceReport, error) {
+func checkWorktreeDivergence(
+	ctx context.Context,
+	repository *Repository,
+	store *db.RepositoryStore,
+	frozen db.Snapshot,
+	objectStore *snapshot.ObjectStore,
+) (snapshot.DivergenceReport, error) {
 	if objectStore == nil {
 		return snapshot.DivergenceReport{
 			SnapshotID: frozen.ID, Status: snapshot.DivergenceUnsupported,
@@ -117,7 +151,10 @@ func checkWorktreeDivergence(ctx context.Context, repository *Repository, store 
 	}
 	current, err := CaptureWorktree(ctx, repository.Root, objectStore)
 	if err != nil {
-		return unavailableReport(frozen.ID, fmt.Sprintf("Unable to capture the live working tree coherently: %v.", err)), nil
+		return unavailableReport(
+			frozen.ID,
+			fmt.Sprintf("Unable to capture the live working tree coherently: %v.", err),
+		), nil
 	}
 	report := snapshot.DivergenceReport{SnapshotID: frozen.ID, Status: snapshot.DivergenceUnchanged}
 	if current.BaseOID != frozen.BaseOID {
@@ -135,7 +172,14 @@ func checkWorktreeDivergence(ctx context.Context, repository *Repository, store 
 	report.Status = snapshot.DivergenceChanged
 	report.Message = "Live working-tree layers differ from the frozen round."
 	if store != nil {
-		report.AffectedPaths = changedPaths(ctx, store, frozen, current, snapshot.TreeSideHead, snapshot.TreeSideWorktree)
+		report.AffectedPaths = changedPaths(
+			ctx,
+			store,
+			frozen,
+			current,
+			snapshot.TreeSideHead,
+			snapshot.TreeSideWorktree,
+		)
 	}
 	return report, nil
 }
@@ -144,7 +188,13 @@ func unavailableReport(snapshotID, message string) snapshot.DivergenceReport {
 	return snapshot.DivergenceReport{SnapshotID: snapshotID, Status: snapshot.DivergenceUnavailable, Message: message}
 }
 
-func changedPaths(ctx context.Context, store *db.RepositoryStore, frozen db.Snapshot, current snapshot.Capture, baseSide, targetSide string) []string {
+func changedPaths(
+	ctx context.Context,
+	store *db.RepositoryStore,
+	frozen db.Snapshot,
+	current snapshot.Capture,
+	baseSide, targetSide string,
+) []string {
 	oldBase, err := store.ListSnapshotEntries(ctx, frozen.ID, baseSide)
 	if err != nil {
 		return nil

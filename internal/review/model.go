@@ -416,7 +416,8 @@ func normalizeGit(gitMetadata PinnedGit, capture snapshot.Capture) (PinnedGit, e
 	if gitMetadata.MergeBaseOID == "" {
 		gitMetadata.MergeBaseOID = capture.MergeBaseOID
 	}
-	if gitMetadata.ObjectFormat != capture.ObjectFormat || gitMetadata.EffectiveBaseOID != capture.EffectiveBaseOID || gitMetadata.TargetOID != capture.TargetOID {
+	if gitMetadata.ObjectFormat != capture.ObjectFormat || gitMetadata.EffectiveBaseOID != capture.EffectiveBaseOID ||
+		gitMetadata.TargetOID != capture.TargetOID {
 		return PinnedGit{}, fmt.Errorf("assemble review model: pinned Git metadata does not match snapshot")
 	}
 	commits := append([]PinnedCommit(nil), gitMetadata.Commits...)
@@ -497,7 +498,18 @@ func normalizeGuidance(guidance []Guidance) ([]Guidance, []ContextArtifact, erro
 			return nil, nil, fmt.Errorf("assemble review model: guidance %q digest mismatch", item.Path)
 		}
 		item.Digest = digest
-		artifacts = append(artifacts, ContextArtifact{ID: item.ID, Kind: string(item.Kind), Source: "snapshot_guidance", Path: item.Path, Tier: item.Tier, Content: item.Content, Digest: digest})
+		artifacts = append(
+			artifacts,
+			ContextArtifact{
+				ID:      item.ID,
+				Kind:    string(item.Kind),
+				Source:  "snapshot_guidance",
+				Path:    item.Path,
+				Tier:    item.Tier,
+				Content: item.Content,
+				Digest:  digest,
+			},
+		)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, artifacts, nil
@@ -507,13 +519,31 @@ func assembleIntent(input Input, gitMetadata PinnedGit, guidance []Guidance) (In
 	base := make([]ContextArtifact, 0)
 	for _, item := range guidance {
 		if item.Tier == PolicyTierBasePolicy || item.Tier == PolicyTierBaseDocumentation {
-			base = append(base, ContextArtifact{ID: item.ID, Kind: string(item.Kind), Source: "base_snapshot", Path: item.Path, Tier: item.Tier, Content: item.Content, Digest: item.Digest})
+			base = append(
+				base,
+				ContextArtifact{
+					ID:      item.ID,
+					Kind:    string(item.Kind),
+					Source:  "base_snapshot",
+					Path:    item.Path,
+					Tier:    item.Tier,
+					Content: item.Content,
+					Digest:  item.Digest,
+				},
+			)
 		}
 	}
 	var earlier *EarlierRound
 	if input.EarlierRound != nil {
 		copyEarlier := *input.EarlierRound
-		digest, err := digestValue(struct{ SessionID, RoundID, SnapshotDigest, Intent string }{copyEarlier.SessionID, copyEarlier.RoundID, copyEarlier.SnapshotDigest, copyEarlier.Intent})
+		digest, err := digestValue(
+			struct{ SessionID, RoundID, SnapshotDigest, Intent string }{
+				copyEarlier.SessionID,
+				copyEarlier.RoundID,
+				copyEarlier.SnapshotDigest,
+				copyEarlier.Intent,
+			},
+		)
 		if err != nil {
 			return Intent{}, nil, err
 		}
@@ -523,7 +553,12 @@ func assembleIntent(input Input, gitMetadata PinnedGit, guidance []Guidance) (In
 		copyEarlier.Digest = digest
 		earlier = &copyEarlier
 	}
-	intent := Intent{Prompt: strings.TrimSpace(input.Request.Prompt), CommitMessages: append([]PinnedCommit(nil), gitMetadata.Commits...), BaseGuidance: base, EarlierRound: earlier}
+	intent := Intent{
+		Prompt:         strings.TrimSpace(input.Request.Prompt),
+		CommitMessages: append([]PinnedCommit(nil), gitMetadata.Commits...),
+		BaseGuidance:   base,
+		EarlierRound:   earlier,
+	}
 	digest, err := digestValue(struct {
 		Prompt  string
 		Commits []PinnedCommit
@@ -536,7 +571,10 @@ func assembleIntent(input Input, gitMetadata PinnedGit, guidance []Guidance) (In
 	intent.Digest = digest
 	artifacts := make([]ContextArtifact, 0, 2)
 	if intent.Prompt != "" {
-		artifacts = append(artifacts, newArtifact("user_prompt", "private_request", "", PolicyTierPrivate, intent.Prompt))
+		artifacts = append(
+			artifacts,
+			newArtifact("user_prompt", "private_request", "", PolicyTierPrivate, intent.Prompt),
+		)
 	}
 	if input.Request.Configuration != "" || len(input.Request.Rules) > 0 {
 		content, err := canonicalText(struct {
@@ -546,20 +584,38 @@ func assembleIntent(input Input, gitMetadata PinnedGit, guidance []Guidance) (In
 		if err != nil {
 			return Intent{}, nil, err
 		}
-		artifacts = append(artifacts, newArtifact("private_configuration", "private_request", "", PolicyTierPrivate, content))
+		artifacts = append(
+			artifacts,
+			newArtifact("private_configuration", "private_request", "", PolicyTierPrivate, content),
+		)
 	}
 	if earlier != nil {
-		artifacts = append(artifacts, newArtifact("earlier_round", "same_session_round", earlier.RoundID, PolicyTierPrivate, earlier.Intent))
+		artifacts = append(
+			artifacts,
+			newArtifact("earlier_round", "same_session_round", earlier.RoundID, PolicyTierPrivate, earlier.Intent),
+		)
 	}
 	return intent, artifacts, nil
 }
 
 func newArtifact(kind, source, artifactPath string, tier PolicyTier, content string) ContextArtifact {
 	digest, _ := digestValue(struct{ Kind, Source, Path, Content string }{kind, source, artifactPath, content})
-	return ContextArtifact{ID: kind + "\x00" + artifactPath, Kind: kind, Source: source, Path: artifactPath, Tier: tier, Content: content, Digest: digest}
+	return ContextArtifact{
+		ID:      kind + "\x00" + artifactPath,
+		Kind:    kind,
+		Source:  source,
+		Path:    artifactPath,
+		Tier:    tier,
+		Content: content,
+		Digest:  digest,
+	}
 }
 
-func assembleFiles(ctx context.Context, capture snapshot.Capture, content ContentReader) ([]FileChange, []AffectedSurface, error) {
+func assembleFiles(
+	ctx context.Context,
+	capture snapshot.Capture,
+	content ContentReader,
+) ([]FileChange, []AffectedSurface, error) {
 	baseByPath := entriesByPath(capture.BaseEntries)
 	targetByPath := entriesByPath(capture.TargetEntries)
 	files := make([]FileChange, 0)
@@ -567,7 +623,13 @@ func assembleFiles(ctx context.Context, capture snapshot.Capture, content Conten
 		if change.Status == snapshot.ChangeUnchanged {
 			continue
 		}
-		file := FileChange{Status: change.Status, BasePath: change.BasePath, TargetPath: change.TargetPath, BaseDigest: change.BaseDigest, TargetDigest: change.TargetDigest}
+		file := FileChange{
+			Status:       change.Status,
+			BasePath:     change.BasePath,
+			TargetPath:   change.TargetPath,
+			BaseDigest:   change.BaseDigest,
+			TargetDigest: change.TargetDigest,
+		}
 		baseEntry := baseByPath[change.BasePath]
 		targetEntry := targetByPath[change.TargetPath]
 		oldBytes, oldAvailable, err := readEntry(ctx, content, baseEntry)
@@ -629,22 +691,31 @@ func classifySurfaces(file FileChange, target snapshot.Entry) []SurfaceKind {
 		name = strings.ToLower(file.BasePath)
 	}
 	set := make(map[SurfaceKind]bool)
-	if strings.HasSuffix(name, "_test.go") || strings.Contains(name, "/test/") || strings.Contains(name, "/tests/") || strings.HasSuffix(name, ".test.js") || strings.HasSuffix(name, ".spec.ts") {
+	if strings.HasSuffix(name, "_test.go") || strings.Contains(name, "/test/") || strings.Contains(name, "/tests/") ||
+		strings.HasSuffix(name, ".test.js") ||
+		strings.HasSuffix(name, ".spec.ts") {
 		set[SurfaceTests] = true
 	}
-	if strings.Contains(name, "migration") || strings.Contains(name, "/migrations/") || strings.Contains(name, "/db/sql/") {
+	if strings.Contains(name, "migration") || strings.Contains(name, "/migrations/") ||
+		strings.Contains(name, "/db/sql/") {
 		set[SurfaceMigrations] = true
 	}
-	if name == "go.mod" || name == "go.sum" || strings.HasSuffix(name, "package.json") || strings.Contains(name, "lock") {
+	if name == "go.mod" || name == "go.sum" || strings.HasSuffix(name, "package.json") ||
+		strings.Contains(name, "lock") {
 		set[SurfaceDependencies] = true
 	}
-	if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".toml") || strings.HasSuffix(name, ".ini") || strings.HasSuffix(name, ".env") || strings.Contains(name, "/config/") {
+	if strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml") || strings.HasSuffix(name, ".toml") ||
+		strings.HasSuffix(name, ".ini") ||
+		strings.HasSuffix(name, ".env") ||
+		strings.Contains(name, "/config/") {
 		set[SurfaceConfiguration] = true
 	}
-	if strings.Contains(name, "schema") || strings.HasSuffix(name, ".proto") || strings.HasSuffix(name, ".graphql") || strings.HasSuffix(name, "openapi.json") {
+	if strings.Contains(name, "schema") || strings.HasSuffix(name, ".proto") || strings.HasSuffix(name, ".graphql") ||
+		strings.HasSuffix(name, "openapi.json") {
 		set[SurfaceContracts] = true
 	}
-	if target.Kind == snapshot.EntryKindFile && (strings.HasSuffix(name, ".go") || strings.Contains(name, "/api/") || strings.Contains(name, "/public/")) {
+	if target.Kind == snapshot.EntryKindFile &&
+		(strings.HasSuffix(name, ".go") || strings.Contains(name, "/api/") || strings.Contains(name, "/public/")) {
 		for _, symbol := range file.Symbols {
 			if symbol.Kind == "function" || symbol.Kind == "type" {
 				set[SurfacePublicAPI] = true
@@ -719,7 +790,10 @@ func collectSurfaces(files []FileChange) []AffectedSurface {
 			if pathName == "" {
 				pathName = file.BasePath
 			}
-			byKind[kind] = append(byKind[kind], SurfaceEvidence{Kind: kind, Path: pathName, HunkIDs: ids, Reason: "path or captured lexical evidence"})
+			byKind[kind] = append(
+				byKind[kind],
+				SurfaceEvidence{Kind: kind, Path: pathName, HunkIDs: ids, Reason: "path or captured lexical evidence"},
+			)
 		}
 	}
 	kinds := make([]SurfaceKind, 0, len(byKind))

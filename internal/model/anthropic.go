@@ -53,7 +53,12 @@ func (adapter *Anthropic) Metadata() review.ModelMetadata {
 	if adapter == nil {
 		return review.ModelMetadata{}
 	}
-	return review.ModelMetadata{Adapter: string(ProviderAnthropic), Protocol: anthropicProtocolVersion, Model: adapter.config.Model, Redactions: []string{"credential"}}
+	return review.ModelMetadata{
+		Adapter:    string(ProviderAnthropic),
+		Protocol:   anthropicProtocolVersion,
+		Model:      adapter.config.Model,
+		Redactions: []string{"credential"},
+	}
 }
 
 // Complete translates a provider-neutral request to Anthropic Messages and
@@ -75,7 +80,13 @@ func (adapter *Anthropic) Complete(ctx context.Context, request review.ModelRequ
 		return review.ModelResponse{}, fmt.Errorf("complete Anthropic model: %w", err)
 	}
 	if request.Repair && strings.TrimSpace(request.PreviousOutput) != "" {
-		messages = append(messages, anthropicMessage{Role: "user", Content: "The previous structured response was invalid. Repair it and return only the required result. Previous response:\n" + request.PreviousOutput})
+		messages = append(
+			messages,
+			anthropicMessage{
+				Role:    "user",
+				Content: "The previous structured response was invalid. Repair it and return only the required result. Previous response:\n" + request.PreviousOutput,
+			},
+		)
 	}
 	payload := make(map[string]any, len(request.Parameters)+8)
 	for key, value := range request.Parameters {
@@ -104,7 +115,14 @@ func (adapter *Anthropic) Complete(ctx context.Context, request review.ModelRequ
 		tools = append(tools, converted)
 	}
 	if request.Output.Schema != "" {
-		tools = append(tools, anthropicTool{Name: structuredToolName, Description: "Return the required provider-neutral structured response.", InputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`)})
+		tools = append(
+			tools,
+			anthropicTool{
+				Name:        structuredToolName,
+				Description: "Return the required provider-neutral structured response.",
+				InputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`),
+			},
+		)
 		payload["tool_choice"] = map[string]any{"type": "tool", "name": structuredToolName}
 	}
 	if len(tools) > 0 {
@@ -128,12 +146,23 @@ func (adapter *Anthropic) Complete(ctx context.Context, request review.ModelRequ
 	if credential != "" {
 		headers.Set("x-api-key", credential)
 	}
-	return execute(ctx, adapter.client, ProviderAnthropic, "messages", requestURL, string(body), credential, headers, adapter.config, func(reader io.Reader) (review.ModelResponse, error) {
-		if adapter.config.Stream {
-			return parseAnthropicStream(reader, adapter.config.Budget)
-		}
-		return parseAnthropicResponse(reader, adapter.config.Budget)
-	})
+	return execute(
+		ctx,
+		adapter.client,
+		ProviderAnthropic,
+		"messages",
+		requestURL,
+		string(body),
+		credential,
+		headers,
+		adapter.config,
+		func(reader io.Reader) (review.ModelResponse, error) {
+			if adapter.config.Stream {
+				return parseAnthropicStream(reader, adapter.config.Budget)
+			}
+			return parseAnthropicResponse(reader, adapter.config.Budget)
+		},
+	)
 }
 
 // DetectCapabilities reports the native Messages features used by this
@@ -146,7 +175,10 @@ func (adapter *Anthropic) DetectCapabilities(ctx context.Context) (CapabilityRep
 	if err := contextError(ctx); err != nil {
 		return CapabilityReport{}, err
 	}
-	report := CapabilityReport{Provider: ProviderAnthropic, BaseURL: adapter.config.BaseURL, Model: adapter.config.Model,
+	report := CapabilityReport{
+		Provider: ProviderAnthropic,
+		BaseURL:  adapter.config.BaseURL,
+		Model:    adapter.config.Model,
 		Features: map[Capability]CapabilityStatus{
 			CapabilityMessages:     CapabilitySupported,
 			CapabilityStreaming:    CapabilitySupported,
@@ -154,8 +186,12 @@ func (adapter *Anthropic) DetectCapabilities(ctx context.Context) (CapabilityRep
 			CapabilityToolUse:      CapabilitySupported,
 			CapabilityUsage:        CapabilitySupported,
 			CapabilityModelListing: CapabilityUnsupported,
-		}, CheckedAt: time.Now().UTC(),
-		Limitations: []string{"Structured output is transported as a forced tool-use block and remains subject to domain schema validation."}}
+		},
+		CheckedAt: time.Now().UTC(),
+		Limitations: []string{
+			"Structured output is transported as a forced tool-use block and remains subject to domain schema validation.",
+		},
+	}
 	for capability, status := range adapter.config.Capabilities {
 		report.Features[capability] = status
 	}
@@ -218,7 +254,11 @@ type anthropicUsage struct {
 }
 
 func (usage anthropicUsage) normalize() review.Usage {
-	return review.Usage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.InputTokens + usage.OutputTokens}
+	return review.Usage{
+		InputTokens:  usage.InputTokens,
+		OutputTokens: usage.OutputTokens,
+		TotalTokens:  usage.InputTokens + usage.OutputTokens,
+	}
 }
 
 func parseAnthropicResponse(reader io.Reader, budget Budget) (review.ModelResponse, error) {
@@ -231,22 +271,42 @@ func parseAnthropicResponse(reader io.Reader, budget Budget) (review.ModelRespon
 		Error      json.RawMessage         `json:"error"`
 	}
 	if err := decoder.Decode(&envelope); err != nil {
-		return review.ModelResponse{}, &MalformedResponseError{Provider: ProviderAnthropic, Operation: "messages", Reason: "invalid JSON"}
+		return review.ModelResponse{}, &MalformedResponseError{
+			Provider:  ProviderAnthropic,
+			Operation: "messages",
+			Reason:    "invalid JSON",
+		}
 	}
 	if err := requireJSONEOF(decoder); err != nil {
-		return review.ModelResponse{}, &MalformedResponseError{Provider: ProviderAnthropic, Operation: "messages", Reason: "trailing JSON"}
+		return review.ModelResponse{}, &MalformedResponseError{
+			Provider:  ProviderAnthropic,
+			Operation: "messages",
+			Reason:    "trailing JSON",
+		}
 	}
 	if envelope.Type != "message" {
-		return review.ModelResponse{}, &MalformedResponseError{Provider: ProviderAnthropic, Operation: "messages", Reason: "response type is not message"}
+		return review.ModelResponse{}, &MalformedResponseError{
+			Provider:  ProviderAnthropic,
+			Operation: "messages",
+			Reason:    "response type is not message",
+		}
 	}
 	if len(envelope.Error) > 0 && string(envelope.Error) != "null" {
-		return review.ModelResponse{}, &MalformedResponseError{Provider: ProviderAnthropic, Operation: "messages", Reason: "provider returned an error payload with a success status"}
+		return review.ModelResponse{}, &MalformedResponseError{
+			Provider:  ProviderAnthropic,
+			Operation: "messages",
+			Reason:    "provider returned an error payload with a success status",
+		}
 	}
 	output, err := anthropicOutput(envelope.Content, budget)
 	if err != nil {
 		return review.ModelResponse{}, err
 	}
-	return review.ModelResponse{Output: []byte(output), Usage: envelope.Usage.normalize(), FinishReason: normalizeFinishReason(envelope.StopReason)}, nil
+	return review.ModelResponse{
+		Output:       []byte(output),
+		Usage:        envelope.Usage.normalize(),
+		FinishReason: normalizeFinishReason(envelope.StopReason),
+	}, nil
 }
 
 func anthropicOutput(blocks []anthropicContentBlock, budget Budget) (string, error) {
@@ -260,10 +320,18 @@ func anthropicOutput(blocks []anthropicContentBlock, budget Budget) (string, err
 				continue
 			}
 			if len(block.Input) == 0 || string(block.Input) == "null" {
-				return "", &MalformedResponseError{Provider: ProviderAnthropic, Operation: "messages", Reason: "structured tool-use block has no input"}
+				return "", &MalformedResponseError{
+					Provider:  ProviderAnthropic,
+					Operation: "messages",
+					Reason:    "structured tool-use block has no input",
+				}
 			}
 			if budget.MaxOutputBytes > 0 && len(block.Input) > budget.MaxOutputBytes {
-				return "", &BudgetError{Kind: "output bytes", Value: int64(len(block.Input)), Limit: int64(budget.MaxOutputBytes)}
+				return "", &BudgetError{
+					Kind:  "output bytes",
+					Value: int64(len(block.Input)),
+					Limit: int64(budget.MaxOutputBytes),
+				}
 			}
 			return string(block.Input), nil
 		}
@@ -308,10 +376,19 @@ func parseAnthropicStream(reader io.Reader, budget Budget) (review.ModelResponse
 			} `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(event.Data), &envelope); err != nil {
-			return &MalformedStreamError{Provider: ProviderAnthropic, Event: eventNumber, Reason: "event data is not valid JSON"}
+			return &MalformedStreamError{
+				Provider: ProviderAnthropic,
+				Event:    eventNumber,
+				Reason:   "event data is not valid JSON",
+			}
 		}
 		if envelope.Type == "error" {
-			return &ProviderError{Provider: ProviderAnthropic, Operation: "messages stream", StatusCode: http.StatusOK, Message: "provider returned a stream error"}
+			return &ProviderError{
+				Provider:   ProviderAnthropic,
+				Operation:  "messages stream",
+				StatusCode: http.StatusOK,
+				Message:    "provider returned a stream error",
+			}
 		}
 		switch envelope.Type {
 		case "message_start":
@@ -319,7 +396,11 @@ func parseAnthropicStream(reader io.Reader, budget Budget) (review.ModelResponse
 			usage = envelope.Message.Usage.normalize()
 		case "content_block_start":
 			if !seenMessageStart {
-				return &MalformedStreamError{Provider: ProviderAnthropic, Event: eventNumber, Reason: "content block started before message_start"}
+				return &MalformedStreamError{
+					Provider: ProviderAnthropic,
+					Event:    eventNumber,
+					Reason:   "content block started before message_start",
+				}
 			}
 			currentBlock = envelope.ContentBlock.Type
 			currentToolName = envelope.ContentBlock.Name
@@ -327,16 +408,28 @@ func parseAnthropicStream(reader io.Reader, budget Budget) (review.ModelResponse
 			switch envelope.Delta.Type {
 			case "text_delta":
 				if currentBlock != "text" {
-					return &MalformedStreamError{Provider: ProviderAnthropic, Event: eventNumber, Reason: "text delta does not belong to a text block"}
+					return &MalformedStreamError{
+						Provider: ProviderAnthropic,
+						Event:    eventNumber,
+						Reason:   "text delta does not belong to a text block",
+					}
 				}
 				text.WriteString(envelope.Delta.Text)
 			case "input_json_delta":
 				if currentBlock != "tool_use" || currentToolName != structuredToolName {
-					return &MalformedStreamError{Provider: ProviderAnthropic, Event: eventNumber, Reason: "JSON delta does not belong to the structured output tool"}
+					return &MalformedStreamError{
+						Provider: ProviderAnthropic,
+						Event:    eventNumber,
+						Reason:   "JSON delta does not belong to the structured output tool",
+					}
 				}
 				toolInput.WriteString(envelope.Delta.PartialJSON)
 			default:
-				return &MalformedStreamError{Provider: ProviderAnthropic, Event: eventNumber, Reason: "unsupported content delta"}
+				return &MalformedStreamError{
+					Provider: ProviderAnthropic,
+					Event:    eventNumber,
+					Reason:   "unsupported content delta",
+				}
 			}
 		case "content_block_stop":
 			currentBlock = ""
@@ -350,21 +443,37 @@ func parseAnthropicStream(reader io.Reader, budget Budget) (review.ModelResponse
 		case "message_stop":
 			seenMessageStop = true
 		default:
-			return &MalformedStreamError{Provider: ProviderAnthropic, Event: eventNumber, Reason: "unsupported event type"}
+			return &MalformedStreamError{
+				Provider: ProviderAnthropic,
+				Event:    eventNumber,
+				Reason:   "unsupported event type",
+			}
 		}
 		if budget.MaxOutputBytes > 0 && text.Len()+toolInput.Len() > budget.MaxOutputBytes {
-			return &BudgetError{Kind: "output bytes", Value: int64(text.Len() + toolInput.Len()), Limit: int64(budget.MaxOutputBytes)}
+			return &BudgetError{
+				Kind:  "output bytes",
+				Value: int64(text.Len() + toolInput.Len()),
+				Limit: int64(budget.MaxOutputBytes),
+			}
 		}
 		return nil
 	}); err != nil {
 		return review.ModelResponse{}, err
 	}
 	if !seenMessageStart || !seenMessageStop {
-		return review.ModelResponse{}, &MalformedStreamError{Provider: ProviderAnthropic, Event: 0, Reason: "stream did not contain message_start and message_stop"}
+		return review.ModelResponse{}, &MalformedStreamError{
+			Provider: ProviderAnthropic,
+			Event:    0,
+			Reason:   "stream did not contain message_start and message_stop",
+		}
 	}
 	output := text.String()
 	if toolInput.Len() > 0 {
 		output = toolInput.String()
 	}
-	return review.ModelResponse{Output: []byte(output), Usage: usage, FinishReason: normalizeFinishReason(finishReason)}, nil
+	return review.ModelResponse{
+		Output:       []byte(output),
+		Usage:        usage,
+		FinishReason: normalizeFinishReason(finishReason),
+	}, nil
 }

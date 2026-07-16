@@ -44,7 +44,12 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 			if worktree {
 				capture, err = gitrepo.CaptureWorktree(command.Context(), identity.CanonicalIdentity, objectStore)
 			} else {
-				capture, err = gitrepo.CaptureRange(command.Context(), identity.CanonicalIdentity, requestedComparison, objectStore)
+				capture, err = gitrepo.CaptureRange(
+					command.Context(),
+					identity.CanonicalIdentity,
+					requestedComparison,
+					objectStore,
+				)
 			}
 			if err != nil {
 				if worktree {
@@ -65,9 +70,19 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 				if worktree {
 					title = "Review working tree"
 				}
-				session, round, persistedSnapshot, err = store.CreateCapturedSession(command.Context(), identity, title, capture)
+				session, round, persistedSnapshot, err = store.CreateCapturedSession(
+					command.Context(),
+					identity,
+					title,
+					capture,
+				)
 			} else {
-				session, round, persistedSnapshot, err = store.AppendCapturedRound(command.Context(), sessionID, identity, capture)
+				session, round, persistedSnapshot, err = store.AppendCapturedRound(
+					command.Context(),
+					sessionID,
+					identity,
+					capture,
+				)
 			}
 			if err != nil {
 				return fmt.Errorf("review: persist captured snapshot: %w", err)
@@ -82,7 +97,16 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 				return fmt.Errorf("review: acquire review operation: %w", err)
 			}
 			writeProgress(progress, "review: assembling frozen change model")
-			execution, executionErr := executeReview(command.Context(), store, session, round, persistedSnapshot, capture, objectStore, state.config.Model)
+			execution, executionErr := executeReview(
+				command.Context(),
+				store,
+				session,
+				round,
+				persistedSnapshot,
+				capture,
+				objectStore,
+				state.config.Model,
+			)
 			if executionErr != nil {
 				_, _ = store.FailOperation(command.Context(), operation.ID, executionErr.Error())
 				return fmt.Errorf("review: run review pipeline: %w", executionErr)
@@ -100,25 +124,50 @@ func newReviewCommand(state *commandContext) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("review: reload round: %w", err)
 			}
-			report, err := buildTerminalReport(command.Context(), store, session, updatedRound, persistedSnapshot, capture, objectStore)
+			report, err := buildTerminalReport(
+				command.Context(),
+				store,
+				session,
+				updatedRound,
+				persistedSnapshot,
+				capture,
+				objectStore,
+			)
 			if err != nil {
 				return fmt.Errorf("review: assemble terminal report: %w", err)
 			}
-			if err := echo.RenderReviewCapture(command.OutOrStdout(), session, updatedRound, persistedSnapshot); err != nil {
+			if err := echo.RenderReviewCapture(
+				command.OutOrStdout(),
+				session,
+				updatedRound,
+				persistedSnapshot,
+			); err != nil {
 				return err
 			}
-			if err := terminal.Render(command.OutOrStdout(), report, terminal.Options{Width: width, Candidates: candidates}); err != nil {
+			if err := terminal.Render(
+				command.OutOrStdout(),
+				report,
+				terminal.Options{Width: width, Candidates: candidates},
+			); err != nil {
 				return err
 			}
 			if report.IncompleteReason != "" {
 				writeProgress(progress, "review: incomplete analysis — "+report.IncompleteReason)
 			} else {
-				writeProgress(progress, fmt.Sprintf("review: complete — %d verified finding(s), %d retained candidate(s)", len(report.Findings), len(report.Candidates)))
+				writeProgress(
+					progress,
+					fmt.Sprintf(
+						"review: complete — %d verified finding(s), %d retained candidate(s)",
+						len(report.Findings),
+						len(report.Candidates),
+					),
+				)
 			}
 			return nil
 		},
 	}
-	command.Flags().StringVar(&requestedComparison, "range", "", "committed comparison in the form <base>..<head> or <base>...<head>")
+	command.Flags().
+		StringVar(&requestedComparison, "range", "", "committed comparison in the form <base>..<head> or <base>...<head>")
 	command.Flags().BoolVar(&worktree, "worktree", false, "capture HEAD, the index, and the final working tree")
 	command.Flags().StringVar(&sessionID, "session", "", "append to an existing session")
 	command.Flags().IntVar(&width, "width", terminal.DefaultWidth, "report width in terminal columns")

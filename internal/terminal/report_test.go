@@ -32,12 +32,58 @@ func TestRenderSeparatesVerifiedCandidatesAndRefutedAtFixedWidth(t *testing.T) {
 		},
 	}
 	report := Report{
-		SessionID: "session", RoundID: "round", SnapshotID: "snapshot", SnapshotKind: "two_dot",
-		RequestedComparison: "base..head", Status: "complete",
-		Change:     change,
-		Findings:   []FindingView{{Revision: review.FindingRevision{FindingID: "finding-1", Revision: 1, Claim: "The changed return can violate the invariant.", Impact: "Callers receive an invalid value.", Category: "correctness", Severity: "high", Verification: review.VerificationSupported, Anchors: []review.Anchor{anchor}}, Lane: review.FindingLaneVerified}},
-		Candidates: []CandidateView{{Candidate: review.CandidateRecord{ID: "candidate-1", Candidate: review.Candidate{Claim: "A retained candidate needs investigation.", Impact: "Potential issue.", Category: "correctness", Severity: "medium", Anchors: []review.Anchor{anchor}}}, Reason: "inconclusive"}},
-		Refuted:    []CandidateView{{Candidate: review.CandidateRecord{ID: "candidate-2", Candidate: review.Candidate{Claim: "A refuted hypothesis.", Impact: "No impact.", Category: "correctness", Severity: "low", Anchors: []review.Anchor{anchor}}}, Reason: "refuted"}},
+		SessionID:           "session",
+		RoundID:             "round",
+		SnapshotID:          "snapshot",
+		SnapshotKind:        "two_dot",
+		RequestedComparison: "base..head",
+		Status:              "complete",
+		Change:              change,
+		Findings: []FindingView{
+			{
+				Revision: review.FindingRevision{
+					FindingID:    "finding-1",
+					Revision:     1,
+					Claim:        "The changed return can violate the invariant.",
+					Impact:       "Callers receive an invalid value.",
+					Category:     "correctness",
+					Severity:     "high",
+					Verification: review.VerificationSupported,
+					Anchors:      []review.Anchor{anchor},
+				},
+				Lane: review.FindingLaneVerified,
+			},
+		},
+		Candidates: []CandidateView{
+			{
+				Candidate: review.CandidateRecord{
+					ID: "candidate-1",
+					Candidate: review.Candidate{
+						Claim:    "A retained candidate needs investigation.",
+						Impact:   "Potential issue.",
+						Category: "correctness",
+						Severity: "medium",
+						Anchors:  []review.Anchor{anchor},
+					},
+				},
+				Reason: "inconclusive",
+			},
+		},
+		Refuted: []CandidateView{
+			{
+				Candidate: review.CandidateRecord{
+					ID: "candidate-2",
+					Candidate: review.Candidate{
+						Claim:    "A refuted hypothesis.",
+						Impact:   "No impact.",
+						Category: "correctness",
+						Severity: "low",
+						Anchors:  []review.Anchor{anchor},
+					},
+				},
+				Reason: "refuted",
+			},
+		},
 	}
 
 	var hidden bytes.Buffer
@@ -47,7 +93,8 @@ func TestRenderSeparatesVerifiedCandidatesAndRefutedAtFixedWidth(t *testing.T) {
 	if strings.Contains(hidden.String(), "candidate-1") || strings.Contains(hidden.String(), "Refuted findings") {
 		t.Fatalf("hidden output exposed optional lanes: %q", hidden.String())
 	}
-	if !strings.Contains(hidden.String(), "Verified findings") || !strings.Contains(hidden.String(), "新しい値") || !strings.Contains(hidden.String(), "src/ユニコード.go#hunk") {
+	if !strings.Contains(hidden.String(), "Verified findings") || !strings.Contains(hidden.String(), "新しい値") ||
+		!strings.Contains(hidden.String(), "src/ユニコード.go#hunk") {
 		t.Fatalf("hidden output = %q", hidden.String())
 	}
 	if strings.Contains(hidden.String(), "\x1b[") {
@@ -83,9 +130,24 @@ func TestRenderSeparatesVerifiedCandidatesAndRefutedAtFixedWidth(t *testing.T) {
 func TestRenderDiffHandlesAddedDeletedAndMovedFiles(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	report := Report{Change: review.ChangeModel{Files: []review.FileChange{
-		{Status: "added", TargetPath: "new.txt", Hunks: []review.Hunk{{Kind: "changed", OldStart: 0, NewStart: 1, NewLines: 1, Lines: []string{"+added\n"}}}},
-		{Status: "deleted", BasePath: "old.txt", Hunks: []review.Hunk{{Kind: "changed", OldStart: 1, OldLines: 1, Lines: []string{"-deleted\n"}}}},
-		{Status: "renamed", BasePath: "old-name.txt", TargetPath: "new-name.txt", Hunks: []review.Hunk{{Kind: "rename", Lines: nil}}},
+		{
+			Status:     "added",
+			TargetPath: "new.txt",
+			Hunks: []review.Hunk{
+				{Kind: "changed", OldStart: 0, NewStart: 1, NewLines: 1, Lines: []string{"+added\n"}},
+			},
+		},
+		{
+			Status:   "deleted",
+			BasePath: "old.txt",
+			Hunks:    []review.Hunk{{Kind: "changed", OldStart: 1, OldLines: 1, Lines: []string{"-deleted\n"}}},
+		},
+		{
+			Status:     "renamed",
+			BasePath:   "old-name.txt",
+			TargetPath: "new-name.txt",
+			Hunks:      []review.Hunk{{Kind: "rename", Lines: nil}},
+		},
 	}}}
 
 	var output bytes.Buffer

@@ -88,7 +88,10 @@ func (c Candidate) normalize(change ChangeModel) (Candidate, error) {
 		if anchor.Side == "" {
 			anchor.Side = snapshot.TreeSideTarget
 		}
-		if anchor.Side != snapshot.TreeSideBase && anchor.Side != snapshot.TreeSideTarget && anchor.Side != snapshot.TreeSideHead && anchor.Side != snapshot.TreeSideIndex && anchor.Side != snapshot.TreeSideWorktree {
+		if anchor.Side != snapshot.TreeSideBase && anchor.Side != snapshot.TreeSideTarget &&
+			anchor.Side != snapshot.TreeSideHead &&
+			anchor.Side != snapshot.TreeSideIndex &&
+			anchor.Side != snapshot.TreeSideWorktree {
 			return Candidate{}, fmt.Errorf("candidate anchor has unsupported side %q", anchor.Side)
 		}
 		hunk, ok := hunks[anchor.HunkID]

@@ -36,11 +36,9 @@ type RepositoryIdentity struct {
 
 // Repository is persisted repository metadata.
 type Repository struct {
-	ID                string
-	CanonicalIdentity string
-	DisplayName       string
-	DiscoveredGitDir  string
-	CreatedAt         time.Time
+	ID string
+	RepositoryIdentity
+	CreatedAt time.Time
 }
 
 // Session is persisted session metadata. RepositoryName and
@@ -141,7 +139,11 @@ func (store *RepositoryStore) Close() error {
 // CreateSession creates a session for identity. Repository insertion or
 // refresh and session insertion commit together, so a failed session write
 // cannot leave a newly-created repository record behind.
-func (store *RepositoryStore) CreateSession(ctx context.Context, identity RepositoryIdentity, title string) (Session, error) {
+func (store *RepositoryStore) CreateSession(
+	ctx context.Context,
+	identity RepositoryIdentity,
+	title string,
+) (Session, error) {
 	if err := store.validate(); err != nil {
 		return Session{}, err
 	}
@@ -176,7 +178,8 @@ func (store *RepositoryStore) CreateSession(ctx context.Context, identity Reposi
 	if createdAt.IsZero() {
 		return Session{}, fmt.Errorf("create session: clock returned zero time")
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(
+		ctx, `
 INSERT INTO sessions (id, repository_id, title, created_at)
 VALUES (?, ?, ?, ?)`,
 		sessionID,
@@ -236,11 +239,13 @@ func (store *RepositoryStore) GetRepositoryForSession(ctx context.Context, sessi
 		ctx = context.Background()
 	}
 	var repository Repository
+	var identity RepositoryIdentity
 	var created string
 	err := store.database.QueryRowContext(ctx, `
 SELECT r.id, r.canonical_identity, r.display_name, r.discovered_git_dir, r.created_at
 FROM repositories r JOIN sessions s ON s.repository_id = r.id WHERE s.id = ?`, strings.TrimSpace(sessionID)).Scan(
-		&repository.ID, &repository.CanonicalIdentity, &repository.DisplayName, &repository.DiscoveredGitDir, &created)
+		&repository.ID, &identity.CanonicalIdentity, &identity.DisplayName, &identity.DiscoveredGitDir, &created,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Repository{}, fmt.Errorf("%w for session: %q", ErrRepositoryNotFound, sessionID)
 	}
@@ -251,6 +256,7 @@ FROM repositories r JOIN sessions s ON s.repository_id = r.id WHERE s.id = ?`, s
 	if parseErr != nil {
 		return Repository{}, fmt.Errorf("parse repository creation time: %w", parseErr)
 	}
+	repository.RepositoryIdentity = identity
 	repository.CreatedAt = parsed
 	return repository, nil
 }
@@ -286,7 +292,10 @@ func (store *RepositoryStore) ListSessions(ctx context.Context) ([]Session, erro
 
 // ListSessionsForRepository returns persisted sessions belonging to one
 // canonical repository identity.
-func (store *RepositoryStore) ListSessionsForRepository(ctx context.Context, canonicalIdentity string) ([]Session, error) {
+func (store *RepositoryStore) ListSessionsForRepository(
+	ctx context.Context,
+	canonicalIdentity string,
+) ([]Session, error) {
 	if err := store.validate(); err != nil {
 		return nil, err
 	}
@@ -298,7 +307,11 @@ func (store *RepositoryStore) ListSessionsForRepository(ctx context.Context, can
 		ctx = context.Background()
 	}
 
-	rows, err := store.database.QueryContext(ctx, sessionQuery+` WHERE r.canonical_identity = ? ORDER BY s.created_at ASC, s.id ASC`, canonicalIdentity)
+	rows, err := store.database.QueryContext(
+		ctx,
+		sessionQuery+` WHERE r.canonical_identity = ? ORDER BY s.created_at ASC, s.id ASC`,
+		canonicalIdentity,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list sessions for repository: %w", err)
 	}
@@ -357,7 +370,10 @@ func (store *RepositoryStore) DeleteSession(ctx context.Context, sessionID strin
 
 // DeleteSessionForRepository deletes one session only when it belongs to the
 // supplied repository identity.
-func (store *RepositoryStore) DeleteSessionForRepository(ctx context.Context, canonicalIdentity, sessionID string) error {
+func (store *RepositoryStore) DeleteSessionForRepository(
+	ctx context.Context,
+	canonicalIdentity, sessionID string,
+) error {
 	if err := store.validate(); err != nil {
 		return err
 	}
@@ -436,14 +452,19 @@ func normalizeIdentity(identity RepositoryIdentity) (RepositoryIdentity, error) 
 	}
 	if identity.DisplayName == "" {
 		identity.DisplayName = filepath.Base(filepath.Clean(identity.CanonicalIdentity))
-		if identity.DisplayName == "." || identity.DisplayName == string(filepath.Separator) || identity.DisplayName == "" {
+		if identity.DisplayName == "." || identity.DisplayName == string(filepath.Separator) ||
+			identity.DisplayName == "" {
 			identity.DisplayName = identity.CanonicalIdentity
 		}
 	}
 	return identity, nil
 }
 
-func (store *RepositoryStore) ensureRepositoryTx(ctx context.Context, tx *sql.Tx, identity RepositoryIdentity) (Repository, error) {
+func (store *RepositoryStore) ensureRepositoryTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	identity RepositoryIdentity,
+) (Repository, error) {
 	repositoryID, err := store.newID()
 	if err != nil {
 		return Repository{}, fmt.Errorf("create repository ID: %w", err)
@@ -452,7 +473,8 @@ func (store *RepositoryStore) ensureRepositoryTx(ctx context.Context, tx *sql.Tx
 	if createdAt.IsZero() {
 		return Repository{}, fmt.Errorf("create repository: clock returned zero time")
 	}
-	_, err = tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(
+		ctx, `
 INSERT INTO repositories (id, canonical_identity, display_name, discovered_git_dir, created_at)
 VALUES (?, ?, ?, ?, ?)
 ON CONFLICT (canonical_identity) DO UPDATE SET
@@ -469,15 +491,16 @@ ON CONFLICT (canonical_identity) DO UPDATE SET
 	}
 
 	var repository Repository
+	var persistedIdentity RepositoryIdentity
 	var createdAtRaw string
 	if err := tx.QueryRowContext(ctx, `
 SELECT id, canonical_identity, display_name, discovered_git_dir, created_at
 FROM repositories
 WHERE canonical_identity = ?`, identity.CanonicalIdentity).Scan(
 		&repository.ID,
-		&repository.CanonicalIdentity,
-		&repository.DisplayName,
-		&repository.DiscoveredGitDir,
+		&persistedIdentity.CanonicalIdentity,
+		&persistedIdentity.DisplayName,
+		&persistedIdentity.DiscoveredGitDir,
 		&createdAtRaw,
 	); err != nil {
 		return Repository{}, fmt.Errorf("read repository identity: %w", err)
@@ -486,6 +509,7 @@ WHERE canonical_identity = ?`, identity.CanonicalIdentity).Scan(
 	if err != nil {
 		return Repository{}, fmt.Errorf("read repository creation time: %w", err)
 	}
+	repository.RepositoryIdentity = persistedIdentity
 	return repository, nil
 }
 

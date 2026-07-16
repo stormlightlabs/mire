@@ -189,7 +189,10 @@ func NewFindingRevision(change ChangeModel, candidate CandidateRecord, inputs ..
 		}
 	}
 	if !verificationState.Valid() {
-		return FindingRevision{}, fmt.Errorf("new finding revision: verification state %q is unsupported", verificationState)
+		return FindingRevision{}, fmt.Errorf(
+			"new finding revision: verification state %q is unsupported",
+			verificationState,
+		)
 	}
 	if options.VerificationRun != nil && verificationRunID == "" {
 		verificationRunID = options.VerificationRun.ID
@@ -210,11 +213,14 @@ func NewFindingRevision(change ChangeModel, candidate CandidateRecord, inputs ..
 		Confidence: normalizedCandidate.Confidence, Verification: verificationState,
 		VerificationRunID: verificationRunID, VerificationDigest: verificationDigest,
 		Anchors: anchors, Evidence: evidence,
-		Origin: FindingOrigin{CandidateID: candidate.ID, ReviewRunID: candidate.RunID, PassName: candidate.PassName,
-			VerificationRunID: verificationRunID, Source: "review_candidate"},
+		Origin: FindingOrigin{
+			CandidateID: candidate.ID, ReviewRunID: candidate.RunID, PassName: candidate.PassName,
+			VerificationRunID: verificationRunID, Source: "review_candidate",
+		},
 		CreatedAt: now,
 	}
-	if revision.Verification == VerificationNotRun && options.VerificationRun != nil && options.VerificationRun.ID != "" {
+	if revision.Verification == VerificationNotRun && options.VerificationRun != nil &&
+		options.VerificationRun.ID != "" {
 		revision.Origin.VerificationRunID = options.VerificationRun.ID
 	}
 	return normalizeFindingRevision(revision, false)
@@ -259,7 +265,11 @@ func NormalizeFindingAnchor(change ChangeModel, candidate Anchor) (Anchor, error
 		candidate.Layer = candidate.Side
 	}
 	switch candidate.Side {
-	case snapshot.TreeSideBase, snapshot.TreeSideTarget, snapshot.TreeSideHead, snapshot.TreeSideIndex, snapshot.TreeSideWorktree:
+	case snapshot.TreeSideBase,
+		snapshot.TreeSideTarget,
+		snapshot.TreeSideHead,
+		snapshot.TreeSideIndex,
+		snapshot.TreeSideWorktree:
 	default:
 		return Anchor{}, fmt.Errorf("finding anchor side %q is unsupported", candidate.Side)
 	}
@@ -279,7 +289,11 @@ func NormalizeFindingAnchor(change ChangeModel, candidate Anchor) (Anchor, error
 				candidate.Path = path
 			}
 			if candidate.Path != path {
-				return Anchor{}, fmt.Errorf("finding anchor path %q does not match hunk %q", candidate.Path, candidate.HunkID)
+				return Anchor{}, fmt.Errorf(
+					"finding anchor path %q does not match hunk %q",
+					candidate.Path,
+					candidate.HunkID,
+				)
 			}
 			if candidate.HunkDigest == "" {
 				candidate.HunkDigest = hunk.Digest
@@ -377,7 +391,8 @@ func normalizeFindingRevision(record FindingRevision, requireIdentity bool) (Fin
 	if requireIdentity && (strings.TrimSpace(record.FindingID) == "" || record.Revision < 1) {
 		return FindingRevision{}, errors.New("finding revision identity is required")
 	}
-	if strings.TrimSpace(record.SessionID) == "" || strings.TrimSpace(record.RoundID) == "" || strings.TrimSpace(record.SnapshotID) == "" {
+	if strings.TrimSpace(record.SessionID) == "" || strings.TrimSpace(record.RoundID) == "" ||
+		strings.TrimSpace(record.SnapshotID) == "" {
 		return FindingRevision{}, errors.New("finding revision session, round, and snapshot are required")
 	}
 	record.Claim = strings.TrimSpace(record.Claim)
@@ -393,11 +408,15 @@ func normalizeFindingRevision(record FindingRevision, requireIdentity bool) (Fin
 	default:
 		return FindingRevision{}, fmt.Errorf("finding revision severity %q is unsupported", record.Severity)
 	}
-	if math.IsNaN(record.Confidence) || math.IsInf(record.Confidence, 0) || record.Confidence < 0 || record.Confidence > 1 {
+	if math.IsNaN(record.Confidence) || math.IsInf(record.Confidence, 0) || record.Confidence < 0 ||
+		record.Confidence > 1 {
 		return FindingRevision{}, errors.New("finding revision confidence must be between 0 and 1")
 	}
 	if !record.Verification.Valid() {
-		return FindingRevision{}, fmt.Errorf("finding revision verification state %q is unsupported", record.Verification)
+		return FindingRevision{}, fmt.Errorf(
+			"finding revision verification state %q is unsupported",
+			record.Verification,
+		)
 	}
 	if len(record.Anchors) == 0 {
 		return FindingRevision{}, errors.New("finding revision needs at least one anchor")
@@ -680,7 +699,11 @@ func CorrelateFinding(previous []FindingRevision, next FindingRevision) (Finding
 		})
 		return finalizeCorrelatedRevision(normalized, FindingMatchStable, nil)
 	}
-	relationships := relationshipsForMatches(top, FindingRelationshipPossibleSuccessor, "multiple prior findings matched with equal identity strength.")
+	relationships := relationshipsForMatches(
+		top,
+		FindingRelationshipPossibleSuccessor,
+		"multiple prior findings matched with equal identity strength.",
+	)
 	return finalizeCorrelatedRevision(normalized, FindingMatchAmbiguous, relationships)
 }
 
@@ -734,8 +757,14 @@ func CorrelateFindings(previous, next []FindingRevision) ([]FindingRevision, err
 			})
 			kind = FindingMatchStable
 		} else if len(top) > 0 {
-			result[currentIndex].Relationships = append(result[currentIndex].Relationships,
-				relationshipsForMatches(top, FindingRelationshipPossibleSuccessor, "continuity was ambiguous across review revisions.")...)
+			result[currentIndex].Relationships = append(
+				result[currentIndex].Relationships,
+				relationshipsForMatches(
+					top,
+					FindingRelationshipPossibleSuccessor,
+					"continuity was ambiguous across review revisions.",
+				)...,
+			)
 			kind = FindingMatchAmbiguous
 		}
 		finalized, err := finalizeCorrelatedRevision(result[currentIndex], kind, nil)
@@ -755,8 +784,10 @@ func CorrelateFindings(previous, next []FindingRevision) ([]FindingRevision, err
 				}
 				prior := previous[priorIndex]
 				result[currentIndex].Relationships = append(result[currentIndex].Relationships, FindingRelationship{
-					Kind: FindingRelationshipDuplicate, FindingID: result[otherIndex].FindingID,
-					Revision: result[otherIndex].Revision, Reason: fmt.Sprintf("both outputs ambiguously matched prior finding %q.", prior.FindingID),
+					Kind:      FindingRelationshipDuplicate,
+					FindingID: result[otherIndex].FindingID,
+					Revision:  result[otherIndex].Revision,
+					Reason:    fmt.Sprintf("both outputs ambiguously matched prior finding %q.", prior.FindingID),
 				})
 			}
 		}
@@ -856,15 +887,31 @@ func anchorMatchScore(previous, next Anchor) int {
 	return score
 }
 
-func relationshipsForMatches(matches []rankedFindingMatch, kind FindingRelationshipKind, reason string) []FindingRelationship {
+func relationshipsForMatches(
+	matches []rankedFindingMatch,
+	kind FindingRelationshipKind,
+	reason string,
+) []FindingRelationship {
 	relationships := make([]FindingRelationship, 0, len(matches))
 	for _, match := range matches {
-		relationships = append(relationships, FindingRelationship{Kind: kind, FindingID: match.revision.FindingID, Revision: match.revision.Revision, Reason: reason})
+		relationships = append(
+			relationships,
+			FindingRelationship{
+				Kind:      kind,
+				FindingID: match.revision.FindingID,
+				Revision:  match.revision.Revision,
+				Reason:    reason,
+			},
+		)
 	}
 	return relationships
 }
 
-func finalizeCorrelatedRevision(record FindingRevision, kind FindingMatchKind, relationships []FindingRelationship) (FindingRevision, error) {
+func finalizeCorrelatedRevision(
+	record FindingRevision,
+	kind FindingMatchKind,
+	relationships []FindingRelationship,
+) (FindingRevision, error) {
 	if len(relationships) > 0 {
 		record.Relationships = append(record.Relationships, relationships...)
 	}

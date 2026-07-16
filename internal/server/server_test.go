@@ -31,7 +31,14 @@ func (recorder *cancelingRecorder) Flush() {
 	}
 }
 
-func callHandler(t *testing.T, webServer *Server, method, target, body string, cookie *http.Cookie, headers map[string]string, host string) *http.Response {
+func callHandler(
+	t *testing.T,
+	webServer *Server,
+	method, target, body string,
+	cookie *http.Cookie,
+	headers map[string]string,
+	host string,
+) *http.Response {
 	t.Helper()
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
 	request.Host = host
@@ -74,8 +81,18 @@ func TestLoopbackServerAuthenticatesAndReplaysDurableResources(t *testing.T) {
 		t.Fatalf("seed session: %v", err)
 	}
 
-	staticFiles := fstest.MapFS{"index.html": &fstest.MapFile{Mode: 0o644, Data: []byte("<!doctype html><title>test</title>")}}
-	webServer, err := New(store, Options{WorkingDir: workingDir, StaticFiles: staticFiles, ExpectedHost: "mire.test", SelectedSessionID: seed.ID})
+	staticFiles := fstest.MapFS{
+		"index.html": &fstest.MapFile{Mode: 0o644, Data: []byte("<!doctype html><title>test</title>")},
+	}
+	webServer, err := New(
+		store,
+		Options{
+			WorkingDir:        workingDir,
+			StaticFiles:       staticFiles,
+			ExpectedHost:      "mire.test",
+			SelectedSessionID: seed.ID,
+		},
+	)
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}
@@ -100,7 +117,16 @@ func TestLoopbackServerAuthenticatesAndReplaysDurableResources(t *testing.T) {
 		t.Fatalf("root body did not use static fallback: %q", rootBody)
 	}
 
-	bootstrap := callHandler(t, webServer, http.MethodGet, "http://mire.test"+apiPrefix+"/bootstrap", "", launchCookie, nil, "mire.test")
+	bootstrap := callHandler(
+		t,
+		webServer,
+		http.MethodGet,
+		"http://mire.test"+apiPrefix+"/bootstrap",
+		"",
+		launchCookie,
+		nil,
+		"mire.test",
+	)
 	if bootstrap.StatusCode != http.StatusOK {
 		t.Fatalf("bootstrap status = %d, want %d", bootstrap.StatusCode, http.StatusOK)
 	}
@@ -110,19 +136,46 @@ func TestLoopbackServerAuthenticatesAndReplaysDurableResources(t *testing.T) {
 		t.Fatalf("bootstrap did not select seeded session: %q", bootstrapBody)
 	}
 
-	badHost := callHandler(t, webServer, http.MethodGet, "http://mire.test"+apiPrefix, "", launchCookie, nil, "evil.example")
+	badHost := callHandler(
+		t,
+		webServer,
+		http.MethodGet,
+		"http://mire.test"+apiPrefix,
+		"",
+		launchCookie,
+		nil,
+		"evil.example",
+	)
 	if badHost.StatusCode != http.StatusForbidden {
 		t.Fatalf("bad Host status = %d, want %d", badHost.StatusCode, http.StatusForbidden)
 	}
 
 	createRequest := []byte(`{"title":"Browser session"}`)
-	created := callHandler(t, webServer, http.MethodPost, "http://mire.test"+apiPrefix+"/sessions", string(createRequest), launchCookie, map[string]string{"Content-Type": "application/json", "Idempotency-Key": "session-create-1"}, "mire.test")
+	created := callHandler(
+		t,
+		webServer,
+		http.MethodPost,
+		"http://mire.test"+apiPrefix+"/sessions",
+		string(createRequest),
+		launchCookie,
+		map[string]string{"Content-Type": "application/json", "Idempotency-Key": "session-create-1"},
+		"mire.test",
+	)
 	if created.StatusCode != http.StatusCreated {
 		t.Fatalf("create session status = %d, want %d", created.StatusCode, http.StatusCreated)
 	}
 	createdBody, _ := io.ReadAll(created.Body)
 	created.Body.Close()
-	replayed := callHandler(t, webServer, http.MethodPost, "http://mire.test"+apiPrefix+"/sessions", string(createRequest), launchCookie, map[string]string{"Content-Type": "application/json", "Idempotency-Key": "session-create-1"}, "mire.test")
+	replayed := callHandler(
+		t,
+		webServer,
+		http.MethodPost,
+		"http://mire.test"+apiPrefix+"/sessions",
+		string(createRequest),
+		launchCookie,
+		map[string]string{"Content-Type": "application/json", "Idempotency-Key": "session-create-1"},
+		"mire.test",
+	)
 	replayedBody, _ := io.ReadAll(replayed.Body)
 	replayed.Body.Close()
 	if string(createdBody) != string(replayedBody) {
@@ -138,7 +191,16 @@ func TestLoopbackServerAuthenticatesAndReplaysDurableResources(t *testing.T) {
 	}
 
 	roundURL := "http://mire.test" + apiPrefix + "/sessions/" + createdPayload.Session.ID + "/rounds"
-	round := callHandler(t, webServer, http.MethodPost, roundURL, "{}", launchCookie, map[string]string{"Content-Type": "application/json", "Idempotency-Key": "round-create-1"}, "mire.test")
+	round := callHandler(
+		t,
+		webServer,
+		http.MethodPost,
+		roundURL,
+		"{}",
+		launchCookie,
+		map[string]string{"Content-Type": "application/json", "Idempotency-Key": "round-create-1"},
+		"mire.test",
+	)
 	if round.StatusCode != http.StatusAccepted {
 		t.Fatalf("create round status = %d, want %d", round.StatusCode, http.StatusAccepted)
 	}
@@ -152,13 +214,31 @@ func TestLoopbackServerAuthenticatesAndReplaysDurableResources(t *testing.T) {
 	if err := json.Unmarshal(roundBody, &roundPayload); err != nil {
 		t.Fatalf("decode round: %v", err)
 	}
-	review := callHandler(t, webServer, http.MethodPost, "http://mire.test"+apiPrefix+"/rounds/"+roundPayload.Round.ID+"/reviews", "{}", launchCookie, map[string]string{"Content-Type": "application/json", "Idempotency-Key": "review-start-1"}, "mire.test")
+	review := callHandler(
+		t,
+		webServer,
+		http.MethodPost,
+		"http://mire.test"+apiPrefix+"/rounds/"+roundPayload.Round.ID+"/reviews",
+		"{}",
+		launchCookie,
+		map[string]string{"Content-Type": "application/json", "Idempotency-Key": "review-start-1"},
+		"mire.test",
+	)
 	if review.StatusCode != http.StatusAccepted {
 		t.Fatalf("start review status = %d, want %d", review.StatusCode, http.StatusAccepted)
 	}
 	review.Body.Close()
 
-	divergence := callHandler(t, webServer, http.MethodGet, "http://mire.test"+apiPrefix+"/rounds/"+roundPayload.Round.ID+"/divergence", "", launchCookie, nil, "mire.test")
+	divergence := callHandler(
+		t,
+		webServer,
+		http.MethodGet,
+		"http://mire.test"+apiPrefix+"/rounds/"+roundPayload.Round.ID+"/divergence",
+		"",
+		launchCookie,
+		nil,
+		"mire.test",
+	)
 	divergenceBody, _ := io.ReadAll(divergence.Body)
 	divergence.Body.Close()
 	if divergence.StatusCode != http.StatusOK || !strings.Contains(string(divergenceBody), "unavailable") {
@@ -166,7 +246,8 @@ func TestLoopbackServerAuthenticatesAndReplaysDurableResources(t *testing.T) {
 	}
 
 	sseContext, cancelSSE := context.WithCancel(ctx)
-	sseRequest := httptest.NewRequest(http.MethodGet, "http://mire.test"+apiPrefix+"/events?sessionId="+url.QueryEscape(createdPayload.Session.ID), nil).WithContext(sseContext)
+	sseRequest := httptest.NewRequest(http.MethodGet, "http://mire.test"+apiPrefix+"/events?sessionId="+url.QueryEscape(createdPayload.Session.ID), nil).
+		WithContext(sseContext)
 	sseRequest.Host = "mire.test"
 	sseRequest.AddCookie(launchCookie)
 	sseRecorder := &cancelingRecorder{ResponseRecorder: httptest.NewRecorder(), cancel: cancelSSE}

@@ -107,6 +107,35 @@ func MaxInt(left, right int) int {
 	return right
 }
 
+// CloneMap returns a shallow copy of a string-keyed value map.
+func CloneMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string]any, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
+}
+
+// UniqueStrings removes empty values and duplicate strings while preserving
+// the order of their first occurrence.
+func UniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		if value != "" && !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
 func Jsonl(value any) ([]byte, error) {
 	data, err := json.Marshal(value)
 	if err != nil {

@@ -19,7 +19,12 @@ func TestChatContextRequiresAnImmutableReference(t *testing.T) {
 	}}}}, "snapshot-1"); err == nil {
 		t.Fatal("NormalizeChatContext() accepted a line-only anchor")
 	}
-	if _, err := NormalizeChatContext(ChatContext{References: []ChatReference{{FindingRevision: &FindingRevisionRef{FindingID: "finding-1", Revision: 1}}}}, "snapshot-1"); err != nil {
+	if _, err := NormalizeChatContext(
+		ChatContext{
+			References: []ChatReference{{FindingRevision: &FindingRevisionRef{FindingID: "finding-1", Revision: 1}}},
+		},
+		"snapshot-1",
+	); err != nil {
 		t.Fatalf("NormalizeChatContext() rejected a finding revision: %v", err)
 	}
 }
@@ -33,9 +38,22 @@ func TestChatResponseKeepsCandidateAndVerificationAsExplicitProposals(t *testing
 		t.Fatal(err)
 	}
 	binding.Context = canonicalContext
-	response := ChatResponse{SchemaVersion: ChatResponseSchemaVersion, Body: "I found a possible issue.",
-		CandidateProposal:   &ChatCandidateProposal{Claim: "The branch accepts invalid input.", Impact: "Invalid state can escape.", Category: "correctness", Severity: "high", Confidence: 0.8, Anchors: []Anchor{*binding.Context.Primary.DiffAnchor}},
-		VerificationRequest: &ChatVerificationRequest{FindingRevision: FindingRevisionRef{FindingID: "finding-1", Revision: 2}, Reason: "Please re-check the guard path."}}
+	response := ChatResponse{
+		SchemaVersion: ChatResponseSchemaVersion,
+		Body:          "I found a possible issue.",
+		CandidateProposal: &ChatCandidateProposal{
+			Claim:      "The branch accepts invalid input.",
+			Impact:     "Invalid state can escape.",
+			Category:   "correctness",
+			Severity:   "high",
+			Confidence: 0.8,
+			Anchors:    []Anchor{*binding.Context.Primary.DiffAnchor},
+		},
+		VerificationRequest: &ChatVerificationRequest{
+			FindingRevision: FindingRevisionRef{FindingID: "finding-1", Revision: 2},
+			Reason:          "Please re-check the guard path.",
+		},
+	}
 	if err := ValidateChatResponse(response, binding); err != nil {
 		t.Fatalf("ValidateChatResponse() error = %v", err)
 	}
@@ -49,21 +67,54 @@ func TestRunChatPersistsBindingBeforeModelAndKeepsAssistantOnPrimary(t *testing.
 	t.Parallel()
 
 	clock := time.Date(2026, time.July, 15, 18, 0, 0, 0, time.UTC)
-	binding := ChatBinding{SessionID: "session-1", RoundID: "round-1", SnapshotID: "snapshot-1", SnapshotDigest: "manifest-1",
-		Context: ChatContext{References: []ChatReference{{DiffAnchor: &Anchor{SnapshotID: "snapshot-1", Side: "target", Layer: "target", Path: "src/a.go", HunkID: "src/a.go#1", HunkDigest: "hunk-1"}}}}}
+	binding := ChatBinding{
+		SessionID:      "session-1",
+		RoundID:        "round-1",
+		SnapshotID:     "snapshot-1",
+		SnapshotDigest: "manifest-1",
+		Context: ChatContext{
+			References: []ChatReference{
+				{
+					DiffAnchor: &Anchor{
+						SnapshotID: "snapshot-1",
+						Side:       "target",
+						Layer:      "target",
+						Path:       "src/a.go",
+						HunkID:     "src/a.go#1",
+						HunkDigest: "hunk-1",
+					},
+				},
+			},
+		},
+	}
 	store := &chatMemoryStore{binding: binding}
-	model := &chatResponseModel{responses: []ModelResponse{{Output: chatResponseBytes(t, "The selected hunk is safely scoped.")}}}
-	result, err := RunChat(context.Background(), ChatTurnRequest{SessionID: binding.SessionID, RoundID: binding.RoundID, SnapshotID: binding.SnapshotID,
-		Body: "What does this hunk change?", Context: binding.Context}, model, ChatOptions{
-		Retry: RetryPolicy{MaxAttempts: 1}, Adapter: "fixture", Protocol: "fixture/v1", Now: func() time.Time { return clock }, Store: store,
-		Retriever: chatRetrieverFunc(func(_ context.Context, _ ChatTurnRequest, binding ChatBinding) ([]ChatRetrievedArtifact, error) {
-			return []ChatRetrievedArtifact{{SnapshotID: binding.SnapshotID, Kind: "source", Path: "src/a.go", Content: "package a"}}, nil
-		}),
+	model := &chatResponseModel{
+		responses: []ModelResponse{{Output: chatResponseBytes(t, "The selected hunk is safely scoped.")}},
+	}
+	result, err := RunChat(context.Background(), ChatTurnRequest{
+		SessionID: binding.SessionID, RoundID: binding.RoundID, SnapshotID: binding.SnapshotID,
+		Body: "What does this hunk change?", Context: binding.Context,
+	}, model, ChatOptions{
+		ModelRunOptions: ModelRunOptions{
+			Retry:    RetryPolicy{MaxAttempts: 1},
+			Adapter:  "fixture",
+			Protocol: "fixture/v1",
+			Now:      func() time.Time { return clock },
+		},
+		Store: store,
+		Retriever: chatRetrieverFunc(
+			func(_ context.Context, _ ChatTurnRequest, binding ChatBinding) ([]ChatRetrievedArtifact, error) {
+				return []ChatRetrievedArtifact{
+					{SnapshotID: binding.SnapshotID, Kind: "source", Path: "src/a.go", Content: "package a"},
+				}, nil
+			},
+		),
 	})
 	if err != nil {
 		t.Fatalf("RunChat() error = %v", err)
 	}
-	if len(store.messages) != 2 || store.messages[0].Role != MessageRoleUser || store.messages[1].Role != MessageRoleAssistant {
+	if len(store.messages) != 2 || store.messages[0].Role != MessageRoleUser ||
+		store.messages[1].Role != MessageRoleAssistant {
 		t.Fatalf("messages = %#v, want one user and one assistant", store.messages)
 	}
 	if len(store.runs) != 1 || store.runs[0].Run.Status != RunStatusComplete {
@@ -72,7 +123,8 @@ func TestRunChatPersistsBindingBeforeModelAndKeepsAssistantOnPrimary(t *testing.
 	if len(store.runs[0].Input.Artifacts) != 1 || store.runs[0].Input.Artifacts[0].Digest == "" {
 		t.Fatalf("run input artifacts = %#v", store.runs[0].Input.Artifacts)
 	}
-	if len(store.messages[1].Context.References) != 1 || store.messages[1].Context.Primary.Kind != ChatReferenceDiffAnchor {
+	if len(store.messages[1].Context.References) != 1 ||
+		store.messages[1].Context.Primary.Kind != ChatReferenceDiffAnchor {
 		t.Fatalf("assistant context = %#v, want the initiating primary binding", store.messages[1].Context)
 	}
 	if result.Assistant == nil || result.Assistant.ProducerRunID != store.runs[0].Run.ID {
@@ -85,21 +137,44 @@ func TestRunChatRepairsMalformedOutputAndLeavesFailedRunsDurable(t *testing.T) {
 
 	binding := testChatBinding()
 	store := &chatMemoryStore{binding: binding}
-	model := &chatResponseModel{responses: []ModelResponse{{Output: []byte("not-json")}, {Output: chatResponseBytes(t, "repaired")}}}
-	result, err := RunChat(context.Background(), testChatRequest(binding), model, ChatOptions{Retry: RetryPolicy{MaxAttempts: 2, RepairAttempts: 1}, Store: store})
+	model := &chatResponseModel{
+		responses: []ModelResponse{{Output: []byte("not-json")}, {Output: chatResponseBytes(t, "repaired")}},
+	}
+	result, err := RunChat(
+		context.Background(),
+		testChatRequest(binding),
+		model,
+		ChatOptions{
+			ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 2, RepairAttempts: 1}},
+			Store:           store,
+		},
+	)
 	if err != nil || result.Run.Run.Status != RunStatusComplete || model.calls != 2 {
 		t.Fatalf("repaired result = %#v, error = %v, calls = %d", result, err, model.calls)
 	}
 
 	store = &chatMemoryStore{binding: binding}
 	model = &chatResponseModel{responses: []ModelResponse{{Output: []byte("bad-1")}, {Output: []byte("bad-2")}}}
-	result, err = RunChat(context.Background(), testChatRequest(binding), model, ChatOptions{Retry: RetryPolicy{MaxAttempts: 2, RepairAttempts: 1}, Store: store})
+	result, err = RunChat(
+		context.Background(),
+		testChatRequest(binding),
+		model,
+		ChatOptions{
+			ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 2, RepairAttempts: 1}},
+			Store:           store,
+		},
+	)
 	var chatErr *ChatError
 	if !errors.As(err, &chatErr) || chatErr.Status != RunStatusFailed || result.Run.Run.Status != RunStatusFailed {
 		t.Fatalf("failed result = %#v, error = %v", result, err)
 	}
 	if len(store.messages) != 1 || len(store.runs) != 1 || store.runs[0].RetainedOutput != "bad-2" {
-		t.Fatalf("failed durable state: messages=%d runs=%d output=%q", len(store.messages), len(store.runs), store.runs[0].RetainedOutput)
+		t.Fatalf(
+			"failed durable state: messages=%d runs=%d output=%q",
+			len(store.messages),
+			len(store.runs),
+			store.runs[0].RetainedOutput,
+		)
 	}
 }
 
@@ -108,12 +183,21 @@ func TestRunChatCancellationPersistsTerminalStatus(t *testing.T) {
 
 	binding := testChatBinding()
 	store := &chatMemoryStore{binding: binding}
-	model := &chatResponseModel{respectContext: true, responses: []ModelResponse{{Output: chatResponseBytes(t, "never")}}}
+	model := &chatResponseModel{
+		respectContext: true,
+		responses:      []ModelResponse{{Output: chatResponseBytes(t, "never")}},
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	result, err := RunChat(ctx, testChatRequest(binding), model, ChatOptions{Retry: RetryPolicy{MaxAttempts: 1}, Store: store})
+	result, err := RunChat(
+		ctx,
+		testChatRequest(binding),
+		model,
+		ChatOptions{ModelRunOptions: ModelRunOptions{Retry: RetryPolicy{MaxAttempts: 1}}, Store: store},
+	)
 	var chatErr *ChatError
-	if !errors.As(err, &chatErr) || chatErr.Status != RunStatusCancelled || result.Run.Run.Status != RunStatusCancelled {
+	if !errors.As(err, &chatErr) || chatErr.Status != RunStatusCancelled ||
+		result.Run.Run.Status != RunStatusCancelled {
 		t.Fatalf("cancel result = %#v, error = %v", result, err)
 	}
 	if len(store.runs) != 1 || store.runs[0].Run.Status != RunStatusCancelled {
@@ -128,7 +212,8 @@ type chatMemoryStore struct {
 }
 
 func (store *chatMemoryStore) ValidateChatBinding(_ context.Context, binding ChatBinding) (ChatBinding, error) {
-	if binding.SessionID != store.binding.SessionID || binding.RoundID != store.binding.RoundID || binding.SnapshotID != store.binding.SnapshotID {
+	if binding.SessionID != store.binding.SessionID || binding.RoundID != store.binding.RoundID ||
+		binding.SnapshotID != store.binding.SnapshotID {
 		return ChatBinding{}, errors.New("binding mismatch")
 	}
 	canonical := store.binding
@@ -174,7 +259,11 @@ type chatResponseModel struct {
 
 type chatRetrieverFunc func(context.Context, ChatTurnRequest, ChatBinding) ([]ChatRetrievedArtifact, error)
 
-func (retriever chatRetrieverFunc) Retrieve(ctx context.Context, request ChatTurnRequest, binding ChatBinding) ([]ChatRetrievedArtifact, error) {
+func (retriever chatRetrieverFunc) Retrieve(
+	ctx context.Context,
+	request ChatTurnRequest,
+	binding ChatBinding,
+) ([]ChatRetrievedArtifact, error) {
 	return retriever(ctx, request, binding)
 }
 
@@ -192,12 +281,36 @@ func (model *chatResponseModel) Complete(ctx context.Context, _ ModelRequest) (M
 }
 
 func testChatBinding() ChatBinding {
-	return ChatBinding{SessionID: "session-1", RoundID: "round-1", SnapshotID: "snapshot-1", SnapshotDigest: "manifest-1",
-		Context: ChatContext{References: []ChatReference{{DiffAnchor: &Anchor{SnapshotID: "snapshot-1", Side: "target", Layer: "target", Path: "src/a.go", HunkID: "src/a.go#1", HunkDigest: "hunk-1"}}}}}
+	return ChatBinding{
+		SessionID:      "session-1",
+		RoundID:        "round-1",
+		SnapshotID:     "snapshot-1",
+		SnapshotDigest: "manifest-1",
+		Context: ChatContext{
+			References: []ChatReference{
+				{
+					DiffAnchor: &Anchor{
+						SnapshotID: "snapshot-1",
+						Side:       "target",
+						Layer:      "target",
+						Path:       "src/a.go",
+						HunkID:     "src/a.go#1",
+						HunkDigest: "hunk-1",
+					},
+				},
+			},
+		},
+	}
 }
 
 func testChatRequest(binding ChatBinding) ChatTurnRequest {
-	return ChatTurnRequest{SessionID: binding.SessionID, RoundID: binding.RoundID, SnapshotID: binding.SnapshotID, Body: "Explain the selected change.", Context: binding.Context}
+	return ChatTurnRequest{
+		SessionID:  binding.SessionID,
+		RoundID:    binding.RoundID,
+		SnapshotID: binding.SnapshotID,
+		Body:       "Explain the selected change.",
+		Context:    binding.Context,
+	}
 }
 
 func chatResponseBytes(t *testing.T, body string) []byte {

@@ -316,7 +316,13 @@ type EvidenceArtifact struct {
 // Build loads one session round and assembles its canonical export projection.
 // objectStore is optional: without it the manifest and ledger still export,
 // while the diff is recorded as an omission.
-func Build(ctx context.Context, store *db.RepositoryStore, session db.Session, round db.Round, objectStore *snapshot.ObjectStore) (Review, error) {
+func Build(
+	ctx context.Context,
+	store *db.RepositoryStore,
+	session db.Session,
+	round db.Round,
+	objectStore *snapshot.ObjectStore,
+) (Review, error) {
 	if store == nil {
 		return Review{}, errors.New("build export: store is nil")
 	}
@@ -326,7 +332,8 @@ func Build(ctx context.Context, store *db.RepositoryStore, session db.Session, r
 	if session.ID == "" {
 		return Review{}, errors.New("build export: session ID is required")
 	}
-	if round.ID == "" || round.SessionID != session.ID || round.RepositoryID != session.RepositoryID || round.SnapshotID == "" {
+	if round.ID == "" || round.SessionID != session.ID || round.RepositoryID != session.RepositoryID ||
+		round.SnapshotID == "" {
 		return Review{}, errors.New("build export: round provenance is incomplete")
 	}
 	persisted, err := store.GetSnapshot(ctx, round.SnapshotID)
@@ -337,8 +344,17 @@ func Build(ctx context.Context, store *db.RepositoryStore, session db.Session, r
 	if repositoryErr != nil {
 		return Review{}, fmt.Errorf("build export: load repository: %w", repositoryErr)
 	}
-	result := Review{SchemaVersion: SchemaVersion, ExportKind: "portable_review_projection", MIREVersion: MIREVersion, Repository: repositoryDescriptor(repository), Session: sessionDescriptor(session), Round: roundDescriptor(round),
-		Coverage: emptyCoverage(), Chat: []review.ChatMessage{}, Omissions: []Omission{}}
+	result := Review{
+		SchemaVersion: SchemaVersion,
+		ExportKind:    "portable_review_projection",
+		MIREVersion:   MIREVersion,
+		Repository:    repositoryDescriptor(repository),
+		Session:       sessionDescriptor(session),
+		Round:         roundDescriptor(round),
+		Coverage:      emptyCoverage(),
+		Chat:          []review.ChatMessage{},
+		Omissions:     []Omission{},
+	}
 	result.SnapshotManifest = snapshotManifest(persisted)
 	entries, changes, entryErr := loadManifest(ctx, store, persisted)
 	if entryErr != nil {
@@ -349,13 +365,24 @@ func Build(ctx context.Context, store *db.RepositoryStore, session db.Session, r
 
 	var changeModel review.ChangeModel
 	if objectStore == nil {
-		result.Omissions = append(result.Omissions, Omission{Kind: "diff", Reason: "private snapshot object store was not supplied"})
+		result.Omissions = append(
+			result.Omissions,
+			Omission{Kind: "diff", Reason: "private snapshot object store was not supplied"},
+		)
 	} else {
 		capture, captureErr := captureFromStore(ctx, store, persisted)
 		if captureErr != nil {
 			result.Omissions = append(result.Omissions, Omission{Kind: "diff", Reason: captureErr.Error()})
 		} else {
-			changeModel, err = review.Assemble(ctx, review.Input{SessionID: session.ID, SnapshotID: persisted.ID, Snapshot: capture, Content: objectContent(objectStore)})
+			changeModel, err = review.Assemble(
+				ctx,
+				review.Input{
+					SessionID:  session.ID,
+					SnapshotID: persisted.ID,
+					Snapshot:   capture,
+					Content:    objectContent(objectStore),
+				},
+			)
 			if err != nil {
 				result.Omissions = append(result.Omissions, Omission{Kind: "diff", Reason: err.Error()})
 			} else {
@@ -387,7 +414,10 @@ func Build(ctx context.Context, store *db.RepositoryStore, session db.Session, r
 		if finding.Lane == review.FindingLaneRefuted || findingHasSARIFLocation(finding.Finding) {
 			continue
 		}
-		result.Omissions = append(result.Omissions, Omission{Kind: "sarif", Reason: finding.Finding.FindingID + " has no representable path location."})
+		result.Omissions = append(
+			result.Omissions,
+			Omission{Kind: "sarif", Reason: finding.Finding.FindingID + " has no representable path location."},
+		)
 	}
 	for _, finding := range findings {
 		if dispositions, listErr := store.ListDispositions(ctx, finding.FindingID); listErr == nil {
@@ -426,7 +456,14 @@ func Build(ctx context.Context, store *db.RepositoryStore, session db.Session, r
 		for _, artifact := range artifacts {
 			result.Artifacts = append(result.Artifacts, artifactDescriptor(artifact))
 			if strings.TrimSpace(artifact.Content) != "" && !artifact.Excluded {
-				result.artifactContents = append(result.artifactContents, EvidenceArtifact{Path: evidencePath(artifact.ID), Digest: artifact.Digest, Content: artifact.Content})
+				result.artifactContents = append(
+					result.artifactContents,
+					EvidenceArtifact{
+						Path:    evidencePath(artifact.ID),
+						Digest:  artifact.Digest,
+						Content: artifact.Content,
+					},
+				)
 			}
 		}
 	} else {
@@ -441,7 +478,8 @@ func Build(ctx context.Context, store *db.RepositoryStore, session db.Session, r
 		if operation.RoundID != round.ID {
 			continue
 		}
-		if operation.Status == db.OperationStatusFailed || operation.Status == db.OperationStatusAbandoned || operation.Status == db.OperationStatusCancelled {
+		if operation.Status == db.OperationStatusFailed || operation.Status == db.OperationStatusAbandoned ||
+			operation.Status == db.OperationStatusCancelled {
 			reason := operation.Failure
 			if reason == "" {
 				reason = "Operation ended with status " + string(operation.Status) + "."
@@ -450,7 +488,10 @@ func Build(ctx context.Context, store *db.RepositoryStore, session db.Session, r
 		}
 	}
 	if round.Status != db.RoundStatusComplete {
-		result.Omissions = append(result.Omissions, Omission{Kind: "round", Reason: "Round status is " + string(round.Status) + "."})
+		result.Omissions = append(
+			result.Omissions,
+			Omission{Kind: "round", Reason: "Round status is " + string(round.Status) + "."},
+		)
 	}
 	activities, _ := store.ListActivity(ctx, session.ID, 0)
 	result.Provenance.Activity = activityDescriptors(activities)
@@ -490,19 +531,40 @@ func emptyCoverage() review.ReviewCoverage {
 		Analyzers:     []review.AnalyzerAvailability{},
 		Exclusions:    []review.CoverageExclusion{},
 		Failures:      []review.CoverageFailure{},
-		Gaps:          []string{}}
+		Gaps:          []string{},
+	}
 }
 
 func snapshotManifest(value db.Snapshot) SnapshotManifest {
 	layers := make([]LayerDescriptor, 0, len(value.Layers))
 	for _, layer := range value.Layers {
-		layers = append(layers, LayerDescriptor{Layer: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest})
+		layers = append(
+			layers,
+			LayerDescriptor{Layer: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest},
+		)
 	}
-	return SnapshotManifest{ID: value.ID, RepositoryID: value.RepositoryID, Kind: value.Kind, RequestedComparison: value.RequestedComparison,
-		BaseOID: value.BaseOID, EffectiveBaseOID: value.EffectiveBaseOID, TargetOID: value.TargetOID, MergeBaseOID: value.MergeBaseOID,
-		IndexOID: value.IndexOID, ObjectFormat: value.ObjectFormat, ContextPolicyHash: value.ContextPolicyHash, IgnorePolicy: value.IgnorePolicy,
-		BaseManifestDigest: value.BaseManifestDigest, TargetManifestDigest: value.TargetManifestDigest, ManifestDigest: value.ManifestDigest,
-		Complete: value.Complete, CreatedAt: value.CreatedAt, Layers: layers, Entries: []SnapshotEntryDescriptor{}, Changes: []SnapshotChangeDescriptor{}}
+	return SnapshotManifest{
+		ID:                   value.ID,
+		RepositoryID:         value.RepositoryID,
+		Kind:                 value.Kind,
+		RequestedComparison:  value.RequestedComparison,
+		BaseOID:              value.BaseOID,
+		EffectiveBaseOID:     value.EffectiveBaseOID,
+		TargetOID:            value.TargetOID,
+		MergeBaseOID:         value.MergeBaseOID,
+		IndexOID:             value.IndexOID,
+		ObjectFormat:         value.ObjectFormat,
+		ContextPolicyHash:    value.ContextPolicyHash,
+		IgnorePolicy:         value.IgnorePolicy,
+		BaseManifestDigest:   value.BaseManifestDigest,
+		TargetManifestDigest: value.TargetManifestDigest,
+		ManifestDigest:       value.ManifestDigest,
+		Complete:             value.Complete,
+		CreatedAt:            value.CreatedAt,
+		Layers:               layers,
+		Entries:              []SnapshotEntryDescriptor{},
+		Changes:              []SnapshotChangeDescriptor{},
+	}
 }
 
 func repositoryDescriptor(value db.Repository) RepositoryDescriptor {
@@ -511,7 +573,8 @@ func repositoryDescriptor(value db.Repository) RepositoryDescriptor {
 		CanonicalIdentity: value.CanonicalIdentity,
 		DisplayName:       value.DisplayName,
 		DiscoveredGitDir:  value.DiscoveredGitDir,
-		CreatedAt:         value.CreatedAt}
+		CreatedAt:         value.CreatedAt,
+	}
 }
 
 func sessionDescriptor(value db.Session) SessionDescriptor {
@@ -522,7 +585,8 @@ func sessionDescriptor(value db.Session) SessionDescriptor {
 		RepositoryIdentity: value.RepositoryIdentity,
 		Title:              value.Title,
 		CreatedAt:          value.CreatedAt,
-		CurrentRoundID:     value.CurrentRoundID}
+		CurrentRoundID:     value.CurrentRoundID,
+	}
 }
 
 func roundDescriptor(value db.Round) RoundDescriptor {
@@ -535,7 +599,8 @@ func roundDescriptor(value db.Round) RoundDescriptor {
 		Number:             value.Number,
 		Status:             string(value.Status),
 		CreatedAt:          value.CreatedAt,
-		UpdatedAt:          value.UpdatedAt}
+		UpdatedAt:          value.UpdatedAt,
+	}
 }
 
 func operationDescriptors(values []db.Operation) []OperationDescriptor {
@@ -552,7 +617,8 @@ func operationDescriptors(values []db.Operation) []OperationDescriptor {
 			CreatedAt:    value.CreatedAt,
 			UpdatedAt:    value.UpdatedAt,
 			StartedAt:    value.StartedAt,
-			FinishedAt:   value.FinishedAt})
+			FinishedAt:   value.FinishedAt,
+		})
 	}
 	return result
 }
@@ -560,12 +626,29 @@ func operationDescriptors(values []db.Operation) []OperationDescriptor {
 func activityDescriptors(values []db.Activity) []ActivityDescriptor {
 	result := make([]ActivityDescriptor, 0, len(values))
 	for _, value := range values {
-		result = append(result, ActivityDescriptor{ID: value.ID, SessionID: value.SessionID, RepositoryID: value.RepositoryID, RoundID: value.RoundID, OperationID: value.OperationID, Kind: value.Kind, Status: value.Status, Message: value.Message, CreatedAt: value.CreatedAt})
+		result = append(
+			result,
+			ActivityDescriptor{
+				ID:           value.ID,
+				SessionID:    value.SessionID,
+				RepositoryID: value.RepositoryID,
+				RoundID:      value.RoundID,
+				OperationID:  value.OperationID,
+				Kind:         value.Kind,
+				Status:       value.Status,
+				Message:      value.Message,
+				CreatedAt:    value.CreatedAt,
+			},
+		)
 	}
 	return result
 }
 
-func loadManifest(ctx context.Context, store *db.RepositoryStore, persisted db.Snapshot) ([]SnapshotEntryDescriptor, []SnapshotChangeDescriptor, error) {
+func loadManifest(
+	ctx context.Context,
+	store *db.RepositoryStore,
+	persisted db.Snapshot,
+) ([]SnapshotEntryDescriptor, []SnapshotChangeDescriptor, error) {
 	sides := []string{snapshot.TreeSideBase, snapshot.TreeSideTarget}
 	if persisted.Kind == snapshot.ComparisonWorktree {
 		sides = []string{snapshot.TreeSideHead, snapshot.TreeSideIndex, snapshot.TreeSideWorktree}
@@ -577,7 +660,19 @@ func loadManifest(ctx context.Context, store *db.RepositoryStore, persisted db.S
 			return nil, nil, fmt.Errorf("build export: list %s entries: %w", side, err)
 		}
 		for _, value := range values {
-			entries = append(entries, SnapshotEntryDescriptor{TreeSide: value.TreeSide, Path: value.Path, Kind: value.Kind, Mode: value.Mode, Size: value.Size, ContentDigest: value.ContentDigest, GitOID: value.GitOID, SymlinkTarget: value.SymlinkTarget})
+			entries = append(
+				entries,
+				SnapshotEntryDescriptor{
+					TreeSide:      value.TreeSide,
+					Path:          value.Path,
+					Kind:          value.Kind,
+					Mode:          value.Mode,
+					Size:          value.Size,
+					ContentDigest: value.ContentDigest,
+					GitOID:        value.GitOID,
+					SymlinkTarget: value.SymlinkTarget,
+				},
+			)
 		}
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
@@ -592,7 +687,16 @@ func loadManifest(ctx context.Context, store *db.RepositoryStore, persisted db.S
 	}
 	result := make([]SnapshotChangeDescriptor, 0, len(changes))
 	for _, value := range changes {
-		result = append(result, SnapshotChangeDescriptor{Status: value.Status, BasePath: value.BasePath, TargetPath: value.TargetPath, BaseDigest: value.BaseDigest, TargetDigest: value.TargetDigest})
+		result = append(
+			result,
+			SnapshotChangeDescriptor{
+				Status:       value.Status,
+				BasePath:     value.BasePath,
+				TargetPath:   value.TargetPath,
+				BaseDigest:   value.BaseDigest,
+				TargetDigest: value.TargetDigest,
+			},
+		)
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		if result[i].BasePath != result[j].BasePath {
@@ -611,7 +715,18 @@ func captureFromStore(ctx context.Context, store *db.RepositoryStore, persisted 
 		}
 		result := make([]snapshot.Entry, 0, len(values))
 		for _, value := range values {
-			result = append(result, snapshot.Entry{Path: value.Path, Kind: value.Kind, Mode: value.Mode, Size: value.Size, ContentDigest: value.ContentDigest, GitOID: value.GitOID, SymlinkTarget: value.SymlinkTarget})
+			result = append(
+				result,
+				snapshot.Entry{
+					Path:          value.Path,
+					Kind:          value.Kind,
+					Mode:          value.Mode,
+					Size:          value.Size,
+					ContentDigest: value.ContentDigest,
+					GitOID:        value.GitOID,
+					SymlinkTarget: value.SymlinkTarget,
+				},
+			)
 		}
 		return result, nil
 	}
@@ -621,7 +736,16 @@ func captureFromStore(ctx context.Context, store *db.RepositoryStore, persisted 
 	}
 	changes := make([]snapshot.Change, 0, len(changeValues))
 	for _, value := range changeValues {
-		changes = append(changes, snapshot.Change{Status: value.Status, BasePath: value.BasePath, TargetPath: value.TargetPath, BaseDigest: value.BaseDigest, TargetDigest: value.TargetDigest})
+		changes = append(
+			changes,
+			snapshot.Change{
+				Status:       value.Status,
+				BasePath:     value.BasePath,
+				TargetPath:   value.TargetPath,
+				BaseDigest:   value.BaseDigest,
+				TargetDigest: value.TargetDigest,
+			},
+		)
 	}
 	baseSide, targetSide := snapshot.TreeSideBase, snapshot.TreeSideTarget
 	if persisted.Kind == snapshot.ComparisonWorktree {
@@ -635,12 +759,26 @@ func captureFromStore(ctx context.Context, store *db.RepositoryStore, persisted 
 	if err != nil {
 		return snapshot.Capture{}, err
 	}
-	capture := snapshot.Capture{ComparisonKind: persisted.Kind, RequestedComparison: persisted.RequestedComparison,
-		BaseOID: persisted.BaseOID, EffectiveBaseOID: persisted.EffectiveBaseOID, TargetOID: persisted.TargetOID, MergeBaseOID: persisted.MergeBaseOID,
-		IndexOID: persisted.IndexOID, ObjectFormat: persisted.ObjectFormat, ContextPolicyHash: persisted.ContextPolicyHash,
-		IgnorePolicy: persisted.IgnorePolicy, CapturedAt: persisted.CreatedAt, BaseEntries: base, TargetEntries: target, Changes: changes,
-		BaseManifestDigest: persisted.BaseManifestDigest, TargetManifestDigest: persisted.TargetManifestDigest, ManifestDigest: persisted.ManifestDigest,
-		Layers: []snapshot.Layer{}}
+	capture := snapshot.Capture{
+		ComparisonKind:       persisted.Kind,
+		RequestedComparison:  persisted.RequestedComparison,
+		BaseOID:              persisted.BaseOID,
+		EffectiveBaseOID:     persisted.EffectiveBaseOID,
+		TargetOID:            persisted.TargetOID,
+		MergeBaseOID:         persisted.MergeBaseOID,
+		IndexOID:             persisted.IndexOID,
+		ObjectFormat:         persisted.ObjectFormat,
+		ContextPolicyHash:    persisted.ContextPolicyHash,
+		IgnorePolicy:         persisted.IgnorePolicy,
+		CapturedAt:           persisted.CreatedAt,
+		BaseEntries:          base,
+		TargetEntries:        target,
+		Changes:              changes,
+		BaseManifestDigest:   persisted.BaseManifestDigest,
+		TargetManifestDigest: persisted.TargetManifestDigest,
+		ManifestDigest:       persisted.ManifestDigest,
+		Layers:               []snapshot.Layer{},
+	}
 	if persisted.Kind == snapshot.ComparisonWorktree {
 		capture.WorktreeOID = persisted.TargetOID
 		capture.HeadEntries = append([]snapshot.Entry(nil), base...)
@@ -651,14 +789,20 @@ func captureFromStore(ctx context.Context, store *db.RepositoryStore, persisted 
 		}
 		capture.HeadManifestDigest, capture.WorktreeManifestDigest = persisted.BaseManifestDigest, persisted.TargetManifestDigest
 		for _, layer := range persisted.Layers {
-			capture.Layers = append(capture.Layers, snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest})
+			capture.Layers = append(
+				capture.Layers,
+				snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest},
+			)
 			if layer.Layer == snapshot.TreeSideIndex {
 				capture.IndexManifestDigest = layer.ManifestDigest
 			}
 		}
 	} else {
 		for _, layer := range persisted.Layers {
-			capture.Layers = append(capture.Layers, snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest})
+			capture.Layers = append(
+				capture.Layers,
+				snapshot.Layer{Name: layer.Layer, Identity: layer.Identity, ManifestDigest: layer.ManifestDigest},
+			)
 		}
 	}
 	if len(capture.Layers) == 0 {
@@ -707,7 +851,20 @@ func changeDescriptor(model review.ChangeModel) ChangeDescriptor {
 			Hunks:        []HunkDescriptor{},
 		}
 		for _, hunk := range file.Hunks {
-			descriptor.Hunks = append(descriptor.Hunks, HunkDescriptor{ID: hunk.ID, Kind: hunk.Kind, OldStart: hunk.OldStart, OldLines: hunk.OldLines, NewStart: hunk.NewStart, NewLines: hunk.NewLines, Binary: hunk.Binary, Available: hunk.Available, Digest: hunk.Digest})
+			descriptor.Hunks = append(
+				descriptor.Hunks,
+				HunkDescriptor{
+					ID:        hunk.ID,
+					Kind:      hunk.Kind,
+					OldStart:  hunk.OldStart,
+					OldLines:  hunk.OldLines,
+					NewStart:  hunk.NewStart,
+					NewLines:  hunk.NewLines,
+					Binary:    hunk.Binary,
+					Available: hunk.Available,
+					Digest:    hunk.Digest,
+				},
+			)
 		}
 		result.Files = append(result.Files, descriptor)
 	}
@@ -766,10 +923,16 @@ func artifactDescriptor(value review.RetrievedArtifact) ArtifactDescriptor {
 		Size:            value.Size,
 		Excluded:        value.Excluded,
 		ExclusionReason: value.ExclusionReason,
-		Truncated:       value.Truncated}
+		Truncated:       value.Truncated,
+	}
 }
 
-func candidateProjections(change review.ChangeModel, candidates []review.CandidateRecord, store *db.RepositoryStore, ctx context.Context) []CandidateProjection {
+func candidateProjections(
+	change review.ChangeModel,
+	candidates []review.CandidateRecord,
+	store *db.RepositoryStore,
+	ctx context.Context,
+) []CandidateProjection {
 	result := make([]CandidateProjection, 0, len(candidates))
 	for _, candidate := range candidates {
 		projection := CandidateProjection{Candidate: candidate, Lane: review.FindingLaneCandidate}
@@ -796,7 +959,14 @@ func candidateProjections(change review.ChangeModel, candidates []review.Candida
 	return result
 }
 
-func findingProjections(change review.ChangeModel, findings []review.FindingRevision, candidates []review.CandidateRecord, verifications []review.VerificationRecord, store *db.RepositoryStore, ctx context.Context) []FindingProjection {
+func findingProjections(
+	change review.ChangeModel,
+	findings []review.FindingRevision,
+	candidates []review.CandidateRecord,
+	verifications []review.VerificationRecord,
+	store *db.RepositoryStore,
+	ctx context.Context,
+) []FindingProjection {
 	candidateByID := make(map[string]review.CandidateRecord, len(candidates))
 	for _, candidate := range candidates {
 		candidateByID[candidate.ID] = candidate
@@ -807,11 +977,21 @@ func findingProjections(change review.ChangeModel, findings []review.FindingRevi
 	}
 	result := make([]FindingProjection, 0, len(findings))
 	for _, finding := range findings {
-		projection := FindingProjection{Finding: finding, Lane: review.FindingLaneCandidate, CandidateID: finding.Origin.CandidateID, Dispositions: []review.DispositionRecord{}, Presentations: []review.PresentationRecord{}}
+		projection := FindingProjection{
+			Finding:       finding,
+			Lane:          review.FindingLaneCandidate,
+			CandidateID:   finding.Origin.CandidateID,
+			Dispositions:  []review.DispositionRecord{},
+			Presentations: []review.PresentationRecord{},
+		}
 		if candidate, ok := candidateByID[finding.Origin.CandidateID]; ok {
 			if verification, verified := verificationByCandidate[candidate.ID]; verified {
 				projection.Verification = &verification
-				if run, runErr := store.GetVerificationRun(ctx, verification.RunID); runErr == nil && change.SnapshotID != "" {
+				if run, runErr := store.GetVerificationRun(
+					ctx,
+					verification.RunID,
+				); runErr == nil &&
+					change.SnapshotID != "" {
 					if lane, laneErr := review.DeriveLane(change, candidate, verification, run); laneErr == nil {
 						projection.Lane = lane
 					}
@@ -866,7 +1046,18 @@ func projectChatRuns(runs []review.ChatRunRecord) []ChatRunProjection {
 			artifactIDs = append(artifactIDs, artifact.ID)
 		}
 		sort.Strings(artifactIDs)
-		result = append(result, ChatRunProjection{Run: sanitizeRun(run.Run), UserMessageID: run.UserMessageID, Binding: run.Binding, InputDigest: run.Input.Digest, ArtifactIDs: artifactIDs, Response: run.Response, RetainedOutput: run.RetainedOutput})
+		result = append(
+			result,
+			ChatRunProjection{
+				Run:            sanitizeRun(run.Run),
+				UserMessageID:  run.UserMessageID,
+				Binding:        run.Binding,
+				InputDigest:    run.Input.Digest,
+				ArtifactIDs:    artifactIDs,
+				Response:       run.Response,
+				RetainedOutput: run.RetainedOutput,
+			},
+		)
 	}
 	return result
 }
@@ -877,7 +1068,9 @@ func sanitizeRun(value review.RunRecord) review.RunRecord {
 	return value
 }
 
-var sensitiveParameter = regexp.MustCompile(`(?i)(password|secret|token|credential|authorization|api[_-]?key|private[_-]?key)`)
+var sensitiveParameter = regexp.MustCompile(
+	`(?i)(password|secret|token|credential|authorization|api[_-]?key|private[_-]?key)`,
+)
 
 func sanitizeParameters(values map[string]any) map[string]any {
 	if values == nil {
@@ -949,10 +1142,17 @@ func normalizeReview(value *Review) {
 		scrubChatBinding(&value.Provenance.ChatRuns[index].Binding)
 		scrubChatResponse(value.Provenance.ChatRuns[index].Response)
 	}
-	sort.SliceStable(value.Provenance.Operations, func(i, j int) bool { return value.Provenance.Operations[i].ID < value.Provenance.Operations[j].ID })
-	sort.SliceStable(value.Provenance.Activity, func(i, j int) bool { return value.Provenance.Activity[i].ID < value.Provenance.Activity[j].ID })
+	sort.SliceStable(
+		value.Provenance.Operations,
+		func(i, j int) bool { return value.Provenance.Operations[i].ID < value.Provenance.Operations[j].ID },
+	)
+	sort.SliceStable(
+		value.Provenance.Activity,
+		func(i, j int) bool { return value.Provenance.Activity[i].ID < value.Provenance.Activity[j].ID },
+	)
 	sort.SliceStable(value.Chat, func(i, j int) bool {
-		return value.Chat[i].CreatedAt.Before(value.Chat[j].CreatedAt) || (value.Chat[i].CreatedAt.Equal(value.Chat[j].CreatedAt) && value.Chat[i].ID < value.Chat[j].ID)
+		return value.Chat[i].CreatedAt.Before(value.Chat[j].CreatedAt) ||
+			(value.Chat[i].CreatedAt.Equal(value.Chat[j].CreatedAt) && value.Chat[i].ID < value.Chat[j].ID)
 	})
 	for index := range value.Chat {
 		scrubChatMessage(&value.Chat[index])
@@ -1072,7 +1272,10 @@ func normalizeCoverage(value review.ReviewCoverage) review.ReviewCoverage {
 	if value.RetrievedArtifacts == nil {
 		value.RetrievedArtifacts = []review.RetrievedArtifact{}
 	}
-	sort.SliceStable(value.RetrievedArtifacts, func(i, j int) bool { return value.RetrievedArtifacts[i].ID < value.RetrievedArtifacts[j].ID })
+	sort.SliceStable(
+		value.RetrievedArtifacts,
+		func(i, j int) bool { return value.RetrievedArtifacts[i].ID < value.RetrievedArtifacts[j].ID },
+	)
 	sort.SliceStable(value.Passes, func(i, j int) bool {
 		if value.Passes[i].Order != value.Passes[j].Order {
 			return value.Passes[i].Order < value.Passes[j].Order
@@ -1155,7 +1358,14 @@ func CanonicalJSON(value Review) ([]byte, error) {
 func Markdown(value Review) []byte {
 	normalizeReview(&value)
 	var b strings.Builder
-	fmt.Fprintf(&b, "# MIRE Review\n\nSession: %s\nRound: %s\nSnapshot: %s\nStatus: %s\n\n", value.Session.ID, value.Round.ID, value.SnapshotManifest.ID, value.Round.Status)
+	fmt.Fprintf(
+		&b,
+		"# MIRE Review\n\nSession: %s\nRound: %s\nSnapshot: %s\nStatus: %s\n\n",
+		value.Session.ID,
+		value.Round.ID,
+		value.SnapshotManifest.ID,
+		value.Round.Status,
+	)
 	b.WriteString("## Diff\n\n")
 	if value.DiffPatch == "" {
 		b.WriteString("Diff content is unavailable from the exported manifest.\n\n")
@@ -1170,7 +1380,15 @@ func Markdown(value Review) []byte {
 		if candidate.Lane != review.FindingLaneCandidate {
 			continue
 		}
-		fmt.Fprintf(&b, "- `%s` (%s, %s): %s — %s\n", candidate.Candidate.ID, candidate.Candidate.Candidate.Severity, candidate.Candidate.Candidate.Category, candidate.Candidate.Candidate.Claim, candidate.Reason)
+		fmt.Fprintf(
+			&b,
+			"- `%s` (%s, %s): %s — %s\n",
+			candidate.Candidate.ID,
+			candidate.Candidate.Candidate.Severity,
+			candidate.Candidate.Candidate.Category,
+			candidate.Candidate.Candidate.Claim,
+			candidate.Reason,
+		)
 	}
 	if !strings.HasSuffix(b.String(), "\n\n") {
 		b.WriteString("\n")
@@ -1183,7 +1401,13 @@ func Markdown(value Review) []byte {
 	}
 	for _, finding := range value.Ledger.Findings {
 		if finding.Lane == review.FindingLaneRefuted {
-			fmt.Fprintf(&b, "- `%s/%d`: %s\n", finding.Finding.FindingID, finding.Finding.Revision, finding.Finding.Claim)
+			fmt.Fprintf(
+				&b,
+				"- `%s/%d`: %s\n",
+				finding.Finding.FindingID,
+				finding.Finding.Revision,
+				finding.Finding.Claim,
+			)
 		}
 	}
 	b.WriteString("\n## Chat\n\n")
@@ -1194,7 +1418,12 @@ func Markdown(value Review) []byte {
 		fmt.Fprintf(&b, "- %s `%s`: %s\n", message.Role, message.ID, strings.ReplaceAll(message.Body, "\n", " "))
 	}
 	b.WriteString("\n## Coverage\n\n")
-	fmt.Fprintf(&b, "Examined files: %d\nExamined hunks: %d\n", len(value.Coverage.ExaminedFiles), len(value.Coverage.ExaminedHunks))
+	fmt.Fprintf(
+		&b,
+		"Examined files: %d\nExamined hunks: %d\n",
+		len(value.Coverage.ExaminedFiles),
+		len(value.Coverage.ExaminedHunks),
+	)
 	for _, pass := range value.Ledger.Passes {
 		fmt.Fprintf(&b, "- %s: %s (%s)\n", pass.Name, pass.Status, pass.Reason)
 	}
@@ -1205,7 +1434,8 @@ func Markdown(value Review) []byte {
 		fmt.Fprintf(&b, "- failure: %s: %s\n", failure.Code, failure.Message)
 	}
 	b.WriteString("\n## Incomplete analysis\n\n")
-	if len(value.Omissions) == 0 && len(value.Coverage.Failures) == 0 && value.Round.Status != string(db.RoundStatusIncomplete) {
+	if len(value.Omissions) == 0 && len(value.Coverage.Failures) == 0 &&
+		value.Round.Status != string(db.RoundStatusIncomplete) {
 		b.WriteString("No incomplete-analysis diagnostics recorded.\n")
 	} else {
 		for _, omission := range value.Omissions {
@@ -1230,7 +1460,16 @@ func writeFindingSection(b *strings.Builder, title string, findings []FindingPro
 		if len(finding.Finding.Anchors) > 0 {
 			anchor = finding.Finding.Anchors[0].Path + "#" + finding.Finding.Anchors[0].HunkID
 		}
-		fmt.Fprintf(b, "### %s/%d\n\n%s\n\n- Severity: %s\n- Category: %s\n- Anchor: `%s`\n", finding.Finding.FindingID, finding.Finding.Revision, finding.Finding.Claim, finding.Finding.Severity, finding.Finding.Category, anchor)
+		fmt.Fprintf(
+			b,
+			"### %s/%d\n\n%s\n\n- Severity: %s\n- Category: %s\n- Anchor: `%s`\n",
+			finding.Finding.FindingID,
+			finding.Finding.Revision,
+			finding.Finding.Claim,
+			finding.Finding.Severity,
+			finding.Finding.Category,
+			anchor,
+		)
 		for _, evidence := range finding.Finding.Evidence {
 			fmt.Fprintf(b, "- Evidence (%s): %s\n", evidence.Relation, evidence.Summary)
 		}
@@ -1249,7 +1488,12 @@ func FindingsJSON(value Review) ([]byte, error) {
 		Candidates    []CandidateProjection `json:"candidates"`
 		Refuted       []FindingProjection   `json:"refuted"`
 	}
-	result := output{SchemaVersion: SchemaVersion, Verified: []FindingProjection{}, Candidates: []CandidateProjection{}, Refuted: []FindingProjection{}}
+	result := output{
+		SchemaVersion: SchemaVersion,
+		Verified:      []FindingProjection{},
+		Candidates:    []CandidateProjection{},
+		Refuted:       []FindingProjection{},
+	}
 	for _, finding := range value.Ledger.Findings {
 		if finding.Lane == review.FindingLaneVerified {
 			result.Verified = append(result.Verified, finding)
@@ -1343,13 +1587,23 @@ func SARIF(value Review) ([]byte, error) {
 			Level:  sarifLevel(finding.Finding.Severity), Locations: []location{},
 			Fingerprints:        map[string]string{"mireResult": identity},
 			PartialFingerprints: map[string]string{"mireFinding": finding.Finding.Digest},
-			Properties: map[string]any{"lane": string(finding.Lane), "severity": finding.Finding.Severity, "finding_id": finding.Finding.FindingID,
-				"finding_revision": finding.Finding.Revision}}
+			Properties: map[string]any{
+				"lane": string(
+					finding.Lane,
+				),
+				"severity":         finding.Finding.Severity,
+				"finding_id":       finding.Finding.FindingID,
+				"finding_revision": finding.Finding.Revision,
+			},
+		}
 		item.Message.Text = strings.TrimSpace(finding.Finding.Claim + " — " + finding.Finding.Impact)
 		var loc location
 		loc.Physical.ArtifactLocation.URI = anchor.Path
 		if anchor.StartLine > 0 {
-			loc.Physical.Region = &region{StartLine: anchor.StartLine, EndLine: shared.MaxInt(anchor.EndLine, anchor.StartLine)}
+			loc.Physical.Region = &region{
+				StartLine: anchor.StartLine,
+				EndLine:   shared.MaxInt(anchor.EndLine, anchor.StartLine),
+			}
 		}
 		item.Locations = append(item.Locations, loc)
 		results = append(results, item)
@@ -1433,7 +1687,10 @@ func EvidenceJSONL(value Review) ([]byte, error) {
 	values := make([]entry, 0)
 	for _, finding := range value.Ledger.Findings {
 		for _, evidence := range finding.Finding.Evidence {
-			values = append(values, entry{FindingID: finding.Finding.FindingID, Revision: finding.Finding.Revision, Evidence: evidence})
+			values = append(
+				values,
+				entry{FindingID: finding.Finding.FindingID, Revision: finding.Finding.Revision, Evidence: evidence},
+			)
 		}
 	}
 	sort.SliceStable(values, func(i, j int) bool {
@@ -1519,7 +1776,17 @@ func Render(value Review) (Rendered, error) {
 		names = append(names, artifact.Path)
 	}
 	sort.Strings(names)
-	files := []string{"REVIEW.md", "review.json", "manifest.json", "diff.patch", "findings.json", "evidence.jsonl", "chat.jsonl", "activity.jsonl", "findings.sarif"}
+	files := []string{
+		"REVIEW.md",
+		"review.json",
+		"manifest.json",
+		"diff.patch",
+		"findings.json",
+		"evidence.jsonl",
+		"chat.jsonl",
+		"activity.jsonl",
+		"findings.sarif",
+	}
 	files = append(files, names...)
 	sort.Strings(files)
 	digests := map[string]string{
@@ -1530,7 +1797,8 @@ func Render(value Review) (Rendered, error) {
 		"evidence.jsonl": shared.Digest(evidenceJSONL),
 		"chat.jsonl":     shared.Digest(chatJSONL),
 		"activity.jsonl": shared.Digest(activityJSONL),
-		"findings.sarif": shared.Digest(sarifJSON)}
+		"findings.sarif": shared.Digest(sarifJSON),
+	}
 	configurationData, _ := json.Marshal(value.Provenance)
 	excludedObjects := make([]string, 0)
 	for _, entry := range value.SnapshotManifest.Entries {
@@ -1575,7 +1843,8 @@ func Render(value Review) (Rendered, error) {
 		SARIF:             sarifJSON,
 		DiffPatch:         []byte(value.DiffPatch),
 		ManifestJSON:      manifestJSON,
-		EvidenceArtifacts: named}, nil
+		EvidenceArtifacts: named,
+	}, nil
 }
 
 func evidencePath(id string) string {
@@ -1668,7 +1937,17 @@ func writeBundle(destination string, rendered Rendered) error {
 			_ = os.RemoveAll(destination)
 		}
 	}()
-	files := map[string][]byte{"REVIEW.md": rendered.Markdown, "review.json": rendered.ReviewJSON, "manifest.json": rendered.ManifestJSON, "diff.patch": rendered.DiffPatch, "findings.json": rendered.FindingsJSON, "evidence.jsonl": rendered.EvidenceJSONL, "chat.jsonl": rendered.ChatJSONL, "activity.jsonl": rendered.ActivityJSONL, "findings.sarif": rendered.SARIF}
+	files := map[string][]byte{
+		"REVIEW.md":      rendered.Markdown,
+		"review.json":    rendered.ReviewJSON,
+		"manifest.json":  rendered.ManifestJSON,
+		"diff.patch":     rendered.DiffPatch,
+		"findings.json":  rendered.FindingsJSON,
+		"evidence.jsonl": rendered.EvidenceJSONL,
+		"chat.jsonl":     rendered.ChatJSONL,
+		"activity.jsonl": rendered.ActivityJSONL,
+		"findings.sarif": rendered.SARIF,
+	}
 	for _, artifact := range rendered.EvidenceArtifacts {
 		files[artifact.Path] = []byte(artifact.Content)
 	}

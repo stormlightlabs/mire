@@ -63,7 +63,9 @@ func (store *RepositoryStore) CreatePlanRun(ctx context.Context, run review.RunR
 	if err != nil {
 		return review.RunRecord{}, err
 	}
-	_, err = store.database.ExecContext(ctx, `
+	_, err = store.database.ExecContext(
+		ctx,
+		`
 INSERT INTO planner_runs (
     id, session_id, round_id, snapshot_id, role, status, attempt, max_attempts,
     error, adapter, protocol, prompt_template_version, model, parameters_json,
@@ -71,12 +73,34 @@ INSERT INTO planner_runs (
     redactions_json, termination_cause, created_at, updated_at, started_at, finished_at
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))`,
-		run.ID, run.SessionID, run.RoundID, run.SnapshotID, run.Role, run.Status,
-		run.Attempt, run.MaxAttempts, run.Error, run.Provenance.Adapter, run.Provenance.Protocol,
-		run.Provenance.PromptTemplateVersion, run.Provenance.Model, parameters,
-		run.Provenance.InputManifestDigest, run.Provenance.InputDigest, run.Provenance.OutputDigest,
-		usage, run.Provenance.FinishReason, redactions, run.Provenance.TerminationCause,
-		shared.TimestampString(now), shared.TimestampString(run.UpdatedAt), shared.TimestampString(run.StartedAt), shared.TimestampString(run.FinishedAt))
+		run.ID,
+		run.SessionID,
+		run.RoundID,
+		run.SnapshotID,
+		run.Role,
+		run.Status,
+		run.Attempt,
+		run.MaxAttempts,
+		run.Error,
+		run.Provenance.Adapter,
+		run.Provenance.Protocol,
+		run.Provenance.PromptTemplateVersion,
+		run.Provenance.Model,
+		parameters,
+		run.Provenance.InputManifestDigest,
+		run.Provenance.InputDigest,
+		run.Provenance.OutputDigest,
+		usage,
+		run.Provenance.FinishReason,
+		redactions,
+		run.Provenance.TerminationCause,
+		shared.TimestampString(
+			now,
+		),
+		shared.TimestampString(run.UpdatedAt),
+		shared.TimestampString(run.StartedAt),
+		shared.TimestampString(run.FinishedAt),
+	)
 	if err != nil {
 		return review.RunRecord{}, fmt.Errorf("insert planner run: %w", err)
 	}
@@ -159,7 +183,11 @@ func (store *RepositoryStore) ListPlanRuns(ctx context.Context, roundID string) 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := store.database.QueryContext(ctx, plannerRunQuery+` WHERE round_id = ? ORDER BY created_at ASC, id ASC`, strings.TrimSpace(roundID))
+	rows, err := store.database.QueryContext(
+		ctx,
+		plannerRunQuery+` WHERE round_id = ? ORDER BY created_at ASC, id ASC`,
+		strings.TrimSpace(roundID),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list planner runs: %w", err)
 	}
@@ -194,7 +222,8 @@ func (store *RepositoryStore) SaveReviewPlan(ctx context.Context, plan review.Re
 		ctx = context.Background()
 	}
 	var runStatus string
-	err := store.database.QueryRowContext(ctx, `SELECT status FROM planner_runs WHERE id = ? AND session_id = ?`, plan.RunID, plan.SessionID).Scan(&runStatus)
+	err := store.database.QueryRowContext(ctx, `SELECT status FROM planner_runs WHERE id = ? AND session_id = ?`, plan.RunID, plan.SessionID).
+		Scan(&runStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: %q", ErrPlannerRunNotFound, plan.RunID)
 	}
@@ -232,7 +261,8 @@ func (store *RepositoryStore) GetReviewPlan(ctx context.Context, runID string) (
 		return review.ReviewPlan{}, errors.New("get review plan: run ID is empty")
 	}
 	var data []byte
-	err := store.database.QueryRowContext(ctx, `SELECT plan_json FROM review_plans WHERE run_id = ?`, strings.TrimSpace(runID)).Scan(&data)
+	err := store.database.QueryRowContext(ctx, `SELECT plan_json FROM review_plans WHERE run_id = ?`, strings.TrimSpace(runID)).
+		Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return review.ReviewPlan{}, fmt.Errorf("%w: %q", ErrReviewPlanNotFound, runID)
 	}

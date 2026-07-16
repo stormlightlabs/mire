@@ -35,7 +35,8 @@ func TestLoggerWritesDiagnosticsToProvidedOutput(t *testing.T) {
 
 	var output bytes.Buffer
 	NewLogger(&output).Error("Command failed", "error", "session does not exist")
-	if !strings.Contains(output.String(), "Command failed") || !strings.Contains(output.String(), "session does not exist") {
+	if !strings.Contains(output.String(), "Command failed") ||
+		!strings.Contains(output.String(), "session does not exist") {
 		t.Fatalf("logger output = %q, missing diagnostic", output.String())
 	}
 	if strings.Contains(output.String(), "[") {

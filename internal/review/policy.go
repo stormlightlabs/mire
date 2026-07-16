@@ -7,7 +7,11 @@ import (
 	"strings"
 )
 
-func resolvePolicies(input Input, guidance []Guidance, files []FileChange) (PolicyResolution, []ContextArtifact, error) {
+func resolvePolicies(
+	input Input,
+	guidance []Guidance,
+	files []FileChange,
+) (PolicyResolution, []ContextArtifact, error) {
 	rules := builtInRules()
 	privateRules := append([]PolicyRule(nil), input.Request.Rules...)
 	if len(privateRules) == 0 && input.Request.Configuration != "" {
@@ -42,7 +46,18 @@ func resolvePolicies(input Input, guidance []Guidance, files []FileChange) (Poli
 			}
 		}
 		if item.Tier == PolicyTierTargetEvidence {
-			artifacts = append(artifacts, ContextArtifact{ID: item.ID, Kind: string(item.Kind), Source: "target_snapshot_evidence", Path: item.Path, Tier: item.Tier, Content: item.Content, Digest: item.Digest})
+			artifacts = append(
+				artifacts,
+				ContextArtifact{
+					ID:      item.ID,
+					Kind:    string(item.Kind),
+					Source:  "target_snapshot_evidence",
+					Path:    item.Path,
+					Tier:    item.Tier,
+					Content: item.Content,
+					Digest:  item.Digest,
+				},
+			)
 			if input.NoBaseRevision && item.Kind == GuidanceTargetPolicy {
 				for _, rule := range item.Rules {
 					rule.Tier = PolicyTierTargetEvidence
@@ -89,14 +104,22 @@ func resolvePolicies(input Input, guidance []Guidance, files []FileChange) (Poli
 		for _, key := range keyList {
 			candidates := applicableRules(rules, key, pathName)
 			selected, conflict := selectRule(candidates)
-			decisions = append(decisions, PolicyDecision{Path: pathName, Key: key, Candidates: candidates, Selected: selected})
+			decisions = append(
+				decisions,
+				PolicyDecision{Path: pathName, Key: key, Candidates: candidates, Selected: selected},
+			)
 			if conflict != nil {
 				conflict.Path = pathName
 				conflicts = append(conflicts, *conflict)
 			}
 		}
 	}
-	resolution := PolicyResolution{Decisions: decisions, Conflicts: conflicts, TargetEvidence: artifacts, NoBaseRevisionException: input.NoBaseRevision}
+	resolution := PolicyResolution{
+		Decisions:               decisions,
+		Conflicts:               conflicts,
+		TargetEvidence:          artifacts,
+		NoBaseRevisionException: input.NoBaseRevision,
+	}
 	digest, err := digestValue(struct {
 		Decisions []PolicyDecision
 		Conflicts []PolicyConflict
@@ -116,7 +139,12 @@ func builtInRules() []PolicyRule {
 		{Key: "command_execution", Value: "deny", Tier: PolicyTierBuiltIn, Source: "mire_builtin_safety"},
 		{Key: "network_access", Value: "deny", Tier: PolicyTierBuiltIn, Source: "mire_builtin_safety"},
 		{Key: "model_tools", Value: "snapshot_read_only", Tier: PolicyTierBuiltIn, Source: "mire_builtin_safety"},
-		{Key: "evidence_floor", Value: "snapshot_anchor_required", Tier: PolicyTierBuiltIn, Source: "mire_builtin_safety"},
+		{
+			Key:    "evidence_floor",
+			Value:  "snapshot_anchor_required",
+			Tier:   PolicyTierBuiltIn,
+			Source: "mire_builtin_safety",
+		},
 	}
 }
 
@@ -209,7 +237,8 @@ func selectRule(candidates []PolicyRule) (PolicyRule, *PolicyConflict) {
 func saferValue(rules []PolicyRule) string {
 	for _, rule := range rules {
 		normalized := strings.ToLower(strings.TrimSpace(rule.Value))
-		if normalized == "deny" || normalized == "false" || normalized == "none" || normalized == "disabled" || normalized == "forbid" {
+		if normalized == "deny" || normalized == "false" || normalized == "none" || normalized == "disabled" ||
+			normalized == "forbid" {
 			return rule.Value
 		}
 	}

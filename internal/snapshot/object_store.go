@@ -130,7 +130,10 @@ func (store *ObjectStore) Put(ctx context.Context, reader io.Reader) (Object, er
 		return Object{}, fmt.Errorf("inspect snapshot object: %w", statErr)
 	}
 	if err := os.Rename(temporaryName, target); err != nil {
-		if info, statErr := os.Lstat(target); statErr == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
+		if info, statErr := os.Lstat(
+			target,
+		); statErr == nil && info.Mode().IsRegular() &&
+			info.Mode()&os.ModeSymlink == 0 {
 			if verifyErr := verifyObjectFile(target, digest, size); verifyErr != nil {
 				return Object{}, verifyErr
 			}

@@ -112,7 +112,8 @@ func TestReviewThreeDotPersistsRequestedAndEffectiveBaseProvenance(t *testing.T)
 	addReviewFile(t, worktree, "common.txt")
 	base := commitReview(t, worktree, "base", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
 	if err := repository.Storer.SetReference(plumbing.NewHashReference(
-		plumbing.NewBranchReferenceName("base"), base)); err != nil {
+		plumbing.NewBranchReferenceName("base"), base,
+	)); err != nil {
 		t.Fatalf("create base branch: %v", err)
 	}
 	writeReviewFile(t, repositoryPath, "target.txt", "target\n")
@@ -128,7 +129,8 @@ func TestReviewThreeDotPersistsRequestedAndEffectiveBaseProvenance(t *testing.T)
 	if err := command.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("review command error = %v", err)
 	}
-	if !strings.Contains(output.String(), "Kind: three_dot") || !strings.Contains(output.String(), "Merge base: "+base.String()) {
+	if !strings.Contains(output.String(), "Kind: three_dot") ||
+		!strings.Contains(output.String(), "Merge base: "+base.String()) {
 		t.Fatalf("stdout = %q", output.String())
 	}
 	if diagnostics.Len() != 0 {
@@ -215,7 +217,9 @@ func TestReviewWorktreePersistsAllThreeLayersAndIgnoredPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSnapshot() error = %v", err)
 	}
-	if persisted.Kind != snapshot.ComparisonWorktree || persisted.BaseOID == "" || persisted.IndexOID == "" || persisted.TargetOID == "" || persisted.IgnorePolicy == "" {
+	if persisted.Kind != snapshot.ComparisonWorktree || persisted.BaseOID == "" || persisted.IndexOID == "" ||
+		persisted.TargetOID == "" ||
+		persisted.IgnorePolicy == "" {
 		t.Fatalf("worktree snapshot = %#v", persisted)
 	}
 	if len(persisted.Layers) != 3 {
@@ -236,7 +240,8 @@ func TestReviewWorktreePersistsAllThreeLayersAndIgnoredPolicy(t *testing.T) {
 	if findReviewEntry(headEntries, "new.txt").Path != "" || findReviewEntry(indexEntries, "new.txt").Path != "" {
 		t.Fatalf("untracked file leaked into prior layers: head=%#v index=%#v", headEntries, indexEntries)
 	}
-	if findReviewEntry(worktreeEntries, "new.txt").Path == "" || findReviewEntry(worktreeEntries, "ignored.txt").Path != "" {
+	if findReviewEntry(worktreeEntries, "new.txt").Path == "" ||
+		findReviewEntry(worktreeEntries, "ignored.txt").Path != "" {
 		t.Fatalf("final worktree entries = %#v", worktreeEntries)
 	}
 	objectStore, err := snapshot.OpenObjectStore(stateDir)
@@ -265,7 +270,10 @@ func TestReviewInvalidRangeCreatesNoDatabaseRecord(t *testing.T) {
 		Stdout: &output, Stderr: &diagnostics, StateDir: stateDir, WorkingDir: repositoryPath,
 	})
 	command.SetArgs([]string{"review", "--range", "missing..HEAD"})
-	if err := command.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "resolve base revision") {
+	if err := command.ExecuteContext(
+		context.Background(),
+	); err == nil ||
+		!strings.Contains(err.Error(), "resolve base revision") {
 		t.Fatalf("invalid review error = %v", err)
 	}
 	if output.Len() != 0 || diagnostics.Len() != 0 {
@@ -294,7 +302,9 @@ func TestReviewSessionAppendsWorktreeRoundAndShowReportsHistory(t *testing.T) {
 
 	stateDir := filepath.Join(t.TempDir(), "state")
 	var firstOutput bytes.Buffer
-	first := NewRootCommand(Config{Stdout: &firstOutput, Stderr: &bytes.Buffer{}, StateDir: stateDir, WorkingDir: repositoryPath})
+	first := NewRootCommand(
+		Config{Stdout: &firstOutput, Stderr: &bytes.Buffer{}, StateDir: stateDir, WorkingDir: repositoryPath},
+	)
 	first.SetArgs([]string{"review", "--range", base.String() + ".." + target.String()})
 	if err := first.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("initial review error = %v", err)
@@ -312,12 +322,15 @@ func TestReviewSessionAppendsWorktreeRoundAndShowReportsHistory(t *testing.T) {
 	writeReviewFile(t, repositoryPath, "file.txt", "working tree\n")
 	writeReviewFile(t, repositoryPath, "new.txt", "new\n")
 	var appendOutput bytes.Buffer
-	appendCommand := NewRootCommand(Config{Stdout: &appendOutput, Stderr: &bytes.Buffer{}, StateDir: stateDir, WorkingDir: repositoryPath})
+	appendCommand := NewRootCommand(
+		Config{Stdout: &appendOutput, Stderr: &bytes.Buffer{}, StateDir: stateDir, WorkingDir: repositoryPath},
+	)
 	appendCommand.SetArgs([]string{"review", "--session", sessionID, "--worktree"})
 	if err := appendCommand.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("append review error = %v", err)
 	}
-	if !strings.Contains(appendOutput.String(), "Round:") || !strings.Contains(appendOutput.String(), "Kind: worktree") {
+	if !strings.Contains(appendOutput.String(), "Round:") ||
+		!strings.Contains(appendOutput.String(), "Kind: worktree") {
 		t.Fatalf("append output = %q", appendOutput.String())
 	}
 
@@ -339,7 +352,9 @@ func TestReviewSessionAppendsWorktreeRoundAndShowReportsHistory(t *testing.T) {
 	}
 
 	var showOutput bytes.Buffer
-	show := NewRootCommand(Config{Stdout: &showOutput, Stderr: &bytes.Buffer{}, StateDir: stateDir, WorkingDir: repositoryPath})
+	show := NewRootCommand(
+		Config{Stdout: &showOutput, Stderr: &bytes.Buffer{}, StateDir: stateDir, WorkingDir: repositoryPath},
+	)
 	show.SetArgs([]string{"show", sessionID})
 	if err := show.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("show error = %v", err)

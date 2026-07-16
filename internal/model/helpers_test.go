@@ -18,12 +18,18 @@ func TestHTTPHelpersNormalizeReasonsContentAndBudgets(t *testing.T) {
 		reason string
 		want   string
 	}{
-		{reason: "", want: "completed"}, {reason: "stop", want: "completed"},
-		{reason: "end_turn", want: "completed"}, {reason: "length", want: "max_tokens"},
-		{reason: "max_tokens", want: "max_tokens"}, {reason: "tool_calls", want: "tool_use"},
-		{reason: "function_call", want: "tool_use"}, {reason: "tool_use", want: "tool_use"},
-		{reason: "content_filter", want: "refused"}, {reason: "refusal", want: "refused"},
-		{reason: "stop_sequence", want: "stop_sequence"}, {reason: "pause_turn", want: "paused"},
+		{reason: "", want: "completed"},
+		{reason: "stop", want: "completed"},
+		{reason: "end_turn", want: "completed"},
+		{reason: "length", want: "max_tokens"},
+		{reason: "max_tokens", want: "max_tokens"},
+		{reason: "tool_calls", want: "tool_use"},
+		{reason: "function_call", want: "tool_use"},
+		{reason: "tool_use", want: "tool_use"},
+		{reason: "content_filter", want: "refused"},
+		{reason: "refusal", want: "refused"},
+		{reason: "stop_sequence", want: "stop_sequence"},
+		{reason: "pause_turn", want: "paused"},
 		{reason: "provider-specific", want: "provider-specific"},
 	} {
 		if got := normalizeFinishReason(test.reason); got != test.want {
@@ -75,19 +81,29 @@ func TestHTTPHelpersNormalizeReasonsContentAndBudgets(t *testing.T) {
 
 func TestHTTPHelpersRedactErrorsRetryAfterAndEndpoints(t *testing.T) {
 	t.Parallel()
-	if got := sanitizeText("Authorization: secret, Bearer sk-ant-abc", "secret"); strings.Contains(got, "secret") || strings.Contains(got, "sk-ant-abc") {
+	if got := sanitizeText(
+		"Authorization: secret, Bearer sk-ant-abc",
+		"secret",
+	); strings.Contains(got, "secret") ||
+		strings.Contains(got, "sk-ant-abc") {
 		t.Fatalf("sanitized text = %q", got)
 	}
 	if got := sanitizeError(errors.New("secret-token"), "secret-token").Error(); got != "[REDACTED]" {
 		t.Fatalf("sanitized error = %q", got)
 	}
-	if got := (&ProviderError{Provider: ProviderAnthropic, Operation: "messages", StatusCode: http.StatusTooManyRequests, Code: "rate_limit", Message: "retry"}).Error(); !strings.Contains(got, "status 429") {
+	if got := (&ProviderError{Provider: ProviderAnthropic, Operation: "messages", StatusCode: http.StatusTooManyRequests, Code: "rate_limit", Message: "retry"}).Error(); !strings.Contains(
+		got,
+		"status 429",
+	) {
 		t.Fatalf("provider error = %q", got)
 	}
-	if (&BudgetError{Kind: "output bytes", Value: 4, Limit: 3}).Error() == "" || (&MalformedResponseError{Provider: ProviderAnthropic, Operation: "messages", Reason: "bad"}).Error() == "" || (&MalformedStreamError{Provider: ProviderAnthropic, Event: 1, Reason: "bad"}).Error() == "" {
+	if (&BudgetError{Kind: "output bytes", Value: 4, Limit: 3}).Error() == "" ||
+		(&MalformedResponseError{Provider: ProviderAnthropic, Operation: "messages", Reason: "bad"}).Error() == "" ||
+		(&MalformedStreamError{Provider: ProviderAnthropic, Event: 1, Reason: "bad"}).Error() == "" {
 		t.Fatal("error types did not describe themselves")
 	}
-	if (&BudgetError{}).Error() == "" || (&MalformedResponseError{}).Error() == "" || (&MalformedStreamError{}).Error() == "" {
+	if (&BudgetError{}).Error() == "" || (&MalformedResponseError{}).Error() == "" ||
+		(&MalformedStreamError{}).Error() == "" {
 		t.Fatal("zero error types did not describe themselves")
 	}
 	if parseRetryAfter(http.Header{"Retry-After": []string{"3"}}) != 3*time.Second {
@@ -113,17 +129,34 @@ func TestRetryWaitAndSSEParsingRespectCancellation(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := waitRetry(ctx, RetryPolicy{InitialDelay: time.Hour, MaxDelay: time.Hour}, 1, 0); !errors.Is(err, context.Canceled) {
+	if err := waitRetry(
+		ctx,
+		RetryPolicy{InitialDelay: time.Hour, MaxDelay: time.Hour},
+		1,
+		0,
+	); !errors.Is(
+		err,
+		context.Canceled,
+	) {
 		t.Fatalf("cancelled retry error = %v", err)
 	}
 	var events []sseEvent
-	if err := readSSE(strings.NewReader(": keepalive\nevent: message\ndata: one\ndata: two\n\n"), ProviderAnthropic, func(_ int, event sseEvent) error {
-		events = append(events, event)
-		return nil
-	}); err != nil || len(events) != 1 || events[0].Name != "message" || events[0].Data != "one\ntwo" {
+	if err := readSSE(
+		strings.NewReader(": keepalive\nevent: message\ndata: one\ndata: two\n\n"),
+		ProviderAnthropic,
+		func(_ int, event sseEvent) error {
+			events = append(events, event)
+			return nil
+		},
+	); err != nil || len(events) != 1 || events[0].Name != "message" ||
+		events[0].Data != "one\ntwo" {
 		t.Fatalf("SSE events=%#v err=%v", events, err)
 	}
-	if err := readSSE(strings.NewReader("unknown: field\n\n"), ProviderAnthropic, func(_ int, _ sseEvent) error { return nil }); err == nil {
+	if err := readSSE(
+		strings.NewReader("unknown: field\n\n"),
+		ProviderAnthropic,
+		func(_ int, _ sseEvent) error { return nil },
+	); err == nil {
 		t.Fatal("unknown SSE field unexpectedly succeeded")
 	}
 }

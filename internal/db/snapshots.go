@@ -12,10 +12,8 @@ import (
 	"github.com/stormlightlabs/mire/internal/snapshot"
 )
 
-var (
-	// ErrSnapshotNotFound is returned when a snapshot ID is not persisted.
-	ErrSnapshotNotFound = errors.New("snapshot not found")
-)
+// ErrSnapshotNotFound is returned when a snapshot ID is not persisted.
+var ErrSnapshotNotFound = errors.New("snapshot not found")
 
 // Snapshot is immutable provenance and manifest metadata for one capture.
 type Snapshot struct {
@@ -74,7 +72,12 @@ type SnapshotChange struct {
 // CreateCapturedSession atomically creates the repository, user-visible
 // session, immutable snapshot, complete manifests, changes, and first round.
 // Callers must capture and verify all object bytes before invoking it.
-func (store *RepositoryStore) CreateCapturedSession(ctx context.Context, identity RepositoryIdentity, title string, capture snapshot.Capture) (Session, Round, Snapshot, error) {
+func (store *RepositoryStore) CreateCapturedSession(
+	ctx context.Context,
+	identity RepositoryIdentity,
+	title string,
+	capture snapshot.Capture,
+) (Session, Round, Snapshot, error) {
 	if err := store.validate(); err != nil {
 		return Session{}, Round{}, Snapshot{}, err
 	}
@@ -132,13 +135,28 @@ VALUES (?, ?, ?, ?)`, sessionID, repository.ID, title, shared.TimestampString(no
 		ID: roundID, SessionID: sessionID, RepositoryID: repository.ID, SnapshotID: snapshotID,
 		Number: 1, Status: RoundStatusPending, CreatedAt: now, UpdatedAt: now,
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(
+		ctx,
+		`
 INSERT INTO rounds (id, session_id, repository_id, snapshot_id, number, status, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, round.ID, round.SessionID, round.RepositoryID, round.SnapshotID,
-		round.Number, round.Status, shared.TimestampString(round.CreatedAt), shared.TimestampString(round.UpdatedAt)); err != nil {
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		round.ID,
+		round.SessionID,
+		round.RepositoryID,
+		round.SnapshotID,
+		round.Number,
+		round.Status,
+		shared.TimestampString(round.CreatedAt),
+		shared.TimestampString(round.UpdatedAt),
+	); err != nil {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert captured round: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET current_round_id = ? WHERE id = ?`, round.ID, sessionID); err != nil {
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE sessions SET current_round_id = ? WHERE id = ?`,
+		round.ID,
+		sessionID,
+	); err != nil {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("set captured current round: %w", err)
 	}
 	if err := insertActivityTx(ctx, tx, Activity{
@@ -160,7 +178,12 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, round.ID, round.SessionID, round.RepositoryID,
 // AppendCapturedRound appends one immutable capture to an existing session.
 // The session and capture repository identities must match, and the new round
 // becomes current only when the complete snapshot transaction commits.
-func (store *RepositoryStore) AppendCapturedRound(ctx context.Context, sessionID string, identity RepositoryIdentity, capture snapshot.Capture) (Session, Round, Snapshot, error) {
+func (store *RepositoryStore) AppendCapturedRound(
+	ctx context.Context,
+	sessionID string,
+	identity RepositoryIdentity,
+	capture snapshot.Capture,
+) (Session, Round, Snapshot, error) {
 	if err := store.validate(); err != nil {
 		return Session{}, Round{}, Snapshot{}, err
 	}
@@ -197,7 +220,13 @@ func (store *RepositoryStore) AppendCapturedRound(ctx context.Context, sessionID
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("read append session %q: %w", sessionID, err)
 	}
 	if session.RepositoryIdentity != identity.CanonicalIdentity {
-		return Session{}, Round{}, Snapshot{}, fmt.Errorf("%w: session %q is for %q, current repository is %q", ErrSessionRepositoryMismatch, sessionID, session.RepositoryIdentity, identity.CanonicalIdentity)
+		return Session{}, Round{}, Snapshot{}, fmt.Errorf(
+			"%w: session %q is for %q, current repository is %q",
+			ErrSessionRepositoryMismatch,
+			sessionID,
+			session.RepositoryIdentity,
+			identity.CanonicalIdentity,
+		)
 	}
 
 	snapshotID, err := store.newID()
@@ -209,13 +238,15 @@ func (store *RepositoryStore) AppendCapturedRound(ctx context.Context, sessionID
 		return Session{}, Round{}, Snapshot{}, err
 	}
 	var predecessorRoundID string
-	if err := tx.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(
+		ctx,
 		`SELECT COALESCE(current_round_id, '') FROM sessions WHERE id = ?`, sessionID,
 	).Scan(&predecessorRoundID); err != nil {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("read append predecessor: %w", err)
 	}
 	var number int
-	if err := tx.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(
+		ctx,
 		`SELECT COALESCE(MAX(number), 0) + 1 FROM rounds WHERE session_id = ?`, sessionID,
 	).Scan(&number); err != nil {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("choose appended round number: %w", err)
@@ -229,14 +260,29 @@ func (store *RepositoryStore) AppendCapturedRound(ctx context.Context, sessionID
 		SnapshotID: snapshotID, PredecessorRoundID: predecessorRoundID,
 		Number: number, Status: RoundStatusPending, CreatedAt: now, UpdatedAt: now,
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(
+		ctx,
+		`
 INSERT INTO rounds (id, session_id, repository_id, snapshot_id, predecessor_round_id, number, status, created_at, updated_at)
 VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
-		round.ID, round.SessionID, round.RepositoryID, round.SnapshotID, round.PredecessorRoundID,
-		round.Number, round.Status, shared.TimestampString(round.CreatedAt), shared.TimestampString(round.UpdatedAt)); err != nil {
+		round.ID,
+		round.SessionID,
+		round.RepositoryID,
+		round.SnapshotID,
+		round.PredecessorRoundID,
+		round.Number,
+		round.Status,
+		shared.TimestampString(round.CreatedAt),
+		shared.TimestampString(round.UpdatedAt),
+	); err != nil {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("insert appended round: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET current_round_id = ? WHERE id = ?`, round.ID, sessionID); err != nil {
+	if _, err := tx.ExecContext(
+		ctx,
+		`UPDATE sessions SET current_round_id = ? WHERE id = ?`,
+		round.ID,
+		sessionID,
+	); err != nil {
 		return Session{}, Round{}, Snapshot{}, fmt.Errorf("set appended current round: %w", err)
 	}
 	if err := insertActivityTx(ctx, tx, Activity{
@@ -252,7 +298,12 @@ VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
 	return session, round, persistedSnapshot, nil
 }
 
-func persistSnapshotTx(ctx context.Context, tx *sql.Tx, repositoryID, snapshotID string, capture snapshot.Capture) (Snapshot, error) {
+func persistSnapshotTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	repositoryID, snapshotID string,
+	capture snapshot.Capture,
+) (Snapshot, error) {
 	persisted := Snapshot{
 		ID: snapshotID, RepositoryID: repositoryID, Kind: captureKind(capture),
 		RequestedComparison: capture.RequestedComparison, BaseOID: capture.BaseOID,
@@ -294,7 +345,13 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
 		if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideBase, capture.BaseEntries); err != nil {
 			return Snapshot{}, err
 		}
-		if err := insertSnapshotEntriesTx(ctx, tx, snapshotID, snapshot.TreeSideTarget, capture.TargetEntries); err != nil {
+		if err := insertSnapshotEntriesTx(
+			ctx,
+			tx,
+			snapshotID,
+			snapshot.TreeSideTarget,
+			capture.TargetEntries,
+		); err != nil {
 			return Snapshot{}, err
 		}
 	}
@@ -382,7 +439,10 @@ FROM snapshot_layers WHERE snapshot_id = ? ORDER BY layer ASC`, snapshotID)
 }
 
 // ListSnapshotEntries reads a stored complete tree manifest in path order.
-func (store *RepositoryStore) ListSnapshotEntries(ctx context.Context, snapshotID, treeSide string) ([]SnapshotEntry, error) {
+func (store *RepositoryStore) ListSnapshotEntries(
+	ctx context.Context,
+	snapshotID, treeSide string,
+) ([]SnapshotEntry, error) {
 	if err := store.validate(); err != nil {
 		return nil, err
 	}
@@ -441,7 +501,14 @@ FROM snapshot_changes WHERE snapshot_id = ? ORDER BY base_path ASC, target_path 
 	changes := make([]SnapshotChange, 0)
 	for rows.Next() {
 		var change SnapshotChange
-		if err := rows.Scan(&change.SnapshotID, &change.Status, &change.BasePath, &change.TargetPath, &change.BaseDigest, &change.TargetDigest); err != nil {
+		if err := rows.Scan(
+			&change.SnapshotID,
+			&change.Status,
+			&change.BasePath,
+			&change.TargetPath,
+			&change.BaseDigest,
+			&change.TargetDigest,
+		); err != nil {
 			return nil, fmt.Errorf("list snapshot changes: %w", err)
 		}
 		changes = append(changes, change)
@@ -471,7 +538,11 @@ func normalizeCapture(capture snapshot.Capture) (snapshot.Capture, error) {
 	if capture.ComparisonKind == "" {
 		capture.ComparisonKind = kind
 	} else if capture.ComparisonKind != kind {
-		return snapshot.Capture{}, fmt.Errorf("snapshot capture: comparison kind %q does not match %q", capture.ComparisonKind, capture.RequestedComparison)
+		return snapshot.Capture{}, fmt.Errorf(
+			"snapshot capture: comparison kind %q does not match %q",
+			capture.ComparisonKind,
+			capture.RequestedComparison,
+		)
 	}
 	if capture.BaseOID == "" {
 		capture.BaseOID = capture.EffectiveBaseOID
@@ -510,7 +581,12 @@ func validateCapture(capture snapshot.Capture) error {
 	return nil
 }
 
-func insertSnapshotEntriesTx(ctx context.Context, tx *sql.Tx, snapshotID, treeSide string, entries []snapshot.Entry) error {
+func insertSnapshotEntriesTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	snapshotID, treeSide string,
+	entries []snapshot.Entry,
+) error {
 	for _, entry := range entries {
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO snapshot_entries (

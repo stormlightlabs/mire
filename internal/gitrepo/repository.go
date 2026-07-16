@@ -212,16 +212,31 @@ func (plan *capturePlan) add(path string, size int64) error {
 		return fmt.Errorf("capture plan: negative object size for %q", path)
 	}
 	if size > plan.limits.MaxObjectBytes {
-		return &CaptureLimitError{Resource: "individual object bytes", Configured: plan.limits.MaxObjectBytes, Observed: size, Path: path}
+		return &CaptureLimitError{
+			Resource:   "individual object bytes",
+			Configured: plan.limits.MaxObjectBytes,
+			Observed:   size,
+			Path:       path,
+		}
 	}
 	if _, exists := plan.paths[path]; !exists {
 		if len(plan.paths) >= plan.limits.MaxFileCount {
-			return &CaptureLimitError{Resource: "file count", Configured: int64(plan.limits.MaxFileCount), Observed: int64(len(plan.paths) + 1), Path: path}
+			return &CaptureLimitError{
+				Resource:   "file count",
+				Configured: int64(plan.limits.MaxFileCount),
+				Observed:   int64(len(plan.paths) + 1),
+				Path:       path,
+			}
 		}
 		plan.paths[path] = struct{}{}
 	}
 	if size > plan.limits.MaxCapturedBytes-plan.bytes {
-		return &CaptureLimitError{Resource: "aggregate captured bytes", Configured: plan.limits.MaxCapturedBytes, Observed: plan.bytes + size, Path: path}
+		return &CaptureLimitError{
+			Resource:   "aggregate captured bytes",
+			Configured: plan.limits.MaxCapturedBytes,
+			Observed:   plan.bytes + size,
+			Path:       path,
+		}
 	}
 	plan.bytes += size
 	return nil
@@ -246,16 +261,31 @@ func (budget *captureBudget) reserve(path string, size int64) (captureReservatio
 		return captureReservation{}, fmt.Errorf("capture: negative object size for %q", path)
 	}
 	if size > budget.limits.MaxObjectBytes {
-		return captureReservation{}, &CaptureLimitError{Resource: "individual object bytes", Configured: budget.limits.MaxObjectBytes, Observed: size, Path: path}
+		return captureReservation{}, &CaptureLimitError{
+			Resource:   "individual object bytes",
+			Configured: budget.limits.MaxObjectBytes,
+			Observed:   size,
+			Path:       path,
+		}
 	}
 	if _, exists := budget.paths[path]; !exists {
 		if len(budget.paths) >= budget.limits.MaxFileCount {
-			return captureReservation{}, &CaptureLimitError{Resource: "file count", Configured: int64(budget.limits.MaxFileCount), Observed: int64(len(budget.paths) + 1), Path: path}
+			return captureReservation{}, &CaptureLimitError{
+				Resource:   "file count",
+				Configured: int64(budget.limits.MaxFileCount),
+				Observed:   int64(len(budget.paths) + 1),
+				Path:       path,
+			}
 		}
 		budget.paths[path] = struct{}{}
 	}
 	if size > budget.limits.MaxCapturedBytes-budget.bytes {
-		return captureReservation{}, &CaptureLimitError{Resource: "aggregate captured bytes", Configured: budget.limits.MaxCapturedBytes, Observed: budget.bytes + size, Path: path}
+		return captureReservation{}, &CaptureLimitError{
+			Resource:   "aggregate captured bytes",
+			Configured: budget.limits.MaxCapturedBytes,
+			Observed:   budget.bytes + size,
+			Path:       path,
+		}
 	}
 	budget.bytes += size
 	return captureReservation{expected: size}, nil
@@ -266,12 +296,22 @@ func (budget *captureBudget) finalize(reservation captureReservation, actual int
 		return fmt.Errorf("capture: negative captured size for %q", path)
 	}
 	if actual > budget.limits.MaxObjectBytes {
-		return &CaptureLimitError{Resource: "individual object bytes", Configured: budget.limits.MaxObjectBytes, Observed: actual, Path: path}
+		return &CaptureLimitError{
+			Resource:   "individual object bytes",
+			Configured: budget.limits.MaxObjectBytes,
+			Observed:   actual,
+			Path:       path,
+		}
 	}
 	if actual > reservation.expected {
 		increase := actual - reservation.expected
 		if increase > budget.limits.MaxCapturedBytes-budget.bytes {
-			return &CaptureLimitError{Resource: "aggregate captured bytes", Configured: budget.limits.MaxCapturedBytes, Observed: budget.bytes + increase, Path: path}
+			return &CaptureLimitError{
+				Resource:   "aggregate captured bytes",
+				Configured: budget.limits.MaxCapturedBytes,
+				Observed:   budget.bytes + increase,
+				Path:       path,
+			}
 		}
 		budget.bytes += increase
 	} else {
@@ -292,7 +332,12 @@ func (reader *captureSizeReader) Read(buffer []byte) (int, error) {
 		var probe [1]byte
 		count, err := reader.reader.Read(probe[:])
 		if count > 0 {
-			return 0, &CaptureLimitError{Resource: "individual object bytes", Configured: reader.max, Observed: reader.max + int64(count), Path: reader.path}
+			return 0, &CaptureLimitError{
+				Resource:   "individual object bytes",
+				Configured: reader.max,
+				Observed:   reader.max + int64(count),
+				Path:       reader.path,
+			}
 		}
 		return 0, err
 	}
@@ -305,12 +350,22 @@ func (reader *captureSizeReader) Read(buffer []byte) (int, error) {
 	return count, err
 }
 
-func putCapturedObject(ctx context.Context, objectStore *snapshot.ObjectStore, budget *captureBudget, path string, reader io.Reader, expectedSize int64) (snapshot.Object, error) {
+func putCapturedObject(
+	ctx context.Context,
+	objectStore *snapshot.ObjectStore,
+	budget *captureBudget,
+	path string,
+	reader io.Reader,
+	expectedSize int64,
+) (snapshot.Object, error) {
 	reservation, err := budget.reserve(path, expectedSize)
 	if err != nil {
 		return snapshot.Object{}, err
 	}
-	stored, err := objectStore.Put(ctx, &captureSizeReader{reader: reader, max: budget.limits.MaxObjectBytes, path: path})
+	stored, err := objectStore.Put(
+		ctx,
+		&captureSizeReader{reader: reader, max: budget.limits.MaxObjectBytes, path: path},
+	)
 	if err != nil {
 		return snapshot.Object{}, err
 	}
@@ -322,12 +377,21 @@ func putCapturedObject(ctx context.Context, objectStore *snapshot.ObjectStore, b
 
 // CaptureRange opens directory, resolves a committed range exactly once, and
 // copies complete effective-base and target trees into objectStore.
-func CaptureRange(ctx context.Context, directory, requestedComparison string, objectStore *snapshot.ObjectStore) (snapshot.Capture, error) {
+func CaptureRange(
+	ctx context.Context,
+	directory, requestedComparison string,
+	objectStore *snapshot.ObjectStore,
+) (snapshot.Capture, error) {
 	return CaptureRangeWithOptions(ctx, directory, requestedComparison, objectStore, CaptureOptions{})
 }
 
 // CaptureRangeWithOptions is CaptureRange with injectable capture metadata.
-func CaptureRangeWithOptions(ctx context.Context, directory, requestedComparison string, objectStore *snapshot.ObjectStore, options CaptureOptions) (snapshot.Capture, error) {
+func CaptureRangeWithOptions(
+	ctx context.Context,
+	directory, requestedComparison string,
+	objectStore *snapshot.ObjectStore,
+	options CaptureOptions,
+) (snapshot.Capture, error) {
 	if objectStore == nil {
 		return snapshot.Capture{}, fmt.Errorf("capture Git range: object store is nil")
 	}
@@ -357,7 +421,12 @@ func CaptureRangeWithOptions(ctx context.Context, directory, requestedComparison
 	if comparisonKind == snapshot.ComparisonThreeDot {
 		mergeBaseOID, err = resolveMergeBase(repository.Git, baseOID, targetOID)
 		if err != nil {
-			return snapshot.Capture{}, fmt.Errorf("resolve merge base for %q...%q: %w", baseRevision, targetRevision, err)
+			return snapshot.Capture{}, fmt.Errorf(
+				"resolve merge base for %q...%q: %w",
+				baseRevision,
+				targetRevision,
+				err,
+			)
 		}
 		effectiveBaseOID = plumbing.NewHash(mergeBaseOID)
 	}
@@ -429,13 +498,22 @@ func CaptureRangeWithOptions(ctx context.Context, directory, requestedComparison
 
 // CaptureWorktree captures HEAD, the index, and the final working tree into
 // MIRE-owned objects without changing the target repository.
-func CaptureWorktree(ctx context.Context, directory string, objectStore *snapshot.ObjectStore) (snapshot.Capture, error) {
+func CaptureWorktree(
+	ctx context.Context,
+	directory string,
+	objectStore *snapshot.ObjectStore,
+) (snapshot.Capture, error) {
 	return CaptureWorktreeWithOptions(ctx, directory, objectStore, CaptureOptions{})
 }
 
 // CaptureWorktreeWithOptions is CaptureWorktree with injectable capture
 // metadata and a bounded retry count for a changing working tree.
-func CaptureWorktreeWithOptions(ctx context.Context, directory string, objectStore *snapshot.ObjectStore, options CaptureOptions) (snapshot.Capture, error) {
+func CaptureWorktreeWithOptions(
+	ctx context.Context,
+	directory string,
+	objectStore *snapshot.ObjectStore,
+	options CaptureOptions,
+) (snapshot.Capture, error) {
 	if objectStore == nil {
 		return snapshot.Capture{}, fmt.Errorf("capture Git worktree: object store is nil")
 	}
@@ -472,7 +550,8 @@ func CaptureWorktreeWithOptions(ctx context.Context, directory string, objectSto
 	for attempt := 1; attempt <= attempts; attempt++ {
 		captured, err := captureWorktreeAttempt(ctx, repository, objectStore, objectFormat, policyHash, limits, clock)
 		if err != nil {
-			if errors.Is(err, ErrTornWorktree) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, ErrTornWorktree) && !errors.Is(err, context.Canceled) &&
+				!errors.Is(err, context.DeadlineExceeded) {
 				lastErr = err
 				continue
 			}
@@ -492,7 +571,14 @@ func CaptureWorktreeWithOptions(ctx context.Context, directory string, objectSto
 
 const worktreeIgnorePolicy = "Git ignore rules exclude ignored untracked paths; tracked paths remain captured."
 
-func captureWorktreeAttempt(ctx context.Context, repository *Repository, objectStore *snapshot.ObjectStore, objectFormat, policyHash string, limits CaptureLimits, clock func() time.Time) (snapshot.Capture, error) {
+func captureWorktreeAttempt(
+	ctx context.Context,
+	repository *Repository,
+	objectStore *snapshot.ObjectStore,
+	objectFormat, policyHash string,
+	limits CaptureLimits,
+	clock func() time.Time,
+) (snapshot.Capture, error) {
 	head, err := repository.Git.Head()
 	if err != nil {
 		return snapshot.Capture{}, fmt.Errorf("read HEAD: %w", err)
@@ -542,7 +628,15 @@ func captureWorktreeAttempt(ctx context.Context, repository *Repository, objectS
 	if err != nil {
 		return snapshot.Capture{}, fmt.Errorf("capture index: %w", err)
 	}
-	worktreeEntries, err := captureWorktreeEntries(ctx, repository.Root, headEntries, indexEntries, paths, objectStore, budget)
+	worktreeEntries, err := captureWorktreeEntries(
+		ctx,
+		repository.Root,
+		headEntries,
+		indexEntries,
+		paths,
+		objectStore,
+		budget,
+	)
 	if err != nil {
 		return snapshot.Capture{}, fmt.Errorf("capture final worktree: %w", err)
 	}
@@ -625,12 +719,23 @@ func digestBytes(content []byte) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func captureIndex(ctx context.Context, repository *git.Repository, gitIndex *index.Index, objectStore *snapshot.ObjectStore) ([]snapshot.Entry, error) {
+func captureIndex(
+	ctx context.Context,
+	repository *git.Repository,
+	gitIndex *index.Index,
+	objectStore *snapshot.ObjectStore,
+) ([]snapshot.Entry, error) {
 	limits, _ := normalizeCaptureLimits(CaptureLimits{})
 	return captureIndexWithBudget(ctx, repository, gitIndex, objectStore, newCaptureBudget(limits))
 }
 
-func captureIndexWithBudget(ctx context.Context, repository *git.Repository, gitIndex *index.Index, objectStore *snapshot.ObjectStore, budget *captureBudget) ([]snapshot.Entry, error) {
+func captureIndexWithBudget(
+	ctx context.Context,
+	repository *git.Repository,
+	gitIndex *index.Index,
+	objectStore *snapshot.ObjectStore,
+	budget *captureBudget,
+) ([]snapshot.Entry, error) {
 	if gitIndex == nil {
 		return nil, fmt.Errorf("Git index is nil")
 	}
@@ -644,7 +749,10 @@ func captureIndexWithBudget(ctx context.Context, repository *git.Repository, git
 			return nil, fmt.Errorf("Git index contains unresolved merge entries; resolve the index before reviewing")
 		}
 		if indexEntry.IntentToAdd {
-			return nil, fmt.Errorf("Git index contains intent-to-add entry %q; stage the file before reviewing", indexEntry.Name)
+			return nil, fmt.Errorf(
+				"Git index contains intent-to-add entry %q; stage the file before reviewing",
+				indexEntry.Name,
+			)
 		}
 		entryPath := filepath.ToSlash(indexEntry.Name)
 		if err := snapshot.ValidateRepositoryPath(entryPath); err != nil {
@@ -659,7 +767,10 @@ func captureIndexWithBudget(ctx context.Context, repository *git.Repository, git
 				return nil, err
 			}
 			entries = append(entries, snapshot.Entry{
-				Path: entryPath, Kind: snapshot.EntryKindSubmodule, Mode: uint32(indexEntry.Mode), GitOID: indexEntry.Hash.String(),
+				Path:   entryPath,
+				Kind:   snapshot.EntryKindSubmodule,
+				Mode:   uint32(indexEntry.Mode),
+				GitOID: indexEntry.Hash.String(),
 			})
 			continue
 		}
@@ -733,7 +844,14 @@ func worktreeInventory(headEntries []snapshot.Entry, gitIndex *index.Index, stat
 	return result, nil
 }
 
-func captureWorktreeEntries(ctx context.Context, root string, headEntries, indexEntries []snapshot.Entry, paths []string, objectStore *snapshot.ObjectStore, budget *captureBudget) ([]snapshot.Entry, error) {
+func captureWorktreeEntries(
+	ctx context.Context,
+	root string,
+	headEntries, indexEntries []snapshot.Entry,
+	paths []string,
+	objectStore *snapshot.ObjectStore,
+	budget *captureBudget,
+) ([]snapshot.Entry, error) {
 	expected := make(map[string]snapshot.Entry, len(headEntries)+len(indexEntries))
 	for _, entry := range headEntries {
 		expected[entry.Path] = entry
@@ -757,7 +875,10 @@ func captureWorktreeEntries(ctx context.Context, root string, headEntries, index
 		prior, hasPrior := expected[entryPath]
 		if info.IsDir() {
 			if !hasPrior || prior.Kind != snapshot.EntryKindSubmodule {
-				return nil, fmt.Errorf("working-tree path %q is a directory; only clean submodules may be captured as directories", entryPath)
+				return nil, fmt.Errorf(
+					"working-tree path %q is a directory; only clean submodules may be captured as directories",
+					entryPath,
+				)
 			}
 			if err := verifySubmodule(root, entryPath, prior.GitOID); err != nil {
 				return nil, err
@@ -765,11 +886,22 @@ func captureWorktreeEntries(ctx context.Context, root string, headEntries, index
 			if _, err := budget.reserve(entryPath, 0); err != nil {
 				return nil, err
 			}
-			entries = append(entries, snapshot.Entry{Path: entryPath, Kind: snapshot.EntryKindSubmodule, Mode: uint32(filemode.Submodule), GitOID: prior.GitOID})
+			entries = append(
+				entries,
+				snapshot.Entry{
+					Path:   entryPath,
+					Kind:   snapshot.EntryKindSubmodule,
+					Mode:   uint32(filemode.Submodule),
+					GitOID: prior.GitOID,
+				},
+			)
 			continue
 		}
 		if !info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 {
-			return nil, fmt.Errorf("working-tree path %q is a special device or unsupported filesystem entry", entryPath)
+			return nil, fmt.Errorf(
+				"working-tree path %q is a special device or unsupported filesystem entry",
+				entryPath,
+			)
 		}
 		mode, err := filemode.NewFromOSFileMode(info.Mode())
 		if err != nil {
@@ -786,11 +918,25 @@ func captureWorktreeEntries(ctx context.Context, root string, headEntries, index
 				}
 				return nil, fmt.Errorf("read symlink %q: %w", entryPath, err)
 			}
-			stored, err := putCapturedObject(ctx, objectStore, budget, entryPath, strings.NewReader(target), int64(len(target)))
+			stored, err := putCapturedObject(
+				ctx,
+				objectStore,
+				budget,
+				entryPath,
+				strings.NewReader(target),
+				int64(len(target)),
+			)
 			if err != nil {
 				return nil, fmt.Errorf("store symlink %q: %w", entryPath, err)
 			}
-			entry := snapshot.Entry{Path: entryPath, Kind: snapshot.EntryKindSymlink, Mode: uint32(mode), Size: stored.Size, ContentDigest: stored.Digest, SymlinkTarget: target}
+			entry := snapshot.Entry{
+				Path:          entryPath,
+				Kind:          snapshot.EntryKindSymlink,
+				Mode:          uint32(mode),
+				Size:          stored.Size,
+				ContentDigest: stored.Digest,
+				SymlinkTarget: target,
+			}
 			if hasPrior && sameWorktreeContent(prior, entry) {
 				entry.GitOID = prior.GitOID
 			}
@@ -815,7 +961,13 @@ func captureWorktreeEntries(ctx context.Context, root string, headEntries, index
 		if closeErr != nil {
 			return nil, fmt.Errorf("close working-tree file %q: %w", entryPath, closeErr)
 		}
-		entry := snapshot.Entry{Path: entryPath, Kind: snapshot.EntryKindFile, Mode: uint32(mode), Size: stored.Size, ContentDigest: stored.Digest}
+		entry := snapshot.Entry{
+			Path:          entryPath,
+			Kind:          snapshot.EntryKindFile,
+			Mode:          uint32(mode),
+			Size:          stored.Size,
+			ContentDigest: stored.Digest,
+		}
 		if hasPrior && sameWorktreeContent(prior, entry) {
 			entry.GitOID = prior.GitOID
 		}
@@ -967,7 +1119,11 @@ func verifySubmodule(root, entryPath, expectedOID string) error {
 		if readErr == nil && len(contents) == 0 {
 			return nil
 		}
-		return fmt.Errorf("%w: %q is not initialized cleanly; review that repository separately", ErrDirtySubmodule, entryPath)
+		return fmt.Errorf(
+			"%w: %q is not initialized cleanly; review that repository separately",
+			ErrDirtySubmodule,
+			entryPath,
+		)
 	}
 	defer nested.Close()
 	nestedWorktree, err := nested.Worktree()
@@ -979,11 +1135,19 @@ func verifySubmodule(root, entryPath, expectedOID string) error {
 		return fmt.Errorf("%w: read %q status: %v", ErrDirtySubmodule, entryPath, err)
 	}
 	if !nestedStatus.IsClean() {
-		return fmt.Errorf("%w: %q has uncommitted changes; review that repository separately", ErrDirtySubmodule, entryPath)
+		return fmt.Errorf(
+			"%w: %q has uncommitted changes; review that repository separately",
+			ErrDirtySubmodule,
+			entryPath,
+		)
 	}
 	nestedHead, err := nested.Head()
 	if err != nil || nestedHead.Hash().String() != expectedOID {
-		return fmt.Errorf("%w: %q HEAD does not match the recorded Git link; review that repository separately", ErrDirtySubmodule, entryPath)
+		return fmt.Errorf(
+			"%w: %q HEAD does not match the recorded Git link; review that repository separately",
+			ErrDirtySubmodule,
+			entryPath,
+		)
 	}
 	return nil
 }
@@ -1055,7 +1219,13 @@ func resolveMergeBase(repository *git.Repository, baseOID, targetOID plumbing.Ha
 			identifiers = append(identifiers, mergeBase.Hash.String())
 		}
 		sort.Strings(identifiers)
-		return "", fmt.Errorf("%w for %s and %s: %s", ErrMultipleMergeBases, baseOID, targetOID, strings.Join(identifiers, ", "))
+		return "", fmt.Errorf(
+			"%w for %s and %s: %s",
+			ErrMultipleMergeBases,
+			baseOID,
+			targetOID,
+			strings.Join(identifiers, ", "),
+		)
 	}
 	if mergeBases[0] == nil || mergeBases[0].Hash.IsZero() {
 		return "", fmt.Errorf("%w: Git returned an empty object ID", ErrNoMergeBase)
@@ -1112,7 +1282,11 @@ func detectAmbiguousRevision(repository *git.Repository, expression string) erro
 			if strings.HasPrefix(object.Hash().String(), strings.ToLower(expression)) {
 				matches++
 				if matches > 1 {
-					return fmt.Errorf("%w: abbreviated object ID %q matches multiple commits", ErrAmbiguousRevision, expression)
+					return fmt.Errorf(
+						"%w: abbreviated object ID %q matches multiple commits",
+						ErrAmbiguousRevision,
+						expression,
+					)
 				}
 			}
 		}
@@ -1136,7 +1310,8 @@ func matchingReferences(repository *git.Repository, expression string) ([]string
 			return nil, err
 		}
 		name := reference.Name().String()
-		if name == expression || name == "refs/heads/"+expression || name == "refs/tags/"+expression || name == "refs/remotes/"+expression {
+		if name == expression || name == "refs/heads/"+expression || name == "refs/tags/"+expression ||
+			name == "refs/remotes/"+expression {
 			candidates = append(candidates, name)
 		}
 	}
@@ -1182,7 +1357,12 @@ func formatHexSize(format string) int {
 	return 40
 }
 
-func planTree(ctx context.Context, repository *git.Repository, commitOID plumbing.Hash, plan *capturePlan) ([]snapshot.Entry, error) {
+func planTree(
+	ctx context.Context,
+	repository *git.Repository,
+	commitOID plumbing.Hash,
+	plan *capturePlan,
+) ([]snapshot.Entry, error) {
 	commit, err := repository.CommitObject(commitOID)
 	if err != nil {
 		return nil, err
@@ -1199,7 +1379,14 @@ func planTree(ctx context.Context, repository *git.Repository, commitOID plumbin
 	return entries, nil
 }
 
-func walkTreePlan(ctx context.Context, repository *git.Repository, tree *object.Tree, prefix string, plan *capturePlan, entries *[]snapshot.Entry) error {
+func walkTreePlan(
+	ctx context.Context,
+	repository *git.Repository,
+	tree *object.Tree,
+	prefix string,
+	plan *capturePlan,
+	entries *[]snapshot.Entry,
+) error {
 	for index := range tree.Entries {
 		select {
 		case <-ctx.Done():
@@ -1207,7 +1394,8 @@ func walkTreePlan(ctx context.Context, repository *git.Repository, tree *object.
 		default:
 		}
 		treeEntry := tree.Entries[index]
-		if treeEntry.Name == "" || treeEntry.Name == "." || treeEntry.Name == ".." || strings.ContainsAny(treeEntry.Name, "/\\\x00") {
+		if treeEntry.Name == "" || treeEntry.Name == "." || treeEntry.Name == ".." ||
+			strings.ContainsAny(treeEntry.Name, "/\\\x00") {
 			return fmt.Errorf("capture plan: invalid Git tree entry name %q", treeEntry.Name)
 		}
 		entryPath := treeEntry.Name
@@ -1230,7 +1418,15 @@ func walkTreePlan(ctx context.Context, repository *git.Repository, tree *object.
 			if err := plan.add(entryPath, 0); err != nil {
 				return err
 			}
-			*entries = append(*entries, snapshot.Entry{Path: entryPath, Kind: snapshot.EntryKindSubmodule, Mode: uint32(treeEntry.Mode), GitOID: treeEntry.Hash.String()})
+			*entries = append(
+				*entries,
+				snapshot.Entry{
+					Path:   entryPath,
+					Kind:   snapshot.EntryKindSubmodule,
+					Mode:   uint32(treeEntry.Mode),
+					GitOID: treeEntry.Hash.String(),
+				},
+			)
 		case filemode.Regular, filemode.Deprecated, filemode.Executable, filemode.Symlink:
 			blob, err := repository.BlobObject(treeEntry.Hash)
 			if err != nil {
@@ -1243,7 +1439,16 @@ func walkTreePlan(ctx context.Context, repository *git.Repository, tree *object.
 			if treeEntry.Mode == filemode.Symlink {
 				kind = snapshot.EntryKindSymlink
 			}
-			*entries = append(*entries, snapshot.Entry{Path: entryPath, Kind: kind, Mode: uint32(treeEntry.Mode), Size: blob.Size, GitOID: treeEntry.Hash.String()})
+			*entries = append(
+				*entries,
+				snapshot.Entry{
+					Path:   entryPath,
+					Kind:   kind,
+					Mode:   uint32(treeEntry.Mode),
+					Size:   blob.Size,
+					GitOID: treeEntry.Hash.String(),
+				},
+			)
 		default:
 			return fmt.Errorf("capture plan %q: unsupported Git tree mode %s", entryPath, treeEntry.Mode)
 		}
@@ -1251,7 +1456,12 @@ func walkTreePlan(ctx context.Context, repository *git.Repository, tree *object.
 	return nil
 }
 
-func planIndex(ctx context.Context, repository *git.Repository, gitIndex *index.Index, plan *capturePlan) ([]snapshot.Entry, error) {
+func planIndex(
+	ctx context.Context,
+	repository *git.Repository,
+	gitIndex *index.Index,
+	plan *capturePlan,
+) ([]snapshot.Entry, error) {
 	if gitIndex == nil {
 		return nil, fmt.Errorf("Git index is nil")
 	}
@@ -1270,7 +1480,10 @@ func planIndex(ctx context.Context, repository *git.Repository, gitIndex *index.
 			return nil, fmt.Errorf("Git index contains unresolved merge entries; resolve the index before reviewing")
 		}
 		if indexEntry.IntentToAdd {
-			return nil, fmt.Errorf("Git index contains intent-to-add entry %q; stage the file before reviewing", indexEntry.Name)
+			return nil, fmt.Errorf(
+				"Git index contains intent-to-add entry %q; stage the file before reviewing",
+				indexEntry.Name,
+			)
 		}
 		entryPath := filepath.ToSlash(indexEntry.Name)
 		if err := snapshot.ValidateRepositoryPath(entryPath); err != nil {
@@ -1284,7 +1497,15 @@ func planIndex(ctx context.Context, repository *git.Repository, gitIndex *index.
 			if err := plan.add(entryPath, 0); err != nil {
 				return nil, err
 			}
-			entries = append(entries, snapshot.Entry{Path: entryPath, Kind: snapshot.EntryKindSubmodule, Mode: uint32(indexEntry.Mode), GitOID: indexEntry.Hash.String()})
+			entries = append(
+				entries,
+				snapshot.Entry{
+					Path:   entryPath,
+					Kind:   snapshot.EntryKindSubmodule,
+					Mode:   uint32(indexEntry.Mode),
+					GitOID: indexEntry.Hash.String(),
+				},
+			)
 			continue
 		}
 		if indexEntry.Hash.IsZero() {
@@ -1301,13 +1522,28 @@ func planIndex(ctx context.Context, repository *git.Repository, gitIndex *index.
 		if indexEntry.Mode == filemode.Symlink {
 			kind = snapshot.EntryKindSymlink
 		}
-		entries = append(entries, snapshot.Entry{Path: entryPath, Kind: kind, Mode: uint32(indexEntry.Mode), Size: blob.Size, GitOID: indexEntry.Hash.String()})
+		entries = append(
+			entries,
+			snapshot.Entry{
+				Path:   entryPath,
+				Kind:   kind,
+				Mode:   uint32(indexEntry.Mode),
+				Size:   blob.Size,
+				GitOID: indexEntry.Hash.String(),
+			},
+		)
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	return entries, nil
 }
 
-func planWorktree(ctx context.Context, root string, headEntries, indexEntries []snapshot.Entry, paths []string, plan *capturePlan) error {
+func planWorktree(
+	ctx context.Context,
+	root string,
+	headEntries, indexEntries []snapshot.Entry,
+	paths []string,
+	plan *capturePlan,
+) error {
 	expected := make(map[string]snapshot.Entry, len(headEntries)+len(indexEntries))
 	for _, entry := range headEntries {
 		expected[entry.Path] = entry
@@ -1335,7 +1571,10 @@ func planWorktree(ctx context.Context, root string, headEntries, indexEntries []
 		prior, hasPrior := expected[entryPath]
 		if info.IsDir() {
 			if !hasPrior || prior.Kind != snapshot.EntryKindSubmodule {
-				return fmt.Errorf("working-tree path %q is a directory; only clean submodules may be captured as directories", entryPath)
+				return fmt.Errorf(
+					"working-tree path %q is a directory; only clean submodules may be captured as directories",
+					entryPath,
+				)
 			}
 			if err := verifySubmodule(root, entryPath, prior.GitOID); err != nil {
 				return err
@@ -1372,12 +1611,23 @@ func planWorktree(ctx context.Context, root string, headEntries, indexEntries []
 	return nil
 }
 
-func captureTree(ctx context.Context, repository *git.Repository, commitOID plumbing.Hash, objectStore *snapshot.ObjectStore) ([]snapshot.Entry, error) {
+func captureTree(
+	ctx context.Context,
+	repository *git.Repository,
+	commitOID plumbing.Hash,
+	objectStore *snapshot.ObjectStore,
+) ([]snapshot.Entry, error) {
 	limits, _ := normalizeCaptureLimits(CaptureLimits{})
 	return captureTreeWithBudget(ctx, repository, commitOID, objectStore, newCaptureBudget(limits))
 }
 
-func captureTreeWithBudget(ctx context.Context, repository *git.Repository, commitOID plumbing.Hash, objectStore *snapshot.ObjectStore, budget *captureBudget) ([]snapshot.Entry, error) {
+func captureTreeWithBudget(
+	ctx context.Context,
+	repository *git.Repository,
+	commitOID plumbing.Hash,
+	objectStore *snapshot.ObjectStore,
+	budget *captureBudget,
+) ([]snapshot.Entry, error) {
 	commit, err := repository.CommitObject(commitOID)
 	if err != nil {
 		return nil, err
@@ -1394,12 +1644,27 @@ func captureTreeWithBudget(ctx context.Context, repository *git.Repository, comm
 	return entries, nil
 }
 
-func walkTree(ctx context.Context, repository *git.Repository, tree *object.Tree, prefix string, objectStore *snapshot.ObjectStore, entries *[]snapshot.Entry) error {
+func walkTree(
+	ctx context.Context,
+	repository *git.Repository,
+	tree *object.Tree,
+	prefix string,
+	objectStore *snapshot.ObjectStore,
+	entries *[]snapshot.Entry,
+) error {
 	limits, _ := normalizeCaptureLimits(CaptureLimits{})
 	return walkTreeWithBudget(ctx, repository, tree, prefix, objectStore, newCaptureBudget(limits), entries)
 }
 
-func walkTreeWithBudget(ctx context.Context, repository *git.Repository, tree *object.Tree, prefix string, objectStore *snapshot.ObjectStore, budget *captureBudget, entries *[]snapshot.Entry) error {
+func walkTreeWithBudget(
+	ctx context.Context,
+	repository *git.Repository,
+	tree *object.Tree,
+	prefix string,
+	objectStore *snapshot.ObjectStore,
+	budget *captureBudget,
+	entries *[]snapshot.Entry,
+) error {
 	for index := range tree.Entries {
 		select {
 		case <-ctx.Done():

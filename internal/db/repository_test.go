@@ -2,11 +2,33 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestRepositoryIdentityEmbeddingPreservesJSONShape(t *testing.T) {
+	t.Parallel()
+
+	data, err := json.Marshal(Repository{
+		ID: "repository-id",
+		RepositoryIdentity: RepositoryIdentity{
+			CanonicalIdentity: "/workspaces/example",
+			DisplayName:       "example",
+			DiscoveredGitDir:  "/workspaces/example/.git",
+		},
+		CreatedAt: time.Date(2026, time.July, 14, 12, 30, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	want := `{"ID":"repository-id","CanonicalIdentity":"/workspaces/example","DisplayName":"example","DiscoveredGitDir":"/workspaces/example/.git","CreatedAt":"2026-07-14T12:30:00Z"}`
+	if string(data) != want {
+		t.Fatalf("repository JSON = %s, want %s", data, want)
+	}
+}
 
 func TestRepositoryStoreSessionLifecycleSurvivesRestart(t *testing.T) {
 	t.Parallel()
@@ -83,6 +105,20 @@ func TestRepositoryStoreSessionLifecycleSurvivesRestart(t *testing.T) {
 	}
 	if loaded.Title != "Initial review" {
 		t.Fatalf("loaded title = %q, want Initial review", loaded.Title)
+	}
+	repository, err := restartedStore.GetRepositoryForSession(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("GetRepositoryForSession() error = %v", err)
+	}
+	if repository.ID != session.RepositoryID || repository.RepositoryIdentity != identity ||
+		!repository.CreatedAt.Equal(createdAt) {
+		t.Fatalf(
+			"loaded repository = %#v, want ID %q, identity %#v, and CreatedAt %s",
+			repository,
+			session.RepositoryID,
+			identity,
+			createdAt,
+		)
 	}
 
 	if err := restartedStore.DeleteSession(context.Background(), session.ID); err != nil {

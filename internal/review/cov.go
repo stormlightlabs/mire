@@ -38,7 +38,10 @@ func (c ReviewCoverage) clone() ReviewCoverage {
 func (c ReviewCoverage) normalize() ReviewCoverage {
 	c.ExaminedFiles = uniqueStringsSorted(c.ExaminedFiles)
 	c.ExaminedHunks = uniqueStringsSorted(c.ExaminedHunks)
-	sort.SliceStable(c.RetrievedArtifacts, func(i, j int) bool { return c.RetrievedArtifacts[i].ID < c.RetrievedArtifacts[j].ID })
+	sort.SliceStable(
+		c.RetrievedArtifacts,
+		func(i, j int) bool { return c.RetrievedArtifacts[i].ID < c.RetrievedArtifacts[j].ID },
+	)
 	sort.SliceStable(c.Passes, func(i, j int) bool {
 		if c.Passes[i].Order != c.Passes[j].Order {
 			return c.Passes[i].Order < c.Passes[j].Order

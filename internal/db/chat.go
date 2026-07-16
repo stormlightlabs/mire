@@ -30,7 +30,11 @@ var (
 
 // RegisterDiffAnchors records the exact hunk inventory produced from a frozen
 // change model. Later chat requests must match one of these immutable anchors.
-func (store *RepositoryStore) RegisterDiffAnchors(ctx context.Context, roundID, snapshotID string, anchors []review.Anchor) error {
+func (store *RepositoryStore) RegisterDiffAnchors(
+	ctx context.Context,
+	roundID, snapshotID string,
+	anchors []review.Anchor,
+) error {
 	if err := store.validate(); err != nil {
 		return err
 	}
@@ -103,19 +107,27 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, roundID, snapshotID, anchor.Side, anchor.Path,
 
 // RegisterChangeModelAnchors registers every hunk from a canonical change
 // model, making the model's exact diff selections available to chat.
-func (store *RepositoryStore) RegisterChangeModelAnchors(ctx context.Context, change review.ChangeModel, roundID string) error {
+func (store *RepositoryStore) RegisterChangeModelAnchors(
+	ctx context.Context,
+	change review.ChangeModel,
+	roundID string,
+) error {
 	anchors := make([]review.Anchor, 0)
 	for _, file := range change.Files {
 		for _, hunk := range file.Hunks {
 			if file.TargetPath != "" {
-				anchors = append(anchors, review.Anchor{SnapshotID: change.SnapshotID, Side: snapshot.TreeSideTarget,
+				anchors = append(anchors, review.Anchor{
+					SnapshotID: change.SnapshotID, Side: snapshot.TreeSideTarget,
 					Layer: snapshot.TreeSideTarget, Path: file.TargetPath, BlobDigest: file.TargetDigest,
-					HunkID: hunk.ID, HunkDigest: hunk.Digest, ContextDigest: contextDigestFromHunk(hunk)})
+					HunkID: hunk.ID, HunkDigest: hunk.Digest, ContextDigest: contextDigestFromHunk(hunk),
+				})
 			}
 			if file.BasePath != "" && file.BasePath != file.TargetPath {
-				anchors = append(anchors, review.Anchor{SnapshotID: change.SnapshotID, Side: snapshot.TreeSideBase,
+				anchors = append(anchors, review.Anchor{
+					SnapshotID: change.SnapshotID, Side: snapshot.TreeSideBase,
 					Layer: snapshot.TreeSideBase, Path: file.BasePath, BlobDigest: file.BaseDigest,
-					HunkID: hunk.ID, HunkDigest: hunk.Digest, ContextDigest: contextDigestFromHunk(hunk)})
+					HunkID: hunk.ID, HunkDigest: hunk.Digest, ContextDigest: contextDigestFromHunk(hunk),
+				})
 			}
 		}
 	}
@@ -160,7 +172,10 @@ ORDER BY side ASC, path ASC, hunk_id ASC`, strings.TrimSpace(roundID))
 
 // ValidateChatBinding resolves a user binding against the session's current
 // round, finding revisions, and registered immutable diff anchors.
-func (store *RepositoryStore) ValidateChatBinding(ctx context.Context, binding review.ChatBinding) (review.ChatBinding, error) {
+func (store *RepositoryStore) ValidateChatBinding(
+	ctx context.Context,
+	binding review.ChatBinding,
+) (review.ChatBinding, error) {
 	if err := store.validate(); err != nil {
 		return review.ChatBinding{}, err
 	}
@@ -179,7 +194,9 @@ func (store *RepositoryStore) ValidateChatBinding(ctx context.Context, binding r
 		return review.ChatBinding{}, fmt.Errorf("validate chat binding: %w", err)
 	}
 	if session.CurrentRoundID != binding.RoundID {
-		return review.ChatBinding{}, errors.New("validate chat binding: context must belong to the session's active round")
+		return review.ChatBinding{}, errors.New(
+			"validate chat binding: context must belong to the session's active round",
+		)
 	}
 	round, err := store.GetRound(ctx, binding.RoundID)
 	if err != nil {
@@ -209,7 +226,10 @@ func (store *RepositoryStore) ValidateChatBinding(ctx context.Context, binding r
 	return canonical, nil
 }
 
-func (store *RepositoryStore) validateStoredChatBinding(ctx context.Context, binding review.ChatBinding) (review.ChatBinding, error) {
+func (store *RepositoryStore) validateStoredChatBinding(
+	ctx context.Context,
+	binding review.ChatBinding,
+) (review.ChatBinding, error) {
 	binding.Digest = ""
 	canonical, err := review.NormalizeChatBinding(binding)
 	if err != nil {
@@ -241,15 +261,25 @@ func (store *RepositoryStore) validateChatReferences(ctx context.Context, bindin
 	for _, reference := range binding.Context.References {
 		switch reference.Kind {
 		case review.ChatReferenceFindingRevision:
-			finding, err := store.GetFindingRevision(ctx, reference.FindingRevision.FindingID, reference.FindingRevision.Revision)
+			finding, err := store.GetFindingRevision(
+				ctx,
+				reference.FindingRevision.FindingID,
+				reference.FindingRevision.Revision,
+			)
 			if err != nil {
 				return fmt.Errorf("validate chat finding context: %w", err)
 			}
-			if finding.SessionID != binding.SessionID || finding.RoundID != binding.RoundID || finding.SnapshotID != binding.SnapshotID {
+			if finding.SessionID != binding.SessionID || finding.RoundID != binding.RoundID ||
+				finding.SnapshotID != binding.SnapshotID {
 				return errors.New("chat finding reference does not belong to the active round and snapshot")
 			}
 		case review.ChatReferenceDiffAnchor:
-			if err := store.validateRegisteredAnchor(ctx, binding.RoundID, binding.SnapshotID, *reference.DiffAnchor); err != nil {
+			if err := store.validateRegisteredAnchor(
+				ctx,
+				binding.RoundID,
+				binding.SnapshotID,
+				*reference.DiffAnchor,
+			); err != nil {
 				return err
 			}
 		default:
@@ -259,7 +289,11 @@ func (store *RepositoryStore) validateChatReferences(ctx context.Context, bindin
 	return nil
 }
 
-func (store *RepositoryStore) validateRegisteredAnchor(ctx context.Context, roundID, snapshotID string, anchor review.Anchor) error {
+func (store *RepositoryStore) validateRegisteredAnchor(
+	ctx context.Context,
+	roundID, snapshotID string,
+	anchor review.Anchor,
+) error {
 	data, err := json.Marshal(anchor)
 	if err != nil {
 		return fmt.Errorf("validate chat diff anchor: encode: %w", err)
@@ -283,7 +317,10 @@ WHERE round_id = ? AND snapshot_id = ? AND side = ? AND path = ? AND hunk_id = ?
 
 // SaveChatMessage appends one immutable chat message after validating its
 // stored round binding. It never rewrites an existing message ID.
-func (store *RepositoryStore) SaveChatMessage(ctx context.Context, message review.ChatMessage) (review.ChatMessage, error) {
+func (store *RepositoryStore) SaveChatMessage(
+	ctx context.Context,
+	message review.ChatMessage,
+) (review.ChatMessage, error) {
 	if err := store.validate(); err != nil {
 		return review.ChatMessage{}, err
 	}
@@ -299,7 +336,15 @@ func (store *RepositoryStore) SaveChatMessage(ctx context.Context, message revie
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = store.now().UTC()
 	}
-	canonicalBinding, err := store.validateStoredChatBinding(ctx, review.ChatBinding{SessionID: message.SessionID, RoundID: message.RoundID, SnapshotID: message.SnapshotID, Context: message.Context})
+	canonicalBinding, err := store.validateStoredChatBinding(
+		ctx,
+		review.ChatBinding{
+			SessionID:  message.SessionID,
+			RoundID:    message.RoundID,
+			SnapshotID: message.SnapshotID,
+			Context:    message.Context,
+		},
+	)
 	if err != nil {
 		return review.ChatMessage{}, fmt.Errorf("save chat message: %w", err)
 	}
@@ -312,10 +357,22 @@ func (store *RepositoryStore) SaveChatMessage(ctx context.Context, message revie
 	if err != nil {
 		return review.ChatMessage{}, fmt.Errorf("encode chat message: %w", err)
 	}
-	_, err = store.database.ExecContext(ctx, `
+	_, err = store.database.ExecContext(
+		ctx,
+		`
 INSERT INTO chat_messages (id, session_id, round_id, snapshot_id, role, digest, message_json, producer_run_id, reply_to, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, message.ID, message.SessionID, message.RoundID, message.SnapshotID,
-		message.Role, message.Digest, data, message.ProducerRunID, message.ReplyTo, shared.TimestampString(message.CreatedAt.UTC()))
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		message.ID,
+		message.SessionID,
+		message.RoundID,
+		message.SnapshotID,
+		message.Role,
+		message.Digest,
+		data,
+		message.ProducerRunID,
+		message.ReplyTo,
+		shared.TimestampString(message.CreatedAt.UTC()),
+	)
 	if err != nil {
 		return review.ChatMessage{}, fmt.Errorf("insert chat message %q: %w", message.ID, err)
 	}
@@ -365,7 +422,8 @@ func (store *RepositoryStore) GetChatMessage(ctx context.Context, messageID stri
 		ctx = context.Background()
 	}
 	var data, expected string
-	err := store.database.QueryRowContext(ctx, `SELECT message_json, digest FROM chat_messages WHERE id = ?`, strings.TrimSpace(messageID)).Scan(&data, &expected)
+	err := store.database.QueryRowContext(ctx, `SELECT message_json, digest FROM chat_messages WHERE id = ?`, strings.TrimSpace(messageID)).
+		Scan(&data, &expected)
 	if errors.Is(err, sql.ErrNoRows) {
 		return review.ChatMessage{}, fmt.Errorf("%w: %q", ErrChatMessageNotFound, messageID)
 	}
@@ -376,7 +434,10 @@ func (store *RepositoryStore) GetChatMessage(ctx context.Context, messageID stri
 }
 
 // CreateChatRun persists a queued run with immutable binding and input.
-func (store *RepositoryStore) CreateChatRun(ctx context.Context, record review.ChatRunRecord) (review.ChatRunRecord, error) {
+func (store *RepositoryStore) CreateChatRun(
+	ctx context.Context,
+	record review.ChatRunRecord,
+) (review.ChatRunRecord, error) {
 	if err := store.validate(); err != nil {
 		return review.ChatRunRecord{}, err
 	}
@@ -406,7 +467,10 @@ func (store *RepositoryStore) CreateChatRun(ctx context.Context, record review.C
 	if err != nil {
 		return review.ChatRunRecord{}, fmt.Errorf("create chat run: %w", err)
 	}
-	if message.Role != review.MessageRoleUser || message.SessionID != record.Run.SessionID || message.RoundID != record.Run.RoundID || message.SnapshotID != record.Run.SnapshotID || !sameJSON(message.Context.Primary, record.Binding.Context.Primary) {
+	if message.Role != review.MessageRoleUser || message.SessionID != record.Run.SessionID ||
+		message.RoundID != record.Run.RoundID ||
+		message.SnapshotID != record.Run.SnapshotID ||
+		!sameJSON(message.Context.Primary, record.Binding.Context.Primary) {
 		return review.ChatRunRecord{}, errors.New("create chat run: user message does not match run binding")
 	}
 	runJSON, inputJSON, bindingJSON, responseJSON, err := encodeChatRun(record)
@@ -437,12 +501,20 @@ func (store *RepositoryStore) UpdateChatRun(ctx context.Context, record review.C
 	if err != nil {
 		return err
 	}
-	if existing.UserMessageID != record.UserMessageID || !sameJSON(existing.Binding, record.Binding) || !sameJSON(existing.Input, record.Input) || existing.Run.SessionID != record.Run.SessionID || existing.Run.RoundID != record.Run.RoundID || existing.Run.SnapshotID != record.Run.SnapshotID {
+	if existing.UserMessageID != record.UserMessageID || !sameJSON(existing.Binding, record.Binding) ||
+		!sameJSON(existing.Input, record.Input) ||
+		existing.Run.SessionID != record.Run.SessionID ||
+		existing.Run.RoundID != record.Run.RoundID ||
+		existing.Run.SnapshotID != record.Run.SnapshotID {
 		return errors.New("update chat run: immutable binding or input changed")
 	}
 	if existing.Run.Status != record.Run.Status {
 		if !existing.Run.Status.CanTransitionTo(record.Run.Status) {
-			return fmt.Errorf("update chat run: invalid status transition %s -> %s", existing.Run.Status, record.Run.Status)
+			return fmt.Errorf(
+				"update chat run: invalid status transition %s -> %s",
+				existing.Run.Status,
+				record.Run.Status,
+			)
 		}
 	} else if record.Run.Status != review.RunStatusRunning {
 		return errors.New("update chat run: terminal status cannot be rewritten")
@@ -561,7 +633,12 @@ func (store *RepositoryStore) GetChatTimeline(ctx context.Context, sessionID str
 
 // SendChatTurn validates the active round, serializes chat work through the
 // session operation lease, and delegates model execution to the domain runner.
-func (store *RepositoryStore) SendChatTurn(ctx context.Context, request review.ChatTurnRequest, model review.Model, options review.ChatOptions) (review.ChatTurnResult, error) {
+func (store *RepositoryStore) SendChatTurn(
+	ctx context.Context,
+	request review.ChatTurnRequest,
+	model review.Model,
+	options review.ChatOptions,
+) (review.ChatTurnResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -582,7 +659,15 @@ func (store *RepositoryStore) SendChatTurn(ctx context.Context, request review.C
 	if request.SnapshotID == "" {
 		request.SnapshotID = round.SnapshotID
 	}
-	binding, err := store.ValidateChatBinding(ctx, review.ChatBinding{SessionID: session.ID, RoundID: round.ID, SnapshotID: request.SnapshotID, Context: request.Context})
+	binding, err := store.ValidateChatBinding(
+		ctx,
+		review.ChatBinding{
+			SessionID:  session.ID,
+			RoundID:    round.ID,
+			SnapshotID: request.SnapshotID,
+			Context:    request.Context,
+		},
+	)
 	if err != nil {
 		return review.ChatTurnResult{}, err
 	}
@@ -700,18 +785,21 @@ func validateSnapshotAnchorTx(ctx context.Context, tx *sql.Tx, frozen Snapshot, 
 	if anchor.Side == snapshot.TreeSideBase || anchor.Side == snapshot.TreeSideHead {
 		column = "base_path"
 	}
-	if anchor.Side == snapshot.TreeSideHead || anchor.Side == snapshot.TreeSideIndex || anchor.Side == snapshot.TreeSideWorktree {
+	if anchor.Side == snapshot.TreeSideHead || anchor.Side == snapshot.TreeSideIndex ||
+		anchor.Side == snapshot.TreeSideWorktree {
 		treeSide = anchor.Side
 	}
 	var changed int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM snapshot_changes WHERE snapshot_id = ? AND `+column+` = ? AND status <> ?`, frozen.ID, anchor.Path, snapshot.ChangeUnchanged).Scan(&changed); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM snapshot_changes WHERE snapshot_id = ? AND `+column+` = ? AND status <> ?`, frozen.ID, anchor.Path, snapshot.ChangeUnchanged).
+		Scan(&changed); err != nil {
 		return fmt.Errorf("check changed path: %w", err)
 	}
 	if changed != 1 {
 		return errors.New("diff anchor path is not an exact changed path")
 	}
 	var storedBlob string
-	err := tx.QueryRowContext(ctx, `SELECT content_digest FROM snapshot_entries WHERE snapshot_id = ? AND tree_side = ? AND path = ?`, frozen.ID, treeSide, anchor.Path).Scan(&storedBlob)
+	err := tx.QueryRowContext(ctx, `SELECT content_digest FROM snapshot_entries WHERE snapshot_id = ? AND tree_side = ? AND path = ?`, frozen.ID, treeSide, anchor.Path).
+		Scan(&storedBlob)
 	if errors.Is(err, sql.ErrNoRows) {
 		return errors.New("diff anchor path is not present in the selected snapshot side")
 	}

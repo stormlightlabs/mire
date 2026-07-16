@@ -5,18 +5,18 @@ definitions. Each change should preserve existing JSON shapes, database
 representations, digest inputs, validation rules, and package boundaries unless
 the change explicitly includes a compatible migration.
 
-- [ ] Embed `db.RepositoryIdentity` in `db.Repository`. The persisted repository
+- [x] Embed `db.RepositoryIdentity` in `db.Repository`. The persisted repository
   repeats `CanonicalIdentity`, `DisplayName`, and `DiscoveredGitDir` exactly.
   Keep `ID` and `CreatedAt` on `Repository`, and update scanners and constructors
   to populate the embedded identity.
 
-- [ ] Introduce a shared model-run options type for `PlannerOptions`,
+- [x] Introduce a shared model-run options type for `PlannerOptions`,
   `ReviewerOpts`, `VerifierOptions`, and `ChatOptions`. It should own `Retry`,
   `Adapter`, `Protocol`, `PromptTemplateVersion`, `Model`, `Parameters`,
   `Redactions`, and `Now`. Embed it only if the resulting nested keyed literals
   remain clear at call sites.
 
-- [ ] Move common model-run option behavior with the shared type. Normalize
+- [x] Move common model-run option behavior with the shared type. Normalize
   retry limits, adapter and protocol defaults, clocks, model metadata, parameter
   copies, and redactions in one place. Let each role supply its own prompt
   template version and role-specific budgets, retriever, store, and round data.

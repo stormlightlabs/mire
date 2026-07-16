@@ -20,20 +20,37 @@ func TestPlannerRunAndPlanPersistAcrossRestart(t *testing.T) {
 	store := NewRepositoryStore(database, WithClock(func() time.Time {
 		return time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
 	}))
-	identity := RepositoryIdentity{CanonicalIdentity: "/workspaces/mire", DisplayName: "mire", DiscoveredGitDir: "/workspaces/mire/.git"}
+	identity := RepositoryIdentity{
+		CanonicalIdentity: "/workspaces/mire",
+		DisplayName:       "mire",
+		DiscoveredGitDir:  "/workspaces/mire/.git",
+	}
 	session, err := store.CreateSession(context.Background(), identity, "Planner test")
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
 	}
 	change := review.ChangeModel{
-		SchemaVersion: "mire/v1/change-model", SessionID: session.ID, SnapshotID: "snapshot-1",
-		SnapshotDigest: "manifest-digest", Digest: "change-model-digest",
-		Files: []review.FileChange{{Status: "modified", TargetPath: "a.go", Hunks: []review.Hunk{{ID: "a.go#hunk", Available: true}}}},
+		SchemaVersion:  "mire/v1/change-model",
+		SessionID:      session.ID,
+		SnapshotID:     "snapshot-1",
+		SnapshotDigest: "manifest-digest",
+		Digest:         "change-model-digest",
+		Files: []review.FileChange{
+			{Status: "modified", TargetPath: "a.go", Hunks: []review.Hunk{{ID: "a.go#hunk", Available: true}}},
+		},
 	}
-	result, err := review.RunPlanner(context.Background(), change, review.NewFixtureModel(change), review.PlannerOptions{
-		Retry: review.RetryPolicy{MaxAttempts: 1}, Store: store, Adapter: "fixture", Protocol: "fixture/v1",
-		Now: func() time.Time { return time.Date(2026, time.July, 14, 12, 1, 0, 0, time.UTC) },
-	})
+	result, err := review.RunPlanner(
+		context.Background(),
+		change,
+		review.NewFixtureModel(change),
+		review.PlannerOptions{
+			ModelRunOptions: review.ModelRunOptions{
+				Retry: review.RetryPolicy{MaxAttempts: 1}, Adapter: "fixture", Protocol: "fixture/v1",
+				Now: func() time.Time { return time.Date(2026, time.July, 14, 12, 1, 0, 0, time.UTC) },
+			},
+			Store: store,
+		},
+	)
 	if err != nil {
 		t.Fatalf("RunPlanner() error = %v", err)
 	}
@@ -78,7 +95,12 @@ func TestPlannerPersistenceRejectsUnknownRunAndMissingSession(t *testing.T) {
 	}
 	store := NewRepositoryStore(database)
 	t.Cleanup(func() { _ = store.Close() })
-	run := review.RunRecord{SessionID: "missing", Role: review.ModelRolePlanner, Status: review.RunStatusQueued, MaxAttempts: 1}
+	run := review.RunRecord{
+		SessionID:   "missing",
+		Role:        review.ModelRolePlanner,
+		Status:      review.RunStatusQueued,
+		MaxAttempts: 1,
+	}
 	if _, err := store.CreatePlanRun(context.Background(), run); !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("CreatePlanRun() error = %v, want ErrSessionNotFound", err)
 	}

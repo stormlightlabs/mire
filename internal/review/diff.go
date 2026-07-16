@@ -17,7 +17,17 @@ type diffLine struct {
 // the hunk digest and patch.
 func diffHunks(basePath, targetPath string, oldBytes, newBytes []byte) ([]Hunk, string) {
 	if isBinary(oldBytes) || isBinary(newBytes) {
-		hunk := makeHunk(targetPath, "binary", 1, lineCount(oldBytes), 1, lineCount(newBytes), []string{"Binary files differ."}, true, true)
+		hunk := makeHunk(
+			targetPath,
+			"binary",
+			1,
+			lineCount(oldBytes),
+			1,
+			lineCount(newBytes),
+			[]string{"Binary files differ."},
+			true,
+			true,
+		)
 		return []Hunk{hunk}, unifiedPatch(basePath, targetPath, []string{"Binary files differ."})
 	}
 	oldLines, newLines := splitLines(string(oldBytes)), splitLines(string(newBytes))
@@ -178,11 +188,38 @@ func groupHunks(path string, ops []diffLine) []Hunk {
 	return hunks
 }
 
-func makeHunk(path, kind string, oldStart, oldLines, newStart, newLines int, lines []string, binary, available bool) Hunk {
-	payload := fmt.Appendf(nil, "%s\x00%s\x00%d\x00%d\x00%d\x00%d\x00%t\x00%s", path, kind, oldStart, oldLines, newStart, newLines, binary, strings.Join(lines, ""))
+func makeHunk(
+	path, kind string,
+	oldStart, oldLines, newStart, newLines int,
+	lines []string,
+	binary, available bool,
+) Hunk {
+	payload := fmt.Appendf(
+		nil,
+		"%s\x00%s\x00%d\x00%d\x00%d\x00%d\x00%t\x00%s",
+		path,
+		kind,
+		oldStart,
+		oldLines,
+		newStart,
+		newLines,
+		binary,
+		strings.Join(lines, ""),
+	)
 	digest := sha256.Sum256(payload)
 	hexDigest := hex.EncodeToString(digest[:])
-	return Hunk{ID: path + "#" + hexDigest[:16], Kind: kind, OldStart: oldStart, OldLines: oldLines, NewStart: newStart, NewLines: newLines, Lines: lines, Binary: binary, Available: available, Digest: hexDigest}
+	return Hunk{
+		ID:        path + "#" + hexDigest[:16],
+		Kind:      kind,
+		OldStart:  oldStart,
+		OldLines:  oldLines,
+		NewStart:  newStart,
+		NewLines:  newLines,
+		Lines:     lines,
+		Binary:    binary,
+		Available: available,
+		Digest:    hexDigest,
+	}
 }
 
 func unifiedPatch(basePath, targetPath string, lines []string) string {

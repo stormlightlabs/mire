@@ -62,16 +62,25 @@ func TestCaptureWorktreePreservesHeadIndexAndFinalLayers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CaptureWorktree() error = %v", err)
 	}
-	if captured.ComparisonKind != snapshot.ComparisonWorktree || captured.RequestedComparison != snapshot.WorktreeComparison {
+	if captured.ComparisonKind != snapshot.ComparisonWorktree ||
+		captured.RequestedComparison != snapshot.WorktreeComparison {
 		t.Fatalf("comparison = %#v", captured)
 	}
-	if captured.BaseOID == "" || captured.IndexOID == "" || captured.WorktreeOID == "" || captured.BaseOID == captured.IndexOID || captured.IndexOID == captured.WorktreeOID {
-		t.Fatalf("layer identities = head %q index %q worktree %q", captured.BaseOID, captured.IndexOID, captured.WorktreeOID)
+	if captured.BaseOID == "" || captured.IndexOID == "" || captured.WorktreeOID == "" ||
+		captured.BaseOID == captured.IndexOID ||
+		captured.IndexOID == captured.WorktreeOID {
+		t.Fatalf(
+			"layer identities = head %q index %q worktree %q",
+			captured.BaseOID,
+			captured.IndexOID,
+			captured.WorktreeOID,
+		)
 	}
 	if len(captured.HeadEntries) != 5 || len(captured.IndexEntries) != 5 {
 		t.Fatalf("head/index entry counts = %d/%d, want 5/5", len(captured.HeadEntries), len(captured.IndexEntries))
 	}
-	if findEntry(captured.WorktreeEntries, "ignored.log").Path != "" || findEntry(captured.WorktreeEntries, "ignored/nested.txt").Path != "" {
+	if findEntry(captured.WorktreeEntries, "ignored.log").Path != "" ||
+		findEntry(captured.WorktreeEntries, "ignored/nested.txt").Path != "" {
 		t.Fatalf("ignored entries were captured: %#v", captured.WorktreeEntries)
 	}
 	if findEntry(captured.WorktreeEntries, "new name-ユニコード.bin").Path == "" {
@@ -80,13 +89,21 @@ func TestCaptureWorktreePreservesHeadIndexAndFinalLayers(t *testing.T) {
 	if findEntry(captured.WorktreeEntries, "deleted.txt").Path != "" {
 		t.Fatalf("deleted path was captured in final layer: %#v", captured.WorktreeEntries)
 	}
-	if got := string(readObject(t, objectStore, findEntry(captured.WorktreeEntries, "shared.txt").ContentDigest)); got != "final\n" {
+	if got := string(
+		readObject(t, objectStore, findEntry(captured.WorktreeEntries, "shared.txt").ContentDigest),
+	); got != "final\n" {
 		t.Fatalf("final shared content = %q", got)
 	}
-	if got := string(readObject(t, objectStore, findEntry(captured.IndexEntries, "shared.txt").ContentDigest)); got != "index\n" {
+	if got := string(
+		readObject(t, objectStore, findEntry(captured.IndexEntries, "shared.txt").ContentDigest),
+	); got != "index\n" {
 		t.Fatalf("index shared content = %q", got)
 	}
-	if link := findEntry(captured.WorktreeEntries, "link"); link.Kind != snapshot.EntryKindSymlink || link.SymlinkTarget != "shared.txt" {
+	if link := findEntry(
+		captured.WorktreeEntries,
+		"link",
+	); link.Kind != snapshot.EntryKindSymlink ||
+		link.SymlinkTarget != "shared.txt" {
 		t.Fatalf("symlink entry = %#v", link)
 	}
 	if script := findEntry(captured.WorktreeEntries, "script.sh"); script.Mode != 0o100755 {
@@ -176,7 +193,10 @@ func TestCaptureRangeStoresCompleteTreesAndDurableChanges(t *testing.T) {
 	addFiles(t, worktree, "unchanged.txt", "old.txt", "delete.txt", "script.sh", "link")
 	base := commit(t, repository, worktree, "base", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
 
-	if err := os.Rename(filepath.Join(repositoryPath, "old.txt"), filepath.Join(repositoryPath, "renamed.txt")); err != nil {
+	if err := os.Rename(
+		filepath.Join(repositoryPath, "old.txt"),
+		filepath.Join(repositoryPath, "renamed.txt"),
+	); err != nil {
 		t.Fatalf("rename file: %v", err)
 	}
 	if err := os.Remove(filepath.Join(repositoryPath, "delete.txt")); err != nil {
@@ -257,7 +277,8 @@ func TestCaptureRangeThreeDotUsesUniqueMergeBaseAndFreezesRefs(t *testing.T) {
 		t.Fatalf("Head() error = %v", err)
 	}
 	if err := repository.Storer.SetReference(plumbing.NewHashReference(
-		plumbing.NewBranchReferenceName("base"), common)); err != nil {
+		plumbing.NewBranchReferenceName("base"), common,
+	)); err != nil {
 		t.Fatalf("create base branch: %v", err)
 	}
 	if err := worktree.Checkout(&git.CheckoutOptions{Branch: mainBranch.Name(), Force: true}); err != nil {
@@ -272,9 +293,15 @@ func TestCaptureRangeThreeDotUsesUniqueMergeBaseAndFreezesRefs(t *testing.T) {
 		t.Fatalf("OpenObjectStore() error = %v", err)
 	}
 	requested := "base..." + mainBranch.Name().Short()
-	captured, err := CaptureRangeWithOptions(context.Background(), repositoryPath, requested, objectStore, CaptureOptions{
-		Clock: func() time.Time { return time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC) },
-	})
+	captured, err := CaptureRangeWithOptions(
+		context.Background(),
+		repositoryPath,
+		requested,
+		objectStore,
+		CaptureOptions{
+			Clock: func() time.Time { return time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC) },
+		},
+	)
 	if err != nil {
 		t.Fatalf("CaptureRange() error = %v", err)
 	}
@@ -287,7 +314,8 @@ func TestCaptureRangeThreeDotUsesUniqueMergeBaseAndFreezesRefs(t *testing.T) {
 			captured.BaseOID, captured.EffectiveBaseOID, captured.TargetOID, captured.MergeBaseOID,
 			common, common, target, common)
 	}
-	if findEntry(captured.BaseEntries, "target.txt").Path != "" || findEntry(captured.TargetEntries, "target.txt").Path == "" {
+	if findEntry(captured.BaseEntries, "target.txt").Path != "" ||
+		findEntry(captured.TargetEntries, "target.txt").Path == "" {
 		t.Fatalf("three-dot trees = base %#v target %#v", captured.BaseEntries, captured.TargetEntries)
 	}
 	if !hasChange(captured.Changes, snapshot.ChangeAdded, "", "target.txt") {
@@ -315,7 +343,8 @@ func TestCaptureRangeThreeDotRejectsMissingMergeBase(t *testing.T) {
 	addFiles(t, worktree, "common.txt")
 	common := commit(t, repository, worktree, "common", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
 	if err := repository.Storer.SetReference(plumbing.NewHashReference(
-		plumbing.NewBranchReferenceName("base"), common)); err != nil {
+		plumbing.NewBranchReferenceName("base"), common,
+	)); err != nil {
 		t.Fatalf("create base branch: %v", err)
 	}
 	head, err := repository.Head()
@@ -329,7 +358,11 @@ func TestCaptureRangeThreeDotRejectsMissingMergeBase(t *testing.T) {
 	addFiles(t, worktree, "orphan.txt")
 	if _, err := worktree.Commit("orphan", &git.CommitOptions{
 		Parents: nil,
-		Author:  &object.Signature{Name: "MIRE Test", Email: "mire@example.test", When: time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC)},
+		Author: &object.Signature{
+			Name:  "MIRE Test",
+			Email: "mire@example.test",
+			When:  time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC),
+		},
 	}); err != nil {
 		t.Fatalf("create orphan commit: %v", err)
 	}
@@ -361,13 +394,16 @@ func TestCaptureRangeThreeDotRejectsMultipleMergeBases(t *testing.T) {
 		t.Fatalf("Head() error = %v", err)
 	}
 	if err := repository.Storer.SetReference(plumbing.NewHashReference(
-		plumbing.NewBranchReferenceName("side"), common)); err != nil {
+		plumbing.NewBranchReferenceName("side"), common,
+	)); err != nil {
 		t.Fatalf("create side branch: %v", err)
 	}
 	writeFile(t, repositoryPath, "base.txt", "base\n", 0o644)
 	addFiles(t, worktree, "base.txt")
 	baseTip := commit(t, repository, worktree, "base", time.Date(2026, time.July, 14, 11, 0, 0, 0, time.UTC))
-	if err := worktree.Checkout(&git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName("side"), Force: true}); err != nil {
+	if err := worktree.Checkout(
+		&git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName("side"), Force: true},
+	); err != nil {
 		t.Fatalf("checkout side branch: %v", err)
 	}
 	writeFile(t, repositoryPath, "side.txt", "side\n", 0o644)
@@ -376,11 +412,25 @@ func TestCaptureRangeThreeDotRejectsMultipleMergeBases(t *testing.T) {
 	if err := worktree.Checkout(&git.CheckoutOptions{Branch: mainBranch.Name(), Force: true}); err != nil {
 		t.Fatalf("checkout main branch: %v", err)
 	}
-	firstMerge := commitWithParents(t, worktree, "first cross merge", []plumbing.Hash{baseTip, sideTip}, time.Date(2026, time.July, 14, 13, 0, 0, 0, time.UTC))
-	if err := worktree.Checkout(&git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName("side"), Force: true}); err != nil {
+	firstMerge := commitWithParents(
+		t,
+		worktree,
+		"first cross merge",
+		[]plumbing.Hash{baseTip, sideTip},
+		time.Date(2026, time.July, 14, 13, 0, 0, 0, time.UTC),
+	)
+	if err := worktree.Checkout(
+		&git.CheckoutOptions{Branch: plumbing.NewBranchReferenceName("side"), Force: true},
+	); err != nil {
 		t.Fatalf("checkout side branch for second merge: %v", err)
 	}
-	secondMerge := commitWithParents(t, worktree, "second cross merge", []plumbing.Hash{sideTip, baseTip}, time.Date(2026, time.July, 14, 14, 0, 0, 0, time.UTC))
+	secondMerge := commitWithParents(
+		t,
+		worktree,
+		"second cross merge",
+		[]plumbing.Hash{sideTip, baseTip},
+		time.Date(2026, time.July, 14, 14, 0, 0, 0, time.UTC),
+	)
 	if firstMerge == secondMerge {
 		t.Fatal("cross merges have identical object IDs")
 	}
@@ -408,7 +458,8 @@ func TestCaptureRangeRejectsAmbiguousBranchAndTag(t *testing.T) {
 	addFiles(t, worktree, "file.txt")
 	commitOID := commit(t, repository, worktree, "commit", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
 	if err := repository.Storer.SetReference(plumbing.NewHashReference(
-		plumbing.NewBranchReferenceName("same"), commitOID)); err != nil {
+		plumbing.NewBranchReferenceName("same"), commitOID,
+	)); err != nil {
 		t.Fatalf("create branch: %v", err)
 	}
 	if _, err := repository.CreateTag("same", commitOID, nil); err != nil {
@@ -446,9 +497,21 @@ func TestCaptureRangeRejectsConfiguredResourceLimitsBeforeCopying(t *testing.T) 
 		limits   CaptureLimits
 		resource string
 	}{
-		{name: "file count", limits: CaptureLimits{MaxFileCount: 1, MaxObjectBytes: 1024, MaxCapturedBytes: 1024}, resource: "file count"},
-		{name: "object size", limits: CaptureLimits{MaxFileCount: 10, MaxObjectBytes: 4, MaxCapturedBytes: 1024}, resource: "individual object bytes"},
-		{name: "aggregate bytes", limits: CaptureLimits{MaxFileCount: 10, MaxObjectBytes: 1024, MaxCapturedBytes: 10}, resource: "aggregate captured bytes"},
+		{
+			name:     "file count",
+			limits:   CaptureLimits{MaxFileCount: 1, MaxObjectBytes: 1024, MaxCapturedBytes: 1024},
+			resource: "file count",
+		},
+		{
+			name:     "object size",
+			limits:   CaptureLimits{MaxFileCount: 10, MaxObjectBytes: 4, MaxCapturedBytes: 1024},
+			resource: "individual object bytes",
+		},
+		{
+			name:     "aggregate bytes",
+			limits:   CaptureLimits{MaxFileCount: 10, MaxObjectBytes: 1024, MaxCapturedBytes: 10},
+			resource: "aggregate captured bytes",
+		},
 	}
 	for _, test := range tests {
 		test := test
@@ -459,7 +522,13 @@ func TestCaptureRangeRejectsConfiguredResourceLimitsBeforeCopying(t *testing.T) 
 			if err != nil {
 				t.Fatalf("OpenObjectStore() error = %v", err)
 			}
-			_, err = CaptureRangeWithOptions(context.Background(), repositoryPath, base.String()+".."+target.String(), objectStore, CaptureOptions{Limits: test.limits})
+			_, err = CaptureRangeWithOptions(
+				context.Background(),
+				repositoryPath,
+				base.String()+".."+target.String(),
+				objectStore,
+				CaptureOptions{Limits: test.limits},
+			)
 			var limitErr *CaptureLimitError
 			if !errors.As(err, &limitErr) || limitErr.Resource != test.resource {
 				t.Fatalf("CaptureRange() error = %v, want %q limit", err, test.resource)
@@ -530,7 +599,9 @@ func TestCheckDivergenceReportsChangedPathsAndUnavailableRefs(t *testing.T) {
 	writeFile(t, repositoryPath, "base.txt", "base\n", 0o644)
 	addFiles(t, worktree, "base.txt")
 	base := commit(t, repository, worktree, "base", time.Date(2026, time.July, 14, 10, 0, 0, 0, time.UTC))
-	if err := repository.Storer.SetReference(plumbing.NewHashReference(plumbing.NewBranchReferenceName("review-base"), base)); err != nil {
+	if err := repository.Storer.SetReference(
+		plumbing.NewHashReference(plumbing.NewBranchReferenceName("review-base"), base),
+	); err != nil {
 		t.Fatalf("set review-base: %v", err)
 	}
 	writeFile(t, repositoryPath, "target.txt", "before\n", 0o644)
@@ -548,7 +619,11 @@ func TestCheckDivergenceReportsChangedPathsAndUnavailableRefs(t *testing.T) {
 	}
 	store := db.NewRepositoryStore(storeDatabase)
 	t.Cleanup(func() { _ = store.Close() })
-	identity := db.RepositoryIdentity{CanonicalIdentity: repositoryPath, DisplayName: "fixture", DiscoveredGitDir: filepath.Join(repositoryPath, ".git")}
+	identity := db.RepositoryIdentity{
+		CanonicalIdentity: repositoryPath,
+		DisplayName:       "fixture",
+		DiscoveredGitDir:  filepath.Join(repositoryPath, ".git"),
+	}
 	capture, err := CaptureRange(context.Background(), repositoryPath, "review-base..HEAD", objectStore)
 	if err != nil {
 		t.Fatalf("CaptureRange() error = %v", err)
@@ -630,7 +705,13 @@ func addFiles(t *testing.T, worktree *git.Worktree, names ...string) {
 	}
 }
 
-func commit(t *testing.T, repository *git.Repository, worktree *git.Worktree, message string, when time.Time) plumbing.Hash {
+func commit(
+	t *testing.T,
+	repository *git.Repository,
+	worktree *git.Worktree,
+	message string,
+	when time.Time,
+) plumbing.Hash {
 	t.Helper()
 	hash, err := worktree.Commit(message, &git.CommitOptions{
 		Author:    &object.Signature{Name: "MIRE Test", Email: "mire@example.test", When: when},
@@ -642,7 +723,13 @@ func commit(t *testing.T, repository *git.Repository, worktree *git.Worktree, me
 	return hash
 }
 
-func commitWithParents(t *testing.T, worktree *git.Worktree, message string, parents []plumbing.Hash, when time.Time) plumbing.Hash {
+func commitWithParents(
+	t *testing.T,
+	worktree *git.Worktree,
+	message string,
+	parents []plumbing.Hash,
+	when time.Time,
+) plumbing.Hash {
 	t.Helper()
 	hash, err := worktree.Commit(message, &git.CommitOptions{
 		Parents:           parents,

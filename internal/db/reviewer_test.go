@@ -19,7 +19,11 @@ func TestReviewPassCandidatesAndCoveragePersistAcrossRestart(t *testing.T) {
 	store := NewRepositoryStore(database, WithClock(func() time.Time {
 		return time.Date(2026, time.July, 15, 14, 0, 0, 0, time.UTC)
 	}))
-	identity := RepositoryIdentity{CanonicalIdentity: "/workspaces/reviewer", DisplayName: "reviewer", DiscoveredGitDir: "/workspaces/reviewer/.git"}
+	identity := RepositoryIdentity{
+		CanonicalIdentity: "/workspaces/reviewer",
+		DisplayName:       "reviewer",
+		DiscoveredGitDir:  "/workspaces/reviewer/.git",
+	}
 	session, err := store.CreateSession(context.Background(), identity, "Reviewer persistence")
 	if err != nil {
 		t.Fatalf("CreateSession() error = %v", err)
@@ -29,14 +33,33 @@ func TestReviewPassCandidatesAndCoveragePersistAcrossRestart(t *testing.T) {
 		t.Fatalf("CreateRound() error = %v", err)
 	}
 	change := review.ChangeModel{
-		SchemaVersion: "mire/v1/change-model", SessionID: session.ID, SnapshotID: "snapshot-1", SnapshotDigest: "manifest-1", Digest: "change-1",
-		Files: []review.FileChange{{Status: "modified", TargetPath: "src/a.go", Patch: "change", Hunks: []review.Hunk{{ID: "src/a.go#hunk", Available: true}}}},
+		SchemaVersion:  "mire/v1/change-model",
+		SessionID:      session.ID,
+		SnapshotID:     "snapshot-1",
+		SnapshotDigest: "manifest-1",
+		Digest:         "change-1",
+		Files: []review.FileChange{
+			{
+				Status:     "modified",
+				TargetPath: "src/a.go",
+				Patch:      "change",
+				Hunks:      []review.Hunk{{ID: "src/a.go#hunk", Available: true}},
+			},
+		},
 	}
-	model := &dbFixtureModel{output: []byte(`{"schema_version":"mire/v1/review-candidates","candidates":[{"claim":"claim","impact":"impact","category":"correctness","severity":"high","anchors":[{"hunk_id":"src/a.go#hunk"}]}]}`)}
+	model := &dbFixtureModel{
+		output: []byte(
+			`{"schema_version":"mire/v1/review-candidates","candidates":[{"claim":"claim","impact":"impact","category":"correctness","severity":"high","anchors":[{"hunk_id":"src/a.go#hunk"}]}]}`,
+		),
+	}
 	result, err := review.RunReviewPasses(context.Background(), change, model, review.ReviewerOpts{
-		Retry: review.RetryPolicy{MaxAttempts: 1}, RoundID: round.ID, Store: store,
-		Passes: []review.PlannedPass{{Name: "correctness", Order: 0, Applicable: true, Reason: "fixture"}},
-		Now:    func() time.Time { return time.Date(2026, time.July, 15, 14, 1, 0, 0, time.UTC) },
+		ModelRunOptions: review.ModelRunOptions{
+			Retry: review.RetryPolicy{MaxAttempts: 1},
+			Now:   func() time.Time { return time.Date(2026, time.July, 15, 14, 1, 0, 0, time.UTC) },
+		},
+		RoundID: round.ID,
+		Store:   store,
+		Passes:  []review.PlannedPass{{Name: "correctness", Order: 0, Applicable: true, Reason: "fixture"}},
 	})
 	if err != nil {
 		t.Fatalf("RunReviewPasses() error = %v", err)

@@ -206,13 +206,15 @@ func (store *RepositoryStore) CreateRound(ctx context.Context, sessionID string)
 		return Round{}, err
 	}
 	var predecessorRoundID string
-	if err := tx.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(
+		ctx,
 		`SELECT COALESCE(current_round_id, '') FROM sessions WHERE id = ?`, sessionID,
 	).Scan(&predecessorRoundID); err != nil {
 		return Round{}, fmt.Errorf("read current round: %w", err)
 	}
 	var number int
-	if err := tx.QueryRowContext(ctx,
+	if err := tx.QueryRowContext(
+		ctx,
 		`SELECT COALESCE(MAX(number), 0) + 1 FROM rounds WHERE session_id = ?`, sessionID,
 	).Scan(&number); err != nil {
 		return Round{}, fmt.Errorf("choose round number: %w", err)
@@ -231,7 +233,8 @@ func (store *RepositoryStore) CreateRound(ctx context.Context, sessionID string)
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(
+		ctx, `
 	INSERT INTO rounds (id, session_id, repository_id, predecessor_round_id, number, status, created_at, updated_at)
 	VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,
 		round.ID, round.SessionID, round.RepositoryID, round.PredecessorRoundID,
@@ -240,7 +243,8 @@ func (store *RepositoryStore) CreateRound(ctx context.Context, sessionID string)
 	); err != nil {
 		return Round{}, fmt.Errorf("insert round: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := tx.ExecContext(
+		ctx,
 		`UPDATE sessions SET current_round_id = ? WHERE id = ?`, round.ID, sessionID,
 	); err != nil {
 		return Round{}, fmt.Errorf("set current round: %w", err)
@@ -320,7 +324,11 @@ func (store *RepositoryStore) ListRounds(ctx context.Context, sessionID string) 
 // CreateOperation queues one operation. The partial unique index and this
 // transaction together prevent competing queued/running operations per
 // session, including callers in separate processes.
-func (store *RepositoryStore) CreateOperation(ctx context.Context, sessionID, roundID string, kind OperationKind) (Operation, error) {
+func (store *RepositoryStore) CreateOperation(
+	ctx context.Context,
+	sessionID, roundID string,
+	kind OperationKind,
+) (Operation, error) {
 	if err := store.validateOperationStore(); err != nil {
 		return Operation{}, err
 	}
@@ -355,7 +363,8 @@ func (store *RepositoryStore) CreateOperation(ctx context.Context, sessionID, ro
 	}
 	if roundID != "" {
 		var roundRepositoryID string
-		err := tx.QueryRowContext(ctx,
+		err := tx.QueryRowContext(
+			ctx,
 			`SELECT repository_id FROM rounds WHERE id = ? AND session_id = ?`, roundID, sessionID,
 		).Scan(&roundRepositoryID)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -395,11 +404,20 @@ LIMIT 1`, sessionID, OperationStatusQueued, OperationStatusRunning).Scan(&active
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(
+		ctx,
+		`
 INSERT INTO operations (id, session_id, repository_id, round_id, kind, status, failure, created_at, updated_at)
 VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?)`,
-		operation.ID, operation.SessionID, operation.RepositoryID, operation.RoundID, operation.Kind,
-		operation.Status, operation.Failure, shared.TimestampString(operation.CreatedAt), shared.TimestampString(operation.UpdatedAt),
+		operation.ID,
+		operation.SessionID,
+		operation.RepositoryID,
+		operation.RoundID,
+		operation.Kind,
+		operation.Status,
+		operation.Failure,
+		shared.TimestampString(operation.CreatedAt),
+		shared.TimestampString(operation.UpdatedAt),
 	); err != nil {
 		if isActiveOperationConstraint(err) {
 			return Operation{}, fmt.Errorf("%w: session %q", ErrOperationActive, sessionID)
@@ -462,7 +480,11 @@ func (store *RepositoryStore) ListOperations(ctx context.Context, sessionID stri
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := store.database.QueryContext(ctx, operationQuery+` WHERE session_id = ? ORDER BY created_at ASC, id ASC`, sessionID)
+	rows, err := store.database.QueryContext(
+		ctx,
+		operationQuery+` WHERE session_id = ? ORDER BY created_at ASC, id ASC`,
+		sessionID,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list operations: %w", err)
 	}
@@ -527,7 +549,8 @@ func (store *RepositoryStore) AcquireOperation(ctx context.Context, operationID 
 		return Operation{}, fmt.Errorf("%w: %s is %s", ErrOperationNotAcquirable, operationID, operation.Status)
 	}
 	leaseExpiresAt := now.Add(store.leaseDuration)
-	result, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(
+		ctx, `
 UPDATE operations
 SET status = ?, owner_id = ?, heartbeat_at = ?, lease_expires_at = ?,
     updated_at = ?, started_at = COALESCE(started_at, ?)
@@ -612,7 +635,8 @@ func (store *RepositoryStore) RenewOperation(ctx context.Context, operationID st
 		return Operation{}, fmt.Errorf("%w: %q", ErrOperationLeaseExpired, operationID)
 	}
 	leaseExpiresAt := now.Add(store.leaseDuration)
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(
+		ctx, `
 UPDATE operations
 SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
 WHERE id = ? AND status = ? AND owner_id = ?`,
@@ -654,7 +678,12 @@ func (store *RepositoryStore) FailOperation(ctx context.Context, operationID, fa
 	return store.finishOperation(ctx, operationID, OperationStatusFailed, failure)
 }
 
-func (store *RepositoryStore) finishOperation(ctx context.Context, operationID string, target OperationStatus, failure string) (Operation, error) {
+func (store *RepositoryStore) finishOperation(
+	ctx context.Context,
+	operationID string,
+	target OperationStatus,
+	failure string,
+) (Operation, error) {
 	if target != OperationStatusComplete && target != OperationStatusFailed {
 		return Operation{}, fmt.Errorf("%w: finish target is %s", ErrInvalidOperationTransition, target)
 	}
@@ -696,7 +725,8 @@ func (store *RepositoryStore) finishOperation(ctx context.Context, operationID s
 	if err := validateOwnedRunningOperation(operation, store.processID, now, target); err != nil {
 		return Operation{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(
+		ctx, `
 UPDATE operations
 SET status = ?, failure = ?, updated_at = ?, finished_at = ?
 WHERE id = ? AND status = ? AND owner_id = ?`,
@@ -778,9 +808,15 @@ func (store *RepositoryStore) CancelOperation(ctx context.Context, operationID s
 		return operation, nil
 	}
 	if operation.Status != OperationStatusQueued && operation.Status != OperationStatusRunning {
-		return Operation{}, fmt.Errorf("%w: %s to %s", ErrInvalidOperationTransition, operation.Status, OperationStatusCancelled)
+		return Operation{}, fmt.Errorf(
+			"%w: %s to %s",
+			ErrInvalidOperationTransition,
+			operation.Status,
+			OperationStatusCancelled,
+		)
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(
+		ctx, `
 UPDATE operations
 SET status = ?, updated_at = ?, finished_at = ?
 WHERE id = ? AND status IN (?, ?)`,
@@ -858,7 +894,12 @@ func (store *RepositoryStore) ListActivity(ctx context.Context, sessionID string
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	rows, err := store.database.QueryContext(ctx, activityQuery+` WHERE session_id = ? AND id > ? ORDER BY id ASC`, sessionID, afterID)
+	rows, err := store.database.QueryContext(
+		ctx,
+		activityQuery+` WHERE session_id = ? AND id > ? ORDER BY id ASC`,
+		sessionID,
+		afterID,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list activity: %w", err)
 	}
@@ -933,7 +974,12 @@ ORDER BY id ASC`, OperationStatusRunning, shared.TimestampString(now))
 	candidates := make([]expiredOperation, 0)
 	for rows.Next() {
 		var operation expiredOperation
-		if err := rows.Scan(&operation.ID, &operation.SessionID, &operation.RepositoryID, &operation.RoundID); err != nil {
+		if err := rows.Scan(
+			&operation.ID,
+			&operation.SessionID,
+			&operation.RepositoryID,
+			&operation.RoundID,
+		); err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("read expired operation: %w", err)
 		}
@@ -949,13 +995,21 @@ ORDER BY id ASC`, OperationStatusRunning, shared.TimestampString(now))
 
 	recovered := make([]Operation, 0, len(candidates))
 	for _, candidate := range candidates {
-		result, err := tx.ExecContext(ctx, `
+		result, err := tx.ExecContext(
+			ctx,
+			`
 UPDATE operations
 SET status = ?, failure = ?, updated_at = ?, finished_at = ?
 WHERE id = ? AND status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?`,
 			OperationStatusAbandoned,
 			"Operation lease expired before completion.",
-			shared.TimestampString(now), shared.TimestampString(now), candidate.ID, OperationStatusRunning, shared.TimestampString(now),
+			shared.TimestampString(
+				now,
+			),
+			shared.TimestampString(now),
+			candidate.ID,
+			OperationStatusRunning,
+			shared.TimestampString(now),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("abandon operation %q: %w", candidate.ID, err)
@@ -1010,7 +1064,8 @@ func markRoundStatusTx(ctx context.Context, tx *sql.Tx, operation Operation, sta
 	if !status.Valid() {
 		return fmt.Errorf("mark round: invalid status %q", status)
 	}
-	result, err := tx.ExecContext(ctx, `
+	result, err := tx.ExecContext(
+		ctx, `
 UPDATE rounds
 SET status = ?, updated_at = ?
 WHERE id = ? AND session_id = ? AND repository_id = ?
@@ -1070,7 +1125,8 @@ func insertActivityTx(ctx context.Context, tx *sql.Tx, activity Activity) error 
 	if activity.OperationID != "" {
 		operationID = activity.OperationID
 	}
-	if _, err := tx.ExecContext(ctx, `
+	if _, err := tx.ExecContext(
+		ctx, `
 INSERT INTO activity (session_id, repository_id, round_id, operation_id, kind, status, message, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		activity.SessionID, activity.RepositoryID, roundID, operationID, activity.Kind,

@@ -24,11 +24,9 @@ const (
 	busyTimeout = 5000
 )
 
-var (
-	// ErrInvalidStateDirectory indicates that a state path is not a private
-	// directory suitable for application data.
-	ErrInvalidStateDirectory = errors.New("invalid private state directory")
-)
+// ErrInvalidStateDirectory indicates that a state path is not a private
+// directory suitable for application data.
+var ErrInvalidStateDirectory = errors.New("invalid private state directory")
 
 // DB is an opened, migrated MIRE database.
 type DB struct {

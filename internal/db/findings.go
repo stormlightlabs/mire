@@ -66,7 +66,11 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, finding.FindingID, finding.Revision, finding.S
 
 // GetFindingRevision returns one immutable finding revision and verifies its
 // stored digest and identity columns.
-func (store *RepositoryStore) GetFindingRevision(ctx context.Context, findingID string, revision int) (review.FindingRevision, error) {
+func (store *RepositoryStore) GetFindingRevision(
+	ctx context.Context,
+	findingID string,
+	revision int,
+) (review.FindingRevision, error) {
 	if err := store.validate(); err != nil {
 		return review.FindingRevision{}, err
 	}
@@ -93,7 +97,10 @@ FROM finding_revisions WHERE finding_id = ? AND revision = ?`, findingID, revisi
 
 // ListFindingRevisions returns all findings recorded in one review round in
 // deterministic identity order.
-func (store *RepositoryStore) ListFindingRevisions(ctx context.Context, roundID string) ([]review.FindingRevision, error) {
+func (store *RepositoryStore) ListFindingRevisions(
+	ctx context.Context,
+	roundID string,
+) ([]review.FindingRevision, error) {
 	if err := store.validate(); err != nil {
 		return nil, err
 	}
@@ -105,7 +112,10 @@ func (store *RepositoryStore) ListFindingRevisions(ctx context.Context, roundID 
 
 // ListFindingRevisionsForFinding returns the immutable revision history for a
 // stable finding ID.
-func (store *RepositoryStore) ListFindingRevisionsForFinding(ctx context.Context, findingID string) ([]review.FindingRevision, error) {
+func (store *RepositoryStore) ListFindingRevisionsForFinding(
+	ctx context.Context,
+	findingID string,
+) ([]review.FindingRevision, error) {
 	if err := store.validate(); err != nil {
 		return nil, err
 	}
@@ -117,7 +127,10 @@ func (store *RepositoryStore) ListFindingRevisionsForFinding(ctx context.Context
 
 // GetLatestFindingRevision returns the newest immutable revision for a stable
 // finding ID.
-func (store *RepositoryStore) GetLatestFindingRevision(ctx context.Context, findingID string) (review.FindingRevision, error) {
+func (store *RepositoryStore) GetLatestFindingRevision(
+	ctx context.Context,
+	findingID string,
+) (review.FindingRevision, error) {
 	if err := store.validate(); err != nil {
 		return review.FindingRevision{}, err
 	}
@@ -138,7 +151,10 @@ FROM finding_revisions WHERE finding_id = ? ORDER BY revision DESC LIMIT 1`, str
 	return decodeFindingRevision(data, expectedDigest, storedID, storedSession, storedRound, storedSnapshot)
 }
 
-func (store *RepositoryStore) listFindingRevisions(ctx context.Context, predicate, value string) ([]review.FindingRevision, error) {
+func (store *RepositoryStore) listFindingRevisions(
+	ctx context.Context,
+	predicate, value string,
+) ([]review.FindingRevision, error) {
 	if value == "" {
 		return nil, errors.New("list finding revisions: selector is empty")
 	}
@@ -157,7 +173,14 @@ FROM finding_revisions WHERE `+predicate+` ORDER BY revision ASC, finding_id ASC
 			&finding.SnapshotID, &expectedDigest, &data, &created); err != nil {
 			return nil, fmt.Errorf("list finding revisions: %w", err)
 		}
-		decoded, err := decodeFindingRevision(data, expectedDigest, finding.FindingID, finding.SessionID, finding.RoundID, finding.SnapshotID)
+		decoded, err := decodeFindingRevision(
+			data,
+			expectedDigest,
+			finding.FindingID,
+			finding.SessionID,
+			finding.RoundID,
+			finding.SnapshotID,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -172,12 +195,15 @@ FROM finding_revisions WHERE `+predicate+` ORDER BY revision ASC, finding_id ASC
 	return findings, nil
 }
 
-func decodeFindingRevision(data, expectedDigest, storedID, storedSession, storedRound, storedSnapshot string) (review.FindingRevision, error) {
+func decodeFindingRevision(
+	data, expectedDigest, storedID, storedSession, storedRound, storedSnapshot string,
+) (review.FindingRevision, error) {
 	var finding review.FindingRevision
 	if err := json.Unmarshal([]byte(data), &finding); err != nil {
 		return review.FindingRevision{}, fmt.Errorf("decode finding revision: %w", err)
 	}
-	if finding.FindingID != storedID || finding.SessionID != storedSession || finding.RoundID != storedRound || finding.SnapshotID != storedSnapshot {
+	if finding.FindingID != storedID || finding.SessionID != storedSession || finding.RoundID != storedRound ||
+		finding.SnapshotID != storedSnapshot {
 		return review.FindingRevision{}, errors.New("finding revision identity columns do not match payload")
 	}
 	if finding.Digest != expectedDigest || finding.Digest != review.FindingRevisionDigest(finding) {
@@ -244,7 +270,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, disposition.ID, disposition.FindingID, d
 
 // ListDispositions returns all human decision events for a finding in append
 // order. The caller can derive the current decision from the final event.
-func (store *RepositoryStore) ListDispositions(ctx context.Context, findingID string) ([]review.DispositionRecord, error) {
+func (store *RepositoryStore) ListDispositions(
+	ctx context.Context,
+	findingID string,
+) ([]review.DispositionRecord, error) {
 	if err := store.validate(); err != nil {
 		return nil, err
 	}
@@ -281,7 +310,10 @@ WHERE finding_id = ? ORDER BY created_at ASC, rowid ASC`, strings.TrimSpace(find
 
 // GetCurrentDisposition returns the latest decision or an implicit open state
 // when a finding has not yet received a human event.
-func (store *RepositoryStore) GetCurrentDisposition(ctx context.Context, findingID string) (review.DispositionRecord, error) {
+func (store *RepositoryStore) GetCurrentDisposition(
+	ctx context.Context,
+	findingID string,
+) (review.DispositionRecord, error) {
 	events, err := store.ListDispositions(ctx, findingID)
 	if err != nil {
 		return review.DispositionRecord{}, err
@@ -293,9 +325,11 @@ func (store *RepositoryStore) GetCurrentDisposition(ctx context.Context, finding
 	if findingErr != nil {
 		return review.DispositionRecord{}, findingErr
 	}
-	return review.DispositionRecord{FindingID: finding.FindingID, Revision: finding.Revision,
+	return review.DispositionRecord{
+		FindingID: finding.FindingID, Revision: finding.Revision,
 		SessionID: finding.SessionID, RoundID: finding.RoundID, Disposition: review.FindingDispositionOpen,
-		CreatedAt: finding.CreatedAt}, nil
+		CreatedAt: finding.CreatedAt,
+	}, nil
 }
 
 // SavePresentation appends one version of publishable finding wording.
@@ -326,7 +360,8 @@ func (store *RepositoryStore) SavePresentation(ctx context.Context, presentation
 		return fmt.Errorf("save presentation: %w", err)
 	}
 	if presentation.Version < 1 {
-		if err := store.database.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) + 1 FROM finding_presentations WHERE finding_id = ?`, presentation.FindingID).Scan(&presentation.Version); err != nil {
+		if err := store.database.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) + 1 FROM finding_presentations WHERE finding_id = ?`, presentation.FindingID).
+			Scan(&presentation.Version); err != nil {
 			return fmt.Errorf("choose presentation version: %w", err)
 		}
 	}
@@ -362,7 +397,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`, presentation.ID, presentation.FindingID, presenta
 
 // ListPresentations returns all wording versions for a finding in version
 // order. It never changes the associated finding revision.
-func (store *RepositoryStore) ListPresentations(ctx context.Context, findingID string) ([]review.PresentationRecord, error) {
+func (store *RepositoryStore) ListPresentations(
+	ctx context.Context,
+	findingID string,
+) ([]review.PresentationRecord, error) {
 	if err := store.validate(); err != nil {
 		return nil, err
 	}
@@ -398,7 +436,10 @@ WHERE finding_id = ? ORDER BY version ASC, id ASC`, strings.TrimSpace(findingID)
 }
 
 // GetLatestPresentation returns the newest wording version for a finding.
-func (store *RepositoryStore) GetLatestPresentation(ctx context.Context, findingID string) (review.PresentationRecord, error) {
+func (store *RepositoryStore) GetLatestPresentation(
+	ctx context.Context,
+	findingID string,
+) (review.PresentationRecord, error) {
 	presentations, err := store.ListPresentations(ctx, findingID)
 	if err != nil {
 		return review.PresentationRecord{}, err

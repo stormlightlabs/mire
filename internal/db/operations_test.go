@@ -18,7 +18,8 @@ func TestOperationLifecyclePersistsStateAndActivity(t *testing.T) {
 		t.Fatalf("OpenState() error = %v", err)
 	}
 	defer database.Close()
-	store := NewRepositoryStore(database,
+	store := NewRepositoryStore(
+		database,
 		WithClock(func() time.Time { return clock }),
 		WithProcessInstanceID("process-one"),
 		WithOperationLeaseDuration(time.Minute),
@@ -43,7 +44,15 @@ func TestOperationLifecyclePersistsStateAndActivity(t *testing.T) {
 	if operation.Status != OperationStatusQueued {
 		t.Fatalf("created operation status = %s, want queued", operation.Status)
 	}
-	if _, err := store.CreateOperation(ctx, session.ID, round.ID, OperationKindReview); !errors.Is(err, ErrOperationActive) {
+	if _, err := store.CreateOperation(
+		ctx,
+		session.ID,
+		round.ID,
+		OperationKindReview,
+	); !errors.Is(
+		err,
+		ErrOperationActive,
+	) {
 		t.Fatalf("second CreateOperation() error = %v, want ErrOperationActive", err)
 	}
 
@@ -66,7 +75,13 @@ func TestOperationLifecyclePersistsStateAndActivity(t *testing.T) {
 		t.Fatalf("RenewOperation() error = %v", err)
 	}
 	if !heartbeat.HeartbeatAt.Equal(clock) || !heartbeat.LeaseExpiresAt.Equal(clock.Add(time.Minute)) {
-		t.Fatalf("heartbeat lease = %s/%s, want %s/%s", heartbeat.HeartbeatAt, heartbeat.LeaseExpiresAt, clock, clock.Add(time.Minute))
+		t.Fatalf(
+			"heartbeat lease = %s/%s, want %s/%s",
+			heartbeat.HeartbeatAt,
+			heartbeat.LeaseExpiresAt,
+			clock,
+			clock.Add(time.Minute),
+		)
 	}
 
 	clock = clock.Add(10 * time.Second)
@@ -127,7 +142,8 @@ func TestOperationRecoveryAbandonsLeaseAndMarksRoundIncomplete(t *testing.T) {
 		DisplayName:       "recovery",
 		DiscoveredGitDir:  "/workspaces/recovery/.git",
 	}
-	first := NewRepositoryStore(database,
+	first := NewRepositoryStore(
+		database,
 		WithClock(func() time.Time { return clock }),
 		WithProcessInstanceID("process-one"),
 		WithOperationLeaseDuration(time.Second),
@@ -149,7 +165,8 @@ func TestOperationRecoveryAbandonsLeaseAndMarksRoundIncomplete(t *testing.T) {
 	}
 
 	clock = clock.Add(2 * time.Second)
-	second := NewRepositoryStore(database,
+	second := NewRepositoryStore(
+		database,
 		WithClock(func() time.Time { return clock }),
 		WithProcessInstanceID("process-two"),
 		WithOperationLeaseDuration(time.Second),
@@ -193,7 +210,8 @@ func TestOpenStoreRecoversExpiredOperationsAtStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenState() error = %v", err)
 	}
-	first := NewRepositoryStore(database,
+	first := NewRepositoryStore(
+		database,
 		WithClock(func() time.Time { return expiredAt }),
 		WithProcessInstanceID("process-one"),
 		WithOperationLeaseDuration(time.Second),
@@ -367,8 +385,19 @@ func TestValidateOperationTransitions(t *testing.T) {
 		{OperationStatusAbandoned, OperationStatusComplete},
 	}
 	for _, transition := range invalid {
-		if err := ValidateOperationTransition(transition[0], transition[1]); !errors.Is(err, ErrInvalidOperationTransition) {
-			t.Errorf("ValidateOperationTransition(%s, %s) error = %v, want invalid transition", transition[0], transition[1], err)
+		if err := ValidateOperationTransition(
+			transition[0],
+			transition[1],
+		); !errors.Is(
+			err,
+			ErrInvalidOperationTransition,
+		) {
+			t.Errorf(
+				"ValidateOperationTransition(%s, %s) error = %v, want invalid transition",
+				transition[0],
+				transition[1],
+				err,
+			)
 		}
 	}
 }

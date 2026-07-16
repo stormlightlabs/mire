@@ -116,7 +116,11 @@ func (capture Capture) Validate() error {
 		return err
 	}
 	if capture.ComparisonKind != "" && capture.ComparisonKind != comparisonKind {
-		return fmt.Errorf("snapshot capture: comparison kind %q does not match %q", capture.ComparisonKind, capture.RequestedComparison)
+		return fmt.Errorf(
+			"snapshot capture: comparison kind %q does not match %q",
+			capture.ComparisonKind,
+			capture.RequestedComparison,
+		)
 	}
 	if strings.TrimSpace(capture.EffectiveBaseOID) == "" || strings.TrimSpace(capture.TargetOID) == "" {
 		return fmt.Errorf("snapshot capture: resolved object IDs are incomplete")
@@ -157,7 +161,8 @@ func (capture Capture) Validate() error {
 				return err
 			}
 		}
-		if capture.HeadManifestDigest == "" || capture.IndexManifestDigest == "" || capture.WorktreeManifestDigest == "" {
+		if capture.HeadManifestDigest == "" || capture.IndexManifestDigest == "" ||
+			capture.WorktreeManifestDigest == "" {
 			return fmt.Errorf("snapshot capture: working-tree layer manifest digests are incomplete")
 		}
 		if capture.WorktreeOID != "" && capture.WorktreeOID != capture.WorktreeManifestDigest {
@@ -224,11 +229,15 @@ func validateEntries(side string, entries []Entry) error {
 // ValidateRepositoryPath validates a Git tree path before it can cross into
 // any filesystem or object-store boundary.
 func ValidateRepositoryPath(value string) error {
-	if value == "" || value == "." || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") || strings.ContainsRune(value, '\x00') {
+	if value == "" || value == "." || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") ||
+		strings.ContainsRune(value, '\x00') {
 		return fmt.Errorf("invalid repository path %q", value)
 	}
 	filesystemPath := filepath.FromSlash(value)
-	windowsDrivePath := len(value) >= 3 && ((value[0] >= 'a' && value[0] <= 'z') || (value[0] >= 'A' && value[0] <= 'Z')) && value[1] == ':' && value[2] == '/'
+	windowsDrivePath := len(value) >= 3 &&
+		((value[0] >= 'a' && value[0] <= 'z') || (value[0] >= 'A' && value[0] <= 'Z')) &&
+		value[1] == ':' &&
+		value[2] == '/'
 	if filepath.IsAbs(filesystemPath) || filepath.VolumeName(filesystemPath) != "" || windowsDrivePath {
 		return fmt.Errorf("invalid repository path %q", value)
 	}
@@ -264,7 +273,11 @@ func OverallManifestDigest(capture Capture) (string, error) {
 		return "", err
 	}
 	if capture.ComparisonKind != "" && capture.ComparisonKind != comparisonKind {
-		return "", fmt.Errorf("snapshot capture: comparison kind %q does not match %q", capture.ComparisonKind, capture.RequestedComparison)
+		return "", fmt.Errorf(
+			"snapshot capture: comparison kind %q does not match %q",
+			capture.ComparisonKind,
+			capture.RequestedComparison,
+		)
 	}
 	baseOID := capture.BaseOID
 	if baseOID == "" {
@@ -330,7 +343,8 @@ func OverallManifestDigest(capture Capture) (string, error) {
 
 // ManifestLayers returns the immutable layer metadata represented by capture.
 func (capture Capture) ManifestLayers() []Layer {
-	if capture.ComparisonKind == ComparisonWorktree || strings.EqualFold(capture.RequestedComparison, WorktreeComparison) {
+	if capture.ComparisonKind == ComparisonWorktree ||
+		strings.EqualFold(capture.RequestedComparison, WorktreeComparison) {
 		return []Layer{
 			{Name: TreeSideHead, Identity: capture.BaseOID, ManifestDigest: capture.HeadManifestDigest},
 			{Name: TreeSideIndex, Identity: capture.IndexOID, ManifestDigest: capture.IndexManifestDigest},
@@ -367,8 +381,10 @@ func BuildChanges(base, target []Entry) []Change {
 		if !sameEntry(entry, other) {
 			status = ChangeModified
 		}
-		changes = append(changes, Change{Status: status, BasePath: path, TargetPath: path,
-			BaseDigest: entry.ContentDigest, TargetDigest: other.ContentDigest})
+		changes = append(changes, Change{
+			Status: status, BasePath: path, TargetPath: path,
+			BaseDigest: entry.ContentDigest, TargetDigest: other.ContentDigest,
+		})
 	}
 	for path, entry := range targetByPath {
 		if _, ok := baseByPath[path]; !ok {
@@ -389,18 +405,24 @@ func BuildChanges(base, target []Entry) []Change {
 		}
 		if rename >= 0 {
 			usedAdded[rename] = true
-			changes = append(changes, Change{Status: ChangeRenamed, BasePath: old.Path,
+			changes = append(changes, Change{
+				Status: ChangeRenamed, BasePath: old.Path,
 				TargetPath: added[rename].Path, BaseDigest: old.ContentDigest,
-				TargetDigest: added[rename].ContentDigest})
+				TargetDigest: added[rename].ContentDigest,
+			})
 		} else {
-			changes = append(changes, Change{Status: ChangeDeleted, BasePath: old.Path,
-				BaseDigest: old.ContentDigest})
+			changes = append(changes, Change{
+				Status: ChangeDeleted, BasePath: old.Path,
+				BaseDigest: old.ContentDigest,
+			})
 		}
 	}
 	for index, entry := range added {
 		if !usedAdded[index] {
-			changes = append(changes, Change{Status: ChangeAdded, TargetPath: entry.Path,
-				TargetDigest: entry.ContentDigest})
+			changes = append(changes, Change{
+				Status: ChangeAdded, TargetPath: entry.Path,
+				TargetDigest: entry.ContentDigest,
+			})
 		}
 	}
 	sort.Slice(changes, func(i, j int) bool {

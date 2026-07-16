@@ -10,7 +10,12 @@ func TestFindingIdentitySurvivesMovedLinesAndRenamedPaths(t *testing.T) {
 
 	firstChange := findingChange("src/old.go", "blob-1", "hunk-1")
 	firstCandidate := findingCandidate(firstChange, "src/old.go", 4)
-	first, err := NewFindingRevision(firstChange, firstCandidate, "round-1", time.Date(2026, time.July, 15, 17, 0, 0, 0, time.UTC))
+	first, err := NewFindingRevision(
+		firstChange,
+		firstCandidate,
+		"round-1",
+		time.Date(2026, time.July, 15, 17, 0, 0, 0, time.UTC),
+	)
 	if err != nil {
 		t.Fatalf("NewFindingRevision(first) error = %v", err)
 	}
@@ -21,7 +26,12 @@ func TestFindingIdentitySurvivesMovedLinesAndRenamedPaths(t *testing.T) {
 
 	secondChange := findingChange("pkg/new.go", "blob-1", "hunk-1")
 	secondCandidate := findingCandidate(secondChange, "pkg/new.go", 91)
-	second, err := NewFindingRevision(secondChange, secondCandidate, "round-2", time.Date(2026, time.July, 15, 17, 1, 0, 0, time.UTC))
+	second, err := NewFindingRevision(
+		secondChange,
+		secondCandidate,
+		"round-2",
+		time.Date(2026, time.July, 15, 17, 1, 0, 0, time.UTC),
+	)
 	if err != nil {
 		t.Fatalf("NewFindingRevision(second) error = %v", err)
 	}
@@ -30,7 +40,13 @@ func TestFindingIdentitySurvivesMovedLinesAndRenamedPaths(t *testing.T) {
 		t.Fatalf("CorrelateFinding(second) error = %v", err)
 	}
 	if second.FindingID != first.FindingID || second.Revision != first.Revision+1 {
-		t.Fatalf("correlated identity = %q/%d, want %q/%d", second.FindingID, second.Revision, first.FindingID, first.Revision+1)
+		t.Fatalf(
+			"correlated identity = %q/%d, want %q/%d",
+			second.FindingID,
+			second.Revision,
+			first.FindingID,
+			first.Revision+1,
+		)
 	}
 	if len(second.Relationships) != 1 || second.Relationships[0].Kind != FindingRelationshipPredecessor {
 		t.Fatalf("relationships = %#v, want one predecessor", second.Relationships)
@@ -71,7 +87,10 @@ func TestFindingCorrelationRejectsRewrittenClaimsAndLinksAmbiguity(t *testing.T)
 	secondPrevious := first
 	secondPrevious.FindingID = "finding-second"
 	secondPrevious.Digest = FindingRevisionDigest(secondPrevious)
-	ambiguous, err := CorrelateFinding([]FindingRevision{first, secondPrevious}, findingCandidateRevision(change, baseCandidate, "round-2"))
+	ambiguous, err := CorrelateFinding(
+		[]FindingRevision{first, secondPrevious},
+		findingCandidateRevision(change, baseCandidate, "round-2"),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +127,8 @@ func TestCorrelateFindingsLinksDuplicateOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(correlated) != 2 || correlated[0].FindingID == prior.FindingID || correlated[1].FindingID == prior.FindingID {
+	if len(correlated) != 2 || correlated[0].FindingID == prior.FindingID ||
+		correlated[1].FindingID == prior.FindingID {
 		t.Fatalf("duplicate outputs reused prior identity: %#v", correlated)
 	}
 	for index, finding := range correlated {
@@ -128,7 +148,12 @@ func TestDispositionAndPresentationValidation(t *testing.T) {
 	t.Parallel()
 
 	when := time.Date(2026, time.July, 15, 17, 2, 0, 0, time.UTC)
-	disposition := DispositionRecord{FindingID: "finding-1", Revision: 1, Disposition: FindingDispositionAcceptedRisk, CreatedAt: when}
+	disposition := DispositionRecord{
+		FindingID:   "finding-1",
+		Revision:    1,
+		Disposition: FindingDispositionAcceptedRisk,
+		CreatedAt:   when,
+	}
 	if err := ValidateDisposition(disposition); err == nil {
 		t.Fatal("accepted risk without rationale was accepted")
 	}
@@ -138,7 +163,13 @@ func TestDispositionAndPresentationValidation(t *testing.T) {
 		t.Fatalf("ValidateDisposition() error = %v", err)
 	}
 
-	presentation := PresentationRecord{FindingID: "finding-1", FindingRevision: 1, Version: 1, Body: "Please reject the invalid input.", CreatedAt: when}
+	presentation := PresentationRecord{
+		FindingID:       "finding-1",
+		FindingRevision: 1,
+		Version:         1,
+		Body:            "Please reject the invalid input.",
+		CreatedAt:       when,
+	}
 	presentation.SchemaVersion = FindingPresentationSchemaVersion
 	presentation.Digest = PresentationDigest(presentation)
 	if err := ValidatePresentation(presentation); err != nil {
@@ -148,7 +179,11 @@ func TestDispositionAndPresentationValidation(t *testing.T) {
 
 func findingChange(path, blobDigest, hunkDigest string) ChangeModel {
 	return ChangeModel{
-		SchemaVersion: "mire/v1/change-model", SessionID: "session-1", SnapshotID: "snapshot-1", SnapshotDigest: "manifest-1", Digest: "change-1",
+		SchemaVersion:  "mire/v1/change-model",
+		SessionID:      "session-1",
+		SnapshotID:     "snapshot-1",
+		SnapshotDigest: "manifest-1",
+		Digest:         "change-1",
 		Files: []FileChange{{
 			Status: "modified", TargetPath: path, TargetDigest: blobDigest,
 			Hunks: []Hunk{{
@@ -160,10 +195,31 @@ func findingChange(path, blobDigest, hunkDigest string) ChangeModel {
 }
 
 func findingCandidate(change ChangeModel, path string, line int) CandidateRecord {
-	return CandidateRecord{ID: "candidate-1", RunID: "review-run-1", PassName: "correctness", Ordinal: 0, Fingerprint: "candidate-fingerprint", Candidate: Candidate{
-		Claim: "The changed branch accepts invalid input.", Impact: "Invalid input reaches a state that assumes the guard ran.", Category: "correctness", Severity: "high", Confidence: 0.75,
-		Anchors: []Anchor{{SnapshotID: change.SnapshotID, Side: "target", Path: path, HunkID: path + "#hunk", StartLine: line, EndLine: line, HunkDigest: "hunk-1"}},
-	}}
+	return CandidateRecord{
+		ID:          "candidate-1",
+		RunID:       "review-run-1",
+		PassName:    "correctness",
+		Ordinal:     0,
+		Fingerprint: "candidate-fingerprint",
+		Candidate: Candidate{
+			Claim:      "The changed branch accepts invalid input.",
+			Impact:     "Invalid input reaches a state that assumes the guard ran.",
+			Category:   "correctness",
+			Severity:   "high",
+			Confidence: 0.75,
+			Anchors: []Anchor{
+				{
+					SnapshotID: change.SnapshotID,
+					Side:       "target",
+					Path:       path,
+					HunkID:     path + "#hunk",
+					StartLine:  line,
+					EndLine:    line,
+					HunkDigest: "hunk-1",
+				},
+			},
+		},
+	}
 }
 
 func findingCandidateRevision(change ChangeModel, candidate CandidateRecord, roundID string) FindingRevision {

@@ -60,8 +60,16 @@ func RenderSessions(output io.Writer, sessions []db.Session) error {
 		if repository == "" {
 			repository = session.RepositoryIdentity
 		}
-		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\n",
-			SessionID(session.ID), session.Title, repository, session.CreatedAt.UTC().Format("2006-01-02 15:04:05Z")); err != nil {
+		if _, err := fmt.Fprintf(
+			writer,
+			"%s\t%s\t%s\t%s\n",
+			SessionID(
+				session.ID,
+			),
+			session.Title,
+			repository,
+			session.CreatedAt.UTC().Format("2006-01-02 15:04:05Z"),
+		); err != nil {
 			return err
 		}
 	}
@@ -75,17 +83,34 @@ func RenderReviewCapture(output io.Writer, session db.Session, round db.Round, p
 		return fmt.Errorf("render review capture: output is nil")
 	}
 	if persistedSnapshot.Kind == snapshot.ComparisonWorktree {
-		_, err := fmt.Fprintf(output,
+		_, err := fmt.Fprintf(
+			output,
 			"Captured review\nSession: %s\nRound: %s\nSnapshot: %s\nKind: %s\nComparison: %s\nHEAD: %s\nIndex: %s\nWorktree: %s\n",
-			session.ID, round.ID, persistedSnapshot.ID, persistedSnapshot.Kind, persistedSnapshot.RequestedComparison,
-			persistedSnapshot.BaseOID, persistedSnapshot.IndexOID, persistedSnapshot.TargetOID)
+			session.ID,
+			round.ID,
+			persistedSnapshot.ID,
+			persistedSnapshot.Kind,
+			persistedSnapshot.RequestedComparison,
+			persistedSnapshot.BaseOID,
+			persistedSnapshot.IndexOID,
+			persistedSnapshot.TargetOID,
+		)
 		return err
 	}
 	if persistedSnapshot.Kind == snapshot.ComparisonThreeDot {
-		_, err := fmt.Fprintf(output,
+		_, err := fmt.Fprintf(
+			output,
 			"Captured review\nSession: %s\nRound: %s\nSnapshot: %s\nKind: %s\nRange: %s\nBase: %s\nEffective base: %s\nTarget: %s\nMerge base: %s\n",
-			session.ID, round.ID, persistedSnapshot.ID, persistedSnapshot.Kind, persistedSnapshot.RequestedComparison,
-			persistedSnapshot.BaseOID, persistedSnapshot.EffectiveBaseOID, persistedSnapshot.TargetOID, persistedSnapshot.MergeBaseOID)
+			session.ID,
+			round.ID,
+			persistedSnapshot.ID,
+			persistedSnapshot.Kind,
+			persistedSnapshot.RequestedComparison,
+			persistedSnapshot.BaseOID,
+			persistedSnapshot.EffectiveBaseOID,
+			persistedSnapshot.TargetOID,
+			persistedSnapshot.MergeBaseOID,
+		)
 		return err
 	}
 	_, err := fmt.Fprintf(output,
@@ -105,11 +130,23 @@ func RenderReviewHistory(output io.Writer, session db.Session, reports []RoundRe
 		_, err := fmt.Fprintln(output, Muted("No sessions found."))
 		return err
 	}
-	if _, err := fmt.Fprintf(output, "Session: %s\nTitle: %s\nRepository: %s\n", session.ID, session.Title, session.RepositoryIdentity); err != nil {
+	if _, err := fmt.Fprintf(
+		output,
+		"Session: %s\nTitle: %s\nRepository: %s\n",
+		session.ID,
+		session.Title,
+		session.RepositoryIdentity,
+	); err != nil {
 		return err
 	}
 	for _, report := range reports {
-		if _, err := fmt.Fprintf(output, "\nRound %d: %s\nStatus: %s\n", report.Round.Number, report.Round.ID, report.Round.Status); err != nil {
+		if _, err := fmt.Fprintf(
+			output,
+			"\nRound %d: %s\nStatus: %s\n",
+			report.Round.Number,
+			report.Round.ID,
+			report.Round.Status,
+		); err != nil {
 			return err
 		}
 		if report.Round.PredecessorRoundID != "" {
@@ -118,7 +155,12 @@ func RenderReviewHistory(output io.Writer, session db.Session, reports []RoundRe
 			}
 		}
 		if report.Snapshot.ID != "" {
-			if _, err := fmt.Fprintf(output, "Snapshot: %s\nKind: %s\n", report.Snapshot.ID, report.Snapshot.Kind); err != nil {
+			if _, err := fmt.Fprintf(
+				output,
+				"Snapshot: %s\nKind: %s\n",
+				report.Snapshot.ID,
+				report.Snapshot.Kind,
+			); err != nil {
 				return err
 			}
 		}
@@ -131,12 +173,20 @@ func RenderReviewHistory(output io.Writer, session db.Session, reports []RoundRe
 			}
 		}
 		if len(report.Divergence.AffectedRefs) > 0 {
-			if _, err := fmt.Fprintf(output, "Refs: %s\n", strings.Join(report.Divergence.AffectedRefs, ", ")); err != nil {
+			if _, err := fmt.Fprintf(
+				output,
+				"Refs: %s\n",
+				strings.Join(report.Divergence.AffectedRefs, ", "),
+			); err != nil {
 				return err
 			}
 		}
 		if len(report.Divergence.AffectedPaths) > 0 {
-			if _, err := fmt.Fprintf(output, "Paths: %s\n", strings.Join(report.Divergence.AffectedPaths, ", ")); err != nil {
+			if _, err := fmt.Fprintf(
+				output,
+				"Paths: %s\n",
+				strings.Join(report.Divergence.AffectedPaths, ", "),
+			); err != nil {
 				return err
 			}
 		}

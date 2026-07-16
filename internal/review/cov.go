@@ -25,7 +25,13 @@ func (c ReviewCoverage) clone() ReviewCoverage {
 	copyCoverage := c
 	copyCoverage.ExaminedFiles = append([]string(nil), c.ExaminedFiles...)
 	copyCoverage.ExaminedHunks = append([]string(nil), c.ExaminedHunks...)
-	copyCoverage.RetrievedArtifacts = append([]RetrievedArtifact(nil), c.RetrievedArtifacts...)
+	if c.RetrievedArtifacts != nil {
+		copyCoverage.RetrievedArtifacts = make([]RetrievedArtifact, len(c.RetrievedArtifacts))
+		for index, artifact := range c.RetrievedArtifacts {
+			copyCoverage.RetrievedArtifacts[index] = artifact
+			copyCoverage.RetrievedArtifacts[index].RetrievedArtifactMetadata = artifact.Metadata()
+		}
+	}
 	copyCoverage.Passes = append([]PassCoverage(nil), c.Passes...)
 	copyCoverage.Analyzers = append([]AnalyzerAvailability(nil), c.Analyzers...)
 	copyCoverage.Exclusions = append([]CoverageExclusion(nil), c.Exclusions...)

@@ -103,7 +103,10 @@ func TestBuildAndRenderAreDeterministicAndDoNotEmbedSnapshotContent(t *testing.T
 		t.Fatalf("change projection = %#v, diff = %q, omissions = %#v", value.Change, value.DiffPatch, value.Omissions)
 	}
 	value.Coverage.RetrievedArtifacts = []review.RetrievedArtifact{
-		{ID: "artifact", Content: "before\n", Digest: "digest", Size: 7},
+		review.NewRetrievedArtifact(
+			review.RetrievedArtifactMetadata{ID: "artifact", Digest: "digest", Size: 7},
+			"before\n",
+		),
 	}
 	canonical, err := CanonicalJSON(value)
 	if err != nil {
@@ -191,5 +194,40 @@ func TestBundleContainsOnlyNamedFiles(t *testing.T) {
 	}
 	if len(entries) != len(want) {
 		t.Fatalf("bundle entries = %d, want %d", len(entries), len(want))
+	}
+}
+
+func TestChatRunProjectionKeepsRunNested(t *testing.T) {
+	t.Parallel()
+
+	data, err := json.Marshal(ChatRunProjection{
+		Run: review.RunRecord{ID: "run-1"},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal(ChatRunProjection) error = %v", err)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("decode chat projection JSON: %v", err)
+	}
+	if _, ok := decoded["run"]; !ok {
+		t.Fatalf("chat projection lost nested run: %s", data)
+	}
+}
+
+func TestArtifactDescriptorUsesSafeRetrievedArtifactMetadata(t *testing.T) {
+	t.Parallel()
+
+	data, err := json.Marshal(ArtifactDescriptor{
+		ID: "artifact-1", Digest: "digest-1", Size: 3,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal(ArtifactDescriptor) error = %v", err)
+	}
+	if strings.Contains(string(data), "content") {
+		t.Fatalf("artifact descriptor exposed content: %s", data)
+	}
+	if !strings.Contains(string(data), `"id":"artifact-1"`) {
+		t.Fatalf("artifact descriptor lost metadata: %s", data)
 	}
 }

@@ -268,17 +268,18 @@ FROM review_artifacts WHERE round_id = ? ORDER BY pass_name ASC, id ASC`, string
 	result := make([]review.RetrievedArtifact, 0)
 	for rows.Next() {
 		var artifact review.RetrievedArtifact
-		var hunkIDs string
+		var hunkIDs, content string
 		var excluded, truncated int
 		if err := rows.Scan(&artifact.ID, &artifact.RunID, &artifact.PassName, &artifact.Kind,
 			&artifact.Path, &artifact.Relation, &hunkIDs, &artifact.Digest, &artifact.Size,
-			&artifact.Content, &excluded, &artifact.ExclusionReason, &truncated); err != nil {
+			&content, &excluded, &artifact.ExclusionReason, &truncated); err != nil {
 			return nil, fmt.Errorf("list review artifacts: %w", err)
 		}
 		if err := json.Unmarshal([]byte(hunkIDs), &artifact.HunkIDs); err != nil {
 			return nil, fmt.Errorf("decode review artifact %q hunk IDs: %w", artifact.ID, err)
 		}
 		artifact.Excluded, artifact.Truncated = excluded == 1, truncated == 1
+		artifact.SetContent(content)
 		result = append(result, artifact)
 	}
 	if err := rows.Err(); err != nil {
@@ -415,7 +416,7 @@ INSERT INTO review_artifacts (
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, artifact.ID,
 			pass.SessionID, pass.RoundID, pass.SnapshotID, result.PassID, artifact.RunID,
 			artifact.PassName, artifact.Kind, artifact.Path, artifact.Relation, hunkIDs,
-			artifact.Digest, artifact.Size, artifact.Content, shared.BoolInt(artifact.Excluded),
+			artifact.Digest, artifact.Size, artifact.Content(), shared.BoolInt(artifact.Excluded),
 			artifact.ExclusionReason, shared.BoolInt(artifact.Truncated), shared.TimestampString(now)); err != nil {
 			return fmt.Errorf("insert retrieved artifact %q: %w", artifact.ID, err)
 		}

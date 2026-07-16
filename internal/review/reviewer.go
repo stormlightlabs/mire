@@ -75,9 +75,10 @@ func (s ReviewPassStatus) Valid() bool {
 	}
 }
 
-// RetrievedArtifact records context considered by a pass. Content is private
-// application state and is never a live-worktree read.
-type RetrievedArtifact struct {
+// RetrievedArtifactMetadata records the safe identity and provenance of
+// context considered by a review pass. It deliberately contains no artifact
+// bytes, so it is safe to use in coverage and export projections.
+type RetrievedArtifactMetadata struct {
 	ID              string   `json:"id"`
 	RunID           string   `json:"run_id"`
 	PassName        string   `json:"pass_name"`
@@ -87,10 +88,41 @@ type RetrievedArtifact struct {
 	HunkIDs         []string `json:"hunk_ids,omitempty"`
 	Digest          string   `json:"digest"`
 	Size            int64    `json:"size"`
-	Content         string   `json:"content,omitempty"`
 	Excluded        bool     `json:"excluded,omitempty"`
 	ExclusionReason string   `json:"exclusion_reason,omitempty"`
 	Truncated       bool     `json:"truncated,omitempty"`
+}
+
+// RetrievedArtifact records context considered by a pass. Content is private
+// application state and is never included in its JSON representation.
+type RetrievedArtifact struct {
+	RetrievedArtifactMetadata
+	content string
+}
+
+// NewRetrievedArtifact constructs an artifact with safe metadata and private
+// content. Metadata slices are copied so callers retain ownership of inputs.
+func NewRetrievedArtifact(metadata RetrievedArtifactMetadata, content string) RetrievedArtifact {
+	metadata.HunkIDs = append([]string(nil), metadata.HunkIDs...)
+	return RetrievedArtifact{RetrievedArtifactMetadata: metadata, content: content}
+}
+
+// Metadata returns a copy of the safe artifact metadata.
+func (artifact RetrievedArtifact) Metadata() RetrievedArtifactMetadata {
+	metadata := artifact.RetrievedArtifactMetadata
+	metadata.HunkIDs = append([]string(nil), metadata.HunkIDs...)
+	return metadata
+}
+
+// Content returns the private artifact bytes for explicitly authorized local
+// processing such as model input or evidence bundle creation.
+func (artifact RetrievedArtifact) Content() string { return artifact.content }
+
+// SetContent replaces the private artifact bytes without changing metadata.
+func (artifact *RetrievedArtifact) SetContent(content string) {
+	if artifact != nil {
+		artifact.content = content
+	}
 }
 
 // RetrievalRequest asks for context related to already-examined changed code.
@@ -806,11 +838,14 @@ func retrievePassArtifacts(
 			hunkIDs = append(hunkIDs, hunk.ID)
 		}
 		patchDigest := plannerDigestBytes([]byte(file.Patch))
-		artifacts = append(artifacts, RetrievedArtifact{
-			ID: fmt.Sprintf("%s:artifact:%d", runID, len(artifacts)), RunID: runID,
-			PassName: passName, Kind: "changed_code", Path: pathName, Relation: "changed_code", HunkIDs: hunkIDs,
-			Digest: patchDigest, Size: int64(len(file.Patch)), Content: file.Patch,
-		})
+		artifacts = append(artifacts, NewRetrievedArtifact(
+			RetrievedArtifactMetadata{
+				ID: fmt.Sprintf("%s:artifact:%d", runID, len(artifacts)), RunID: runID,
+				PassName: passName, Kind: "changed_code", Path: pathName, Relation: "changed_code", HunkIDs: hunkIDs,
+				Digest: patchDigest, Size: int64(len(file.Patch)),
+			},
+			file.Patch,
+		))
 		if retriever == nil {
 			continue
 		}
@@ -839,11 +874,11 @@ func retrievePassArtifacts(
 			if artifact.Relation == "" {
 				artifact.Relation = "related_to_changed_code"
 			}
-			if artifact.Digest == "" && artifact.Content != "" {
-				artifact.Digest = plannerDigestBytes([]byte(artifact.Content))
+			if artifact.Digest == "" && artifact.Content() != "" {
+				artifact.Digest = plannerDigestBytes([]byte(artifact.Content()))
 			}
-			if artifact.Size == 0 && artifact.Content != "" {
-				artifact.Size = int64(len(artifact.Content))
+			if artifact.Size == 0 && artifact.Content() != "" {
+				artifact.Size = int64(len(artifact.Content()))
 			}
 			if budget.MaxArtifacts > 0 && len(artifacts) >= budget.MaxArtifacts {
 				truncated = true
@@ -851,12 +886,12 @@ func retrievePassArtifacts(
 				artifact.Truncated = true
 				artifact.ExclusionReason = "additional snapshot context was excluded by the artifact budget"
 				if artifact.Digest == "" {
-					artifact.Digest = plannerDigestBytes([]byte(artifact.Content))
+					artifact.Digest = plannerDigestBytes([]byte(artifact.Content()))
 				}
 				if artifact.Size == 0 {
-					artifact.Size = int64(len(artifact.Content))
+					artifact.Size = int64(len(artifact.Content()))
 				}
-				artifact.Content = ""
+				artifact.SetContent("")
 				artifacts = append(artifacts, artifact)
 				diagnostic := ReviewDiagnostic{
 					ID:        fmt.Sprintf("%s:diagnostic:%d", runID, len(diagnostics)),
@@ -869,10 +904,10 @@ func retrievePassArtifacts(
 				diagnostics = append(diagnostics, diagnostic)
 				break
 			}
-			if artifact.Content != "" && artifact.Digest != plannerDigestBytes([]byte(artifact.Content)) {
+			if artifact.Content() != "" && artifact.Digest != plannerDigestBytes([]byte(artifact.Content())) {
 				artifact.Excluded = true
 				artifact.ExclusionReason = "artifact digest does not match its supplied content"
-				artifact.Content = ""
+				artifact.SetContent("")
 				diagnostics = append(diagnostics, ReviewDiagnostic{
 					ID: fmt.Sprintf("%s:diagnostic:%d", runID, len(diagnostics)), PassName: passName, RunID: runID,
 					Code: DiagnosticRetrievalFailure, Message: artifact.ExclusionReason, CreatedAt: now.UTC(),
@@ -886,7 +921,7 @@ func retrievePassArtifacts(
 					artifact.Size,
 					budget.MaxArtifactBytes,
 				)
-				artifact.Content = ""
+				artifact.SetContent("")
 				truncated = true
 				diagnostics = append(diagnostics, ReviewDiagnostic{
 					ID: fmt.Sprintf("%s:diagnostic:%d", runID, len(diagnostics)), PassName: passName, RunID: runID,

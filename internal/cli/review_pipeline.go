@@ -410,15 +410,17 @@ func (retriever snapshotRetriever) Retrieve(
 			return nil, closeErr
 		}
 		return []review.RetrievedArtifact{
-			{
-				Kind:     request.Kind,
-				Path:     pathName,
-				Relation: request.Relation,
-				HunkIDs:  append([]string(nil), request.HunkIDs...),
-				Digest:   entry.ContentDigest,
-				Size:     int64(len(data)),
-				Content:  string(data),
-			},
+			review.NewRetrievedArtifact(
+				review.RetrievedArtifactMetadata{
+					Kind:     request.Kind,
+					Path:     pathName,
+					Relation: request.Relation,
+					HunkIDs:  append([]string(nil), request.HunkIDs...),
+					Digest:   entry.ContentDigest,
+					Size:     int64(len(data)),
+				},
+				string(data),
+			),
 		}, nil
 	}
 	return nil, nil

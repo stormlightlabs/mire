@@ -21,31 +21,23 @@ const (
 
 // Anthropic is an adapter for Anthropic's native Messages API.
 type Anthropic struct {
-	config      RoleConfig
-	credentials CredentialResolver
-	client      *http.Client
+	adapterBase
 }
 
 // NewAnthropic creates an Anthropic adapter without resolving the configured
 // credential.
 func NewAnthropic(config RoleConfig, credentials CredentialResolver, client *http.Client) (*Anthropic, error) {
-	normalized, err := normalizeRoleConfig(config)
+	base, err := newAdapterBase(config, credentials, client)
 	if err != nil {
 		return nil, err
 	}
-	if normalized.Provider != ProviderAnthropic {
-		return nil, fmt.Errorf("create Anthropic model: provider %q is unsupported", normalized.Provider)
+	if base.config.Provider != ProviderAnthropic {
+		return nil, fmt.Errorf("create Anthropic model: provider %q is unsupported", base.config.Provider)
 	}
-	if _, err := endpoint(normalized.BaseURL, "messages"); err != nil {
+	if _, err := endpoint(base.config.BaseURL, "messages"); err != nil {
 		return nil, fmt.Errorf("create Anthropic model: %w", err)
 	}
-	if credentials == nil {
-		credentials = EnvironmentCredentialResolver{}
-	}
-	if client == nil {
-		client = &http.Client{}
-	}
-	return &Anthropic{config: normalized, credentials: credentials, client: client}, nil
+	return &Anthropic{adapterBase: base}, nil
 }
 
 // Metadata returns credential-free provenance for durable review runs.
@@ -53,12 +45,7 @@ func (adapter *Anthropic) Metadata() review.ModelMetadata {
 	if adapter == nil {
 		return review.ModelMetadata{}
 	}
-	return review.ModelMetadata{
-		Adapter:    string(ProviderAnthropic),
-		Protocol:   anthropicProtocolVersion,
-		Model:      adapter.config.Model,
-		Redactions: []string{"credential"},
-	}
+	return adapter.adapterBase.metadata(anthropicProtocolVersion)
 }
 
 // Complete translates a provider-neutral request to Anthropic Messages and

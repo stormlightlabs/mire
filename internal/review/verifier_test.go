@@ -281,7 +281,9 @@ func TestVerifyCandidateBoundsRetrievalAndRepairsMalformedOutput(t *testing.T) {
 	}}
 	retriever := SnapshotRetrieverFunc(func(_ context.Context, request RetrievalRequest) ([]RetrievedArtifact, error) {
 		return []RetrievedArtifact{
-			{Kind: request.Kind, Path: request.Path, Relation: request.Relation, Content: request.Kind},
+			NewRetrievedArtifact(RetrievedArtifactMetadata{
+				Kind: request.Kind, Path: request.Path, Relation: request.Relation,
+			}, request.Kind),
 		}, nil
 	})
 	result, err := VerifyCandidate(context.Background(), change, verifierFixtureCandidate(), model, VerifierOptions{

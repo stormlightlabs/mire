@@ -470,6 +470,62 @@ func TestRouterRoleAliasesAndCredentialReferences(t *testing.T) {
 	}
 }
 
+func TestAdaptersShareNormalizedDependencies(t *testing.T) {
+	t.Parallel()
+
+	client := &http.Client{}
+	credentials := testCredentials("secret-token")
+	tests := []struct {
+		name     string
+		provider Provider
+		create   func(RoleConfig, CredentialResolver, *http.Client) (review.Model, error)
+	}{
+		{
+			name:     "OpenAI-compatible",
+			provider: ProviderOpenAICompatible,
+			create: func(config RoleConfig, credentials CredentialResolver, client *http.Client) (review.Model, error) {
+				return NewOpenAICompat(config, credentials, client)
+			},
+		},
+		{
+			name:     "Anthropic",
+			provider: ProviderAnthropic,
+			create: func(config RoleConfig, credentials CredentialResolver, client *http.Client) (review.Model, error) {
+				return NewAnthropic(config, credentials, client)
+			},
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			adapter, err := test.create(
+				RoleConfig{Provider: test.provider, BaseURL: "https://models.example/", Model: "fixture"},
+				credentials,
+				client,
+			)
+			if err != nil {
+				t.Fatalf("create adapter error = %v", err)
+			}
+			base := func() adapterBase {
+				switch value := adapter.(type) {
+				case *OpenAICompatible:
+					return value.adapterBase
+				case *Anthropic:
+					return value.adapterBase
+				default:
+					t.Fatalf("unexpected adapter type %T", adapter)
+					return adapterBase{}
+				}
+			}()
+			if base.config.BaseURL != "https://models.example" || base.config.Model != "fixture" ||
+				base.config.Timeout <= 0 || base.config.Retry.MaxAttempts != 2 ||
+				base.credentials == nil || base.client != client {
+				t.Fatalf("shared adapter dependencies = %#v", base)
+			}
+		})
+	}
+}
+
 func TestEnvironmentCredentialResolverValidation(t *testing.T) {
 	t.Parallel()
 	resolver := EnvironmentCredentialResolver{}

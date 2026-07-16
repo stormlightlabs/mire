@@ -116,8 +116,12 @@ func TestRunReviewPassesBoundsRetrievalAndRetainsItsAuditTrail(t *testing.T) {
 	}
 	retriever := SnapshotRetrieverFunc(func(_ context.Context, request RetrievalRequest) ([]RetrievedArtifact, error) {
 		return []RetrievedArtifact{
-			{Kind: "test", Path: "src/a_test.go", Relation: request.Relation, Content: "test context"},
-			{Kind: "contract", Path: "api/schema.json", Relation: request.Relation, Content: "contract context"},
+			NewRetrievedArtifact(RetrievedArtifactMetadata{
+				Kind: "test", Path: "src/a_test.go", Relation: request.Relation,
+			}, "test context"),
+			NewRetrievedArtifact(RetrievedArtifactMetadata{
+				Kind: "contract", Path: "api/schema.json", Relation: request.Relation,
+			}, "contract context"),
 		}, nil
 	})
 	result, err := RunReviewPasses(context.Background(), change, model, ReviewerOpts{

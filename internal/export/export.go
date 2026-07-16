@@ -186,20 +186,9 @@ type ChangeDescriptor struct {
 }
 
 // ArtifactDescriptor describes retrieved context without embedding its bytes.
-type ArtifactDescriptor struct {
-	ID              string   `json:"id"`
-	RunID           string   `json:"run_id"`
-	PassName        string   `json:"pass_name"`
-	Kind            string   `json:"kind"`
-	Path            string   `json:"path,omitempty"`
-	Relation        string   `json:"relation"`
-	HunkIDs         []string `json:"hunk_ids,omitempty"`
-	Digest          string   `json:"digest"`
-	Size            int64    `json:"size"`
-	Excluded        bool     `json:"excluded,omitempty"`
-	ExclusionReason string   `json:"exclusion_reason,omitempty"`
-	Truncated       bool     `json:"truncated,omitempty"`
-}
+// The alias keeps the export boundary restricted to review's safe metadata
+// projection without duplicating its JSON contract.
+type ArtifactDescriptor = review.RetrievedArtifactMetadata
 
 // FindingProjection is the derived lane plus immutable finding history.
 type FindingProjection struct {
@@ -455,13 +444,13 @@ func Build(
 	if artifactErr == nil {
 		for _, artifact := range artifacts {
 			result.Artifacts = append(result.Artifacts, artifactDescriptor(artifact))
-			if strings.TrimSpace(artifact.Content) != "" && !artifact.Excluded {
+			if strings.TrimSpace(artifact.Content()) != "" && !artifact.Excluded {
 				result.artifactContents = append(
 					result.artifactContents,
 					EvidenceArtifact{
 						Path:    evidencePath(artifact.ID),
 						Digest:  artifact.Digest,
-						Content: artifact.Content,
+						Content: artifact.Content(),
 					},
 				)
 			}
@@ -899,20 +888,7 @@ func diffPatch(model review.ChangeModel) string {
 }
 
 func artifactDescriptor(value review.RetrievedArtifact) ArtifactDescriptor {
-	return ArtifactDescriptor{
-		ID:              value.ID,
-		RunID:           value.RunID,
-		PassName:        value.PassName,
-		Kind:            value.Kind,
-		Path:            value.Path,
-		Relation:        value.Relation,
-		HunkIDs:         append([]string{}, value.HunkIDs...),
-		Digest:          value.Digest,
-		Size:            value.Size,
-		Excluded:        value.Excluded,
-		ExclusionReason: value.ExclusionReason,
-		Truncated:       value.Truncated,
-	}
+	return value.Metadata()
 }
 
 func candidateProjections(
@@ -1251,11 +1227,6 @@ func normalizeCoverage(value review.ReviewCoverage) review.ReviewCoverage {
 	}
 	if value.Passes == nil {
 		value.Passes = []review.PassCoverage{}
-	}
-	for index := range value.RetrievedArtifacts {
-		// Coverage retains descriptors for audit, while artifact bytes belong in
-		// explicitly named bundle evidence files only.
-		value.RetrievedArtifacts[index].Content = ""
 	}
 	if value.RetrievedArtifacts == nil {
 		value.RetrievedArtifacts = []review.RetrievedArtifact{}

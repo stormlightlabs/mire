@@ -70,6 +70,13 @@ func TestVerificationPersistsRunEvidenceAndDerivedLaneAcrossRestart(t *testing.T
 		t.Fatalf("RunReviewPasses() error = %v", err)
 	}
 	candidate := candidateResult.Candidates[0]
+	artifacts, err := store.ListReviewArtifacts(context.Background(), round.ID)
+	if err != nil {
+		t.Fatalf("ListReviewArtifacts() error = %v", err)
+	}
+	if len(artifacts) != 1 || artifacts[0].Content() != "change" {
+		t.Fatalf("stored artifacts = %#v, want one artifact retaining private content", artifacts)
+	}
 	anchor := review.Anchor{
 		SnapshotID: change.SnapshotID,
 		Path:       "src/a.go",

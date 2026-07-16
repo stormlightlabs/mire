@@ -19,9 +19,7 @@ const openAIProtocolVersion = "openai-chat-completions/v1"
 // endpoints. It deliberately uses local wire structs so compatible services
 // are not coupled to the official OpenAI SDK's types.
 type OpenAICompatible struct {
-	config      RoleConfig
-	credentials CredentialResolver
-	client      *http.Client
+	adapterBase
 }
 
 // NewOpenAICompat creates an OpenAI-compatible adapter without resolving the configured credential.
@@ -30,23 +28,17 @@ func NewOpenAICompat(
 	credentials CredentialResolver,
 	client *http.Client,
 ) (*OpenAICompatible, error) {
-	normalized, err := normalizeRoleConfig(config)
+	base, err := newAdapterBase(config, credentials, client)
 	if err != nil {
 		return nil, err
 	}
-	if normalized.Provider != ProviderOpenAICompatible {
-		return nil, fmt.Errorf("create OpenAI-compatible model: provider %q is unsupported", normalized.Provider)
+	if base.config.Provider != ProviderOpenAICompatible {
+		return nil, fmt.Errorf("create OpenAI-compatible model: provider %q is unsupported", base.config.Provider)
 	}
-	if _, err := endpoint(normalized.BaseURL, "chat/completions"); err != nil {
+	if _, err := endpoint(base.config.BaseURL, "chat/completions"); err != nil {
 		return nil, fmt.Errorf("create OpenAI-compatible model: %w", err)
 	}
-	if credentials == nil {
-		credentials = EnvironmentCredentialResolver{}
-	}
-	if client == nil {
-		client = &http.Client{}
-	}
-	return &OpenAICompatible{config: normalized, credentials: credentials, client: client}, nil
+	return &OpenAICompatible{adapterBase: base}, nil
 }
 
 // Metadata returns credential-free provenance for durable review runs.
@@ -54,12 +46,7 @@ func (adapter *OpenAICompatible) Metadata() review.ModelMetadata {
 	if adapter == nil {
 		return review.ModelMetadata{}
 	}
-	return review.ModelMetadata{
-		Adapter:    string(ProviderOpenAICompatible),
-		Protocol:   openAIProtocolVersion,
-		Model:      adapter.config.Model,
-		Redactions: []string{"credential"},
-	}
+	return adapter.adapterBase.metadata(openAIProtocolVersion)
 }
 
 // Complete translates a provider-neutral request to Chat Completions and

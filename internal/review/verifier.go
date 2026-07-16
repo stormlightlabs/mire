@@ -616,13 +616,13 @@ func retrieveVerificationArtifacts(
 			}
 			artifact.ID = fmt.Sprintf("verification-artifact:%d", len(artifacts))
 			if artifact.Digest == "" {
-				artifact.Digest = plannerDigestBytes([]byte(artifact.Content))
+				artifact.Digest = plannerDigestBytes([]byte(artifact.Content()))
 			}
 			if artifact.Size == 0 {
-				artifact.Size = int64(len(artifact.Content))
+				artifact.Size = int64(len(artifact.Content()))
 			}
 			if options.Budget.MaxArtifactBytes > 0 && artifact.Size > options.Budget.MaxArtifactBytes {
-				artifact.Content = ""
+				artifact.SetContent("")
 				artifact.Excluded = true
 				artifact.Truncated = true
 				artifact.ExclusionReason = fmt.Sprintf(

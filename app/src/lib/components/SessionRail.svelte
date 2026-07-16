@@ -1,13 +1,19 @@
 <script lang="ts">
-	import type { LoadState, Session } from '$lib/workbench/types';
+	import type { LoadState, Session } from '$lib/types';
 
 	let {
 		sessions,
 		selectedSessionId,
 		loadState,
-		onSelect
-	}: { sessions: Session[]; selectedSessionId?: string; loadState: LoadState; onSelect: (session: Session) => void } =
-		$props();
+		onSelect,
+		onCollapse
+	}: {
+		sessions: Session[];
+		selectedSessionId?: string;
+		loadState: LoadState;
+		onSelect: (session: Session) => void;
+		onCollapse: () => void;
+	} = $props();
 
 	function formatDate(value: string) {
 		return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(
@@ -22,7 +28,11 @@
 			<p class="eyebrow">WORKSPACE</p>
 			<h1>Sessions</h1>
 		</div>
-		<span class="count-badge">{loadState === 'loading' ? '—' : sessions.length}</span>
+		<div class="rail-heading__actions">
+			<span class="count-badge">{loadState === 'loading' ? '—' : sessions.length}</span>
+			<button class="collapse-button" type="button" aria-label="Collapse review sessions" onclick={onCollapse}
+				>←</button>
+		</div>
 	</div>
 
 	{#if loadState === 'ready' && sessions.length}
@@ -46,8 +56,6 @@
 			<p>{loadState === 'loading' ? 'Reading private state…' : 'Start a review from the CLI to see it here.'}</p>
 		</div>
 	{/if}
-
-	<div class="rail-footer"><span class="rail-footer__line"></span><span>REPOSITORY STATE IS READ-ONLY</span></div>
 </aside>
 
 <style>
@@ -59,9 +67,9 @@
 		overflow-y: auto;
 		overscroll-behavior: contain;
 		scrollbar-gutter: stable;
-		padding: 42px 22px 24px;
-		border-right: 1px solid var(--line);
+		padding: 36px 22px 24px;
 		background: var(--panel);
+		box-shadow: 12px 0 40px rgb(0 0 0 / 10%);
 	}
 
 	.rail-heading {
@@ -74,14 +82,41 @@
 
 	.rail-heading h1 {
 		margin-top: 8px;
-		font-size: 19px;
+		font-size: 24px;
 		font-weight: 580;
 		letter-spacing: -0.03em;
 	}
 
+	.rail-heading__actions {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+	}
+
+	.collapse-button {
+		display: grid;
+		width: 28px;
+		height: 28px;
+		place-items: center;
+		border: 0;
+		border-radius: 6px;
+		color: var(--muted);
+		background: transparent;
+		font: 15px var(--mono);
+		cursor: pointer;
+		transition:
+			color 150ms,
+			background-color 150ms;
+	}
+
+	.collapse-button:hover {
+		color: var(--ink);
+		background: var(--panel-hover);
+	}
+
 	.eyebrow {
 		color: var(--lavender);
-		font: 650 9px/1.4 var(--mono);
+		font: 650 11px/1.4 var(--mono);
 		letter-spacing: 0.16em;
 	}
 
@@ -94,7 +129,7 @@
 		border: 1px solid var(--line-bright);
 		border-radius: 5px;
 		color: var(--muted);
-		font: 10px var(--mono);
+		font: 12px var(--mono);
 	}
 
 	.session-list {
@@ -104,13 +139,13 @@
 
 	.session-card {
 		display: grid;
-		grid-template-columns: 25px minmax(0, 1fr) 18px;
-		align-items: center;
-		min-height: 68px;
-		gap: 7px;
-		padding: 11px 8px;
+		grid-template-columns: 28px minmax(0, 1fr) 20px;
+		align-items: start;
+		min-height: 82px;
+		gap: 10px;
+		padding: 16px 14px;
 		border: 1px solid transparent;
-		border-radius: 7px;
+		border-radius: 10px;
 		color: var(--ink);
 		background: transparent;
 		text-align: left;
@@ -118,17 +153,17 @@
 		transition:
 			background 160ms ease-out,
 			border-color 160ms ease-out,
-			transform 160ms ease-out;
+			translate 160ms ease-out;
 	}
 
 	.session-card:hover {
 		background: var(--panel-hover);
 		border-color: var(--line);
-		transform: translateX(2px);
+		translate: 2px 0;
 	}
 
 	.session-card:active {
-		transform: scale(0.98);
+		scale: 0.96;
 	}
 
 	.session-card--active {
@@ -140,10 +175,10 @@
 	}
 
 	.session-card__index {
-		align-self: start;
-		padding-top: 2px;
+		padding-top: 1px;
 		color: var(--faint);
-		font: 10px var(--mono);
+		font: 12px/1.45 var(--mono);
+		font-variant-numeric: tabular-nums;
 	}
 
 	.session-card__body {
@@ -154,8 +189,9 @@
 
 	.session-card__body strong {
 		overflow: hidden;
-		font-size: 12px;
+		font-size: 14px;
 		font-weight: 620;
+		line-height: 1.45;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
@@ -163,7 +199,7 @@
 	.session-card__body small {
 		overflow: hidden;
 		color: var(--muted);
-		font-size: 10px;
+		font-size: 12px;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
@@ -205,37 +241,16 @@
 		line-height: 1.5;
 	}
 
-	.rail-footer {
-		display: flex;
-		align-items: center;
-		gap: 9px;
-		margin-top: auto;
-		padding: 16px 8px 0;
-		color: var(--faint);
-		font: 8px var(--mono);
-		letter-spacing: 0.08em;
-	}
-
-	.rail-footer__line {
-		width: 22px;
-		height: 1px;
-		background: var(--pink);
-	}
-
 	@media (max-width: 800px) {
 		.session-rail {
 			max-height: min(280px, 42dvh);
 			padding: 25px 18px 16px;
 			border-right: 0;
-			border-bottom: 1px solid var(--line);
+			box-shadow: 0 12px 40px rgb(0 0 0 / 12%);
 		}
 
 		.session-list {
 			grid-template-columns: repeat(auto-fit, minmax(205px, 1fr));
-		}
-
-		.rail-footer {
-			display: none;
 		}
 	}
 </style>

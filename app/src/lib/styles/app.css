@@ -21,6 +21,10 @@
 	--blue: #6cb6ff;
 	--green: #7bd88f;
 	--mono: 'Martian Mono Variable', 'Martian Mono', monospace;
+	--text-xs: 0.6875rem;
+	--text-sm: 0.75rem;
+	--text-base: 0.875rem;
+	--text-lg: 1rem;
 	--shadow: 0 20px 60px rgb(0 0 0 / 22%), 0 2px 8px rgb(0 0 0 / 28%);
 	--shadow-border: 0 0 0 1px rgb(255 255 255 / 8%);
 	--shadow-border-hover: 0 0 0 1px rgb(255 255 255 / 13%);
@@ -47,6 +51,8 @@ body {
 	min-height: 100vh;
 	color: var(--ink);
 	background: var(--void);
+	font-size: var(--text-base);
+	line-height: 1.5;
 	text-rendering: optimizeLegibility;
 }
 

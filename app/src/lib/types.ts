@@ -58,6 +58,8 @@ export type DiffFile = {
 	patch?: string;
 };
 
+export const pathOf = (file: DiffFile) => file.target_path || file.base_path || 'unknown';
+
 export type LogicalSlice = {
 	id: string;
 	title: string;

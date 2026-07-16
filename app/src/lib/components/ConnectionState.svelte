@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { LoadState } from '$lib/workbench/types';
+	import type { LoadState } from '$lib/types';
 
 	let { loadState, errorMessage, onRetry }: { loadState: LoadState; errorMessage: string; onRetry: () => void } =
 		$props();

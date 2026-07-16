@@ -1,6 +1,6 @@
 import { expect, test, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
-import type { ReviewWorkspace } from '$lib/workbench/types';
+import type { ReviewWorkspace } from '$lib/types';
 import ReviewOverview from './ReviewOverview.svelte';
 
 const anchor = { snapshot_id: 'snapshot-1234', path: 'internal/server/server.go', hunk_id: 'server.go#abc' };
@@ -176,6 +176,12 @@ test('explores ordering, diff modes, lanes, and evidence with non-color cues', a
 	await expect.element(screen.getByText('Review the authenticated read-only API.')).toBeVisible();
 	await expect.element(screen.getByText('Navigation order is not proof of coverage.', { exact: false })).toBeVisible();
 	await expect.element(screen.getByRole('button', { name: /ANCHOR/ })).toBeVisible();
+	await screen.getByRole('button', { name: 'Collapse change navigation' }).click();
+	await expect.element(screen.getByRole('button', { name: 'Show changes' })).toBeVisible();
+	await screen.getByRole('button', { name: 'Show changes' }).click();
+	await screen.getByRole('button', { name: 'Collapse finding ledger' }).click();
+	await expect.element(screen.getByRole('button', { name: 'Show findings' })).toBeVisible();
+	await screen.getByRole('button', { name: 'Show findings' }).click();
 	await screen.getByRole('button', { name: 'Side by side' }).click();
 	await expect.element(screen.getByLabelText('Side-by-side diff for internal/server/server.go')).toBeVisible();
 

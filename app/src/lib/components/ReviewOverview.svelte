@@ -11,7 +11,7 @@
 		Round,
 		Run,
 		Session
-	} from '$lib/workbench/types';
+	} from '$lib/types';
 
 	let {
 		selectedSession,
@@ -48,6 +48,8 @@
 	let selectedItemID = $state('');
 	let detail = $state<FindingDetailResource | null>(null);
 	let detailLoading = $state(false);
+	let navigatorOpen = $state(true);
+	let ledgerOpen = $state(true);
 
 	const shortID = (value = '') => (value ? value.slice(0, 10) : '—');
 	const pathOf = (file: { target_path?: string; base_path?: string }) =>
@@ -72,6 +74,9 @@
 		workspace?.slices.slices.find((slice) => `slice:${slice.id}` === selectedNavID) ?? null
 	);
 	const selectedPath = $derived(selectedNavID.startsWith('file:') ? selectedNavID.slice(5) : undefined);
+	const titledComparison = $derived(
+		selectedSession?.title.startsWith('Review ') ? selectedSession.title.slice('Review '.length) : ''
+	);
 
 	const navigationItems = $derived.by(() => {
 		if (!workspace) return [] as { id: string; title: string; meta: string; score: number; kind: NavMode }[];
@@ -202,7 +207,9 @@
 		<header class="review-header">
 			<div class="review-header__copy">
 				<p class="eyebrow">REVIEW / {selectedSession.repository_name} / {shortID(selectedSession.id)}</p>
-				<h2>{selectedSession.title}</h2>
+				<h2>
+					{#if titledComparison}Review <code>{titledComparison}</code>{:else}{selectedSession.title}{/if}
+				</h2>
 				<p>
 					{workspace.overview.intent.prompt ||
 						workspace.overview.intent.commit_messages?.at(0)?.message ||
@@ -227,7 +234,8 @@
 			<div class="orientation__primary">
 				<span class="status-mark" data-status={selectedRound.status}>R{selectedRound.number}</span>
 				<div>
-					<small>ROUND STATUS</small><strong>{selectedRound.status}</strong>
+					<small>ROUND</small>
+					<strong>{selectedRound.status}</strong>
 					<p>{workspace.overview.snapshot.requested_comparison || workspace.overview.snapshot.kind}</p>
 				</div>
 			</div>
@@ -245,16 +253,24 @@
 				<p>{modelNames.join(', ') || 'No model run recorded'}</p>
 			</div>
 			<div>
-				<small>COVERAGE</small><strong
-					>{workspace.overview.coverage.examined_hunks.length} / {workspace.diff.files.flatMap(
+				<small>COVERAGE</small><strong>
+					{workspace.overview.coverage.examined_hunks.length} / {workspace.diff.files.flatMap(
 						(file) => file.hunks ?? []
-					).length}</strong>
+					).length}
+				</strong>
 				<p>Examined / changed hunks</p>
 			</div>
 		</section>
 
-		<div class="work-area">
-			<aside class="navigator" aria-label="Change navigation">
+		<div
+			class="work-area"
+			class:work-area--navigator-collapsed={!navigatorOpen}
+			class:work-area--ledger-collapsed={!ledgerOpen}>
+			<aside id="change-navigation" class="navigator" aria-label="Change navigation">
+				<div class="panel-heading">
+					<strong>Changes</strong>
+					<button aria-label="Collapse change navigation" onclick={() => (navigatorOpen = false)}>←</button>
+				</div>
 				<div class="segmented" aria-label="Navigation type">
 					<button
 						class:active={navMode === 'slices'}
@@ -289,14 +305,27 @@
 
 			<section class="review-surface" aria-label="Snapshot diff and findings">
 				<div class="surface-toolbar">
-					<div>
-						<p class="eyebrow">FROZEN CHANGE</p>
-						<strong>{selectedSlice?.title || selectedPath || 'Complete snapshot diff'}</strong>
+					<div class="surface-toolbar__title">
+						{#if !navigatorOpen}<button
+								class="panel-restore"
+								aria-controls="change-navigation"
+								onclick={() => (navigatorOpen = true)}>Show changes</button
+							>{/if}
+						<div>
+							<p class="eyebrow">FROZEN CHANGE</p>
+							<strong>{selectedSlice?.title || selectedPath || 'Complete snapshot diff'}</strong>
+						</div>
 					</div>
-					<div class="segmented" aria-label="Diff mode">
-						<button class:active={diffMode === 'unified'} onclick={() => (diffMode = 'unified')}>Unified</button><button
-							class:active={diffMode === 'split'}
-							onclick={() => (diffMode = 'split')}>Side by side</button>
+					<div class="surface-toolbar__actions">
+						<div class="segmented" aria-label="Diff mode">
+							<button class:active={diffMode === 'unified'} onclick={() => (diffMode = 'unified')}>Unified</button
+							><button class:active={diffMode === 'split'} onclick={() => (diffMode = 'split')}>Side by side</button>
+						</div>
+						{#if !ledgerOpen}<button
+								class="panel-restore"
+								aria-controls="finding-ledger"
+								onclick={() => (ledgerOpen = true)}>Show findings</button
+							>{/if}
 					</div>
 				</div>
 				<DiffViewer
@@ -308,7 +337,11 @@
 					onSelectAnchor={selectAnchor} />
 			</section>
 
-			<aside class="ledger" aria-label="Finding ledger">
+			<aside id="finding-ledger" class="ledger" aria-label="Finding ledger">
+				<div class="panel-heading">
+					<strong>Findings</strong>
+					<button aria-label="Collapse finding ledger" onclick={() => (ledgerOpen = false)}>→</button>
+				</div>
 				<div class="lane-tabs" role="tablist" aria-label="Finding lanes">
 					{#each [['verified', '✓', 'Verified'], ['candidate', '?', 'Candidates'], ['refuted', '×', 'Refuted']] as tab (tab[0])}
 						<button
@@ -318,11 +351,11 @@
 								lane = tab[0] as FindingLane;
 								selectedItemID = '';
 								detail = null;
-							}}
-							><span aria-hidden="true">{tab[1]}</span>{tab[2]}<small
-								>{workspace.findings[tab[0] as FindingLane].findings.length +
-									workspace.findings[tab[0] as FindingLane].candidates.length}</small
-							></button>
+							}}>
+							<span aria-hidden="true">{tab[1]}</span>{tab[2]}<small>
+								{workspace.findings[tab[0] as FindingLane].findings.length +
+									workspace.findings[tab[0] as FindingLane].candidates.length}</small>
+						</button>
 					{/each}
 				</div>
 				<div class="finding-list" role="tabpanel" tabindex="0" onkeydown={handleFindingKeys}>
@@ -467,19 +500,19 @@
 	}
 	.review-shell {
 		min-width: 0;
-		padding: 42px clamp(24px, 4vw, 64px) 72px;
+		padding: 36px clamp(20px, 3vw, 52px) 64px;
 	}
 	.eyebrow {
 		color: var(--lavender);
-		font: 650 9px/1.4 var(--mono);
-		letter-spacing: 0.15em;
+		font: 650 11px/1.4 var(--mono);
+		letter-spacing: 0.125em;
 	}
 	.review-header {
 		display: flex;
 		align-items: start;
 		justify-content: space-between;
 		gap: 28px;
-		max-width: 1500px;
+		max-width: 1600px;
 		margin: 0 auto 34px;
 	}
 	.review-header__copy {
@@ -492,11 +525,17 @@
 		letter-spacing: -0.055em;
 		line-height: 0.98;
 	}
+	.review-header h2 code {
+		font-family: var(--mono);
+		font-size: 0.78em;
+		font-weight: 520;
+		letter-spacing: -0.045em;
+	}
 	.review-header__copy > p:last-child {
 		max-width: 690px;
 		margin-top: 15px;
 		color: var(--muted);
-		font-size: 13px;
+		font-size: 15px;
 		line-height: 1.55;
 	}
 	.round-picker {
@@ -507,7 +546,7 @@
 	.round-picker label,
 	.order span {
 		color: var(--faint);
-		font: 8px var(--mono);
+		font: 10px var(--mono);
 		letter-spacing: 0.12em;
 	}
 	select {
@@ -521,51 +560,51 @@
 		background-repeat: no-repeat;
 		background-position: right 14px center;
 		appearance: none;
-		font: 10px var(--mono);
+		font: 12px var(--mono);
 		cursor: pointer;
 	}
 	.orientation {
 		display: grid;
 		grid-template-columns: 1.15fr repeat(4, minmax(130px, 1fr));
-		max-width: 1500px;
+		max-width: 1600px;
 		margin: 0 auto 18px;
-		overflow: hidden;
-		border-radius: 9px;
-		background: var(--line);
-		box-shadow: var(--shadow);
-		gap: 1px;
+		gap: 10px;
 	}
 	.orientation > div {
 		display: grid;
 		align-content: center;
-		min-height: 94px;
-		gap: 7px;
-		padding: 15px 17px;
+		min-width: 0;
+		min-height: 104px;
+		gap: 6px;
+		padding: 18px 20px;
+		border-radius: 10px;
 		background: var(--panel);
+		box-shadow: var(--shadow-border);
 	}
 	.orientation__primary {
-		grid-template-columns: 42px 1fr;
+		grid-template-columns: 48px minmax(0, 1fr);
 		align-items: center;
 		background: rgb(164 140 242 / 11%) !important;
 	}
 	.status-mark {
 		display: grid;
-		width: 40px;
-		height: 40px;
+		width: 46px;
+		height: 46px;
 		place-items: center;
 		border-radius: 50%;
 		box-shadow: 0 0 0 1px rgb(164 140 242 / 50%);
 		color: var(--lavender);
-		font: 10px var(--mono);
+		font: 12px var(--mono);
+		font-variant-numeric: tabular-nums;
 	}
 	.orientation small {
 		color: var(--faint);
-		font: 8px var(--mono);
+		font: 10px var(--mono);
 		letter-spacing: 0.1em;
 	}
 	.orientation strong {
 		overflow: hidden;
-		font-size: 13px;
+		font-size: 15px;
 		font-weight: 620;
 		text-overflow: ellipsis;
 		white-space: nowrap;
@@ -573,33 +612,93 @@
 	.orientation p {
 		overflow: hidden;
 		color: var(--muted);
-		font-size: 10px;
+		font-size: 12px;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	.orientation__primary p {
+		font-family: var(--mono);
+	}
 	.work-area {
 		display: grid;
-		grid-template-columns: 220px minmax(460px, 1fr) minmax(290px, 350px);
-		max-width: 1500px;
-		min-height: 720px;
+		grid-template-areas: 'navigator surface ledger';
+		grid-template-columns: 270px minmax(520px, 1fr) minmax(340px, 390px);
+		align-items: start;
+		max-width: 1600px;
 		margin: 0 auto;
-		border-radius: 10px;
-		background: var(--panel);
-		box-shadow:
-			0 0 0 1px rgb(255 255 255 / 8%),
-			0 28px 80px rgb(0 0 0 / 18%);
+		gap: 12px;
+	}
+	.work-area--navigator-collapsed {
+		grid-template-areas: 'surface ledger';
+		grid-template-columns: minmax(520px, 1fr) minmax(340px, 390px);
+	}
+	.work-area--ledger-collapsed {
+		grid-template-areas: 'navigator surface';
+		grid-template-columns: 270px minmax(520px, 1fr);
+	}
+	.work-area--navigator-collapsed.work-area--ledger-collapsed {
+		grid-template-areas: 'surface';
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.work-area--navigator-collapsed .navigator,
+	.work-area--ledger-collapsed .ledger {
+		display: none;
 	}
 	.navigator,
 	.ledger {
 		min-width: 0;
-		padding: 16px;
+		padding: 18px;
+		border-radius: 10px;
+		background: var(--panel);
+		box-shadow: var(--shadow-border);
 	}
 	.navigator {
-		border-right: 1px solid var(--line);
+		grid-area: navigator;
 	}
 	.ledger {
-		border-left: 1px solid var(--line);
+		grid-area: ledger;
 	}
+	.panel-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		min-height: 40px;
+		margin-bottom: 12px;
+	}
+	.panel-heading > strong {
+		font-size: 14px;
+		font-weight: 650;
+	}
+	.panel-heading button,
+	.panel-restore {
+		min-width: 40px;
+		min-height: 40px;
+		border: 0;
+		border-radius: 7px;
+		color: var(--muted);
+		background: var(--panel-hover);
+		cursor: pointer;
+		transition-property: color, background-color, scale;
+		transition-duration: 150ms;
+		transition-timing-function: ease-out;
+	}
+	.panel-heading button:hover,
+	.panel-restore:hover {
+		color: var(--ink);
+		background: rgb(164 140 242 / 14%);
+	}
+
+	.panel-heading button:active,
+	.panel-restore:active {
+		scale: 0.96;
+	}
+
+	.panel-restore {
+		width: auto;
+		padding: 0 12px;
+		font-size: 12px;
+	}
+
 	.segmented {
 		display: grid;
 		grid-auto-flow: column;
@@ -610,51 +709,61 @@
 		background: #090b14;
 		box-shadow: inset 0 0 0 1px rgb(255 255 255 / 6%);
 	}
+
 	.segmented button {
-		min-height: 35px;
+		min-height: 42px;
 		padding: 0 9px;
 		border: 0;
 		border-radius: 4px;
 		color: var(--muted);
 		background: transparent;
-		font-size: 10px;
+		font-size: 12px;
 		cursor: pointer;
 		transition:
 			color 150ms,
 			background-color 150ms,
 			box-shadow 150ms;
 	}
+
 	.segmented button.active {
 		color: var(--ink);
 		background: var(--panel-hover);
 		box-shadow: 0 2px 8px rgb(0 0 0 / 24%);
 	}
+
 	.segmented button:active,
 	.button:active {
 		scale: 0.96;
 	}
+
 	.order {
 		display: grid;
 		gap: 7px;
 		margin-top: 17px;
 	}
+
 	.order select {
 		width: 100%;
 	}
+
 	.ordering-note {
 		margin: 12px 2px 15px;
 		color: var(--faint);
-		font-size: 9px;
-		line-height: 1.5;
+		font-size: 11px;
+		line-height: 1.6;
 	}
+
 	.nav-list {
 		display: grid;
 		gap: 4px;
+		max-height: 640px;
+		overflow: auto;
 	}
+
 	.nav-item {
 		display: grid;
 		grid-template-columns: 21px minmax(0, 1fr);
-		min-height: 55px;
+		min-height: 64px;
 		gap: 3px 7px;
 		padding: 9px;
 		border: 0;
@@ -678,29 +787,32 @@
 	}
 	.nav-item.active {
 		color: var(--ink);
-		background: rgb(164 140 242 / 10%);
-		box-shadow: inset 2px 0 var(--lavender);
+		background: rgb(164 140 242 / 13%);
 	}
 	.nav-item i {
 		grid-row: 1 / 3;
 		color: var(--faint);
-		font: normal 8px var(--mono);
+		font: normal 10px var(--mono);
+		font-variant-numeric: tabular-nums;
 	}
 	.nav-item span {
 		overflow: hidden;
-		font-size: 10px;
+		font-size: 12px;
 		font-weight: 610;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 	.nav-item small {
 		color: var(--faint);
-		font: 8px var(--mono);
+		font: 10px var(--mono);
 	}
 	.review-surface {
+		grid-area: surface;
 		min-width: 0;
-		padding: 18px;
+		padding: 20px;
+		border-radius: 10px;
 		background: #0e101a;
+		box-shadow: var(--shadow-border);
 	}
 	.surface-toolbar {
 		display: flex;
@@ -715,38 +827,46 @@
 		max-width: 480px;
 		margin-top: 5px;
 		overflow: hidden;
-		font-size: 12px;
+		font-size: 14px;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 	.surface-toolbar .segmented {
-		width: 190px;
+		width: 220px;
+	}
+	.surface-toolbar__title,
+	.surface-toolbar__actions {
+		display: flex;
+		align-items: center;
+		gap: 12px;
 	}
 	.lane-tabs {
 		display: grid;
 		grid-template-columns: repeat(3, 1fr);
 		gap: 2px;
-		padding-bottom: 14px;
-		border-bottom: 1px solid var(--line);
+		padding: 3px;
+		border-radius: 8px;
+		background: #090b14;
+		box-shadow: inset 0 0 0 1px rgb(255 255 255 / 5%);
 	}
 	.lane-tabs button {
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		min-width: 0;
-		min-height: 44px;
+		min-height: 46px;
 		gap: 6px;
 		padding: 0 7px;
 		border: 0;
 		border-radius: 5px;
 		color: var(--faint);
 		background: transparent;
-		font-size: 8px;
+		font-size: 11px;
 		white-space: nowrap;
 		cursor: pointer;
 	}
 	.lane-tabs button span {
-		font: 10px var(--mono);
+		font: 11px var(--mono);
 	}
 	.lane-tabs button small {
 		display: grid;
@@ -755,20 +875,20 @@
 		place-items: center;
 		border-radius: 4px;
 		background: rgb(255 255 255 / 5%);
-		font: 8px var(--mono);
+		font: 10px var(--mono);
 		font-variant-numeric: tabular-nums;
 	}
 	.lane-tabs button[aria-selected='true'] {
 		color: var(--ink);
 		background: var(--panel-hover);
-		box-shadow: inset 0 -2px var(--lavender);
+		box-shadow: 0 2px 10px rgb(0 0 0 / 24%);
 	}
 	.finding-list {
 		display: grid;
 		gap: 6px;
 		max-height: 315px;
 		overflow: auto;
-		padding: 13px 1px;
+		padding: 12px 1px 2px;
 	}
 	.finding-card {
 		display: grid;
@@ -811,7 +931,7 @@
 	}
 	.finding-card__cue {
 		color: var(--green);
-		font: 8px var(--mono);
+		font: 10px var(--mono);
 		letter-spacing: 0.1em;
 	}
 	.finding-card--candidate .finding-card__cue {
@@ -822,26 +942,26 @@
 		text-decoration: line-through;
 	}
 	.finding-card strong {
-		font-size: 11px;
-		line-height: 1.35;
+		font-size: 13px;
+		line-height: 1.45;
 	}
 	.finding-card small {
 		color: var(--faint);
-		font: 8px var(--mono);
+		font: 10px var(--mono);
 		text-transform: uppercase;
 	}
 	.empty-lane,
 	.muted {
-		padding: 22px 8px;
+		padding: 18px 10px;
 		color: var(--muted);
-		font-size: 11px;
+		font-size: 13px;
 		line-height: 1.5;
 	}
 	.finding-detail {
 		display: grid;
 		gap: 17px;
 		padding-top: 16px;
-		border-top: 1px solid var(--line);
+		box-shadow: 0 -1px rgb(255 255 255 / 6%);
 	}
 	.detail-heading {
 		display: grid;
@@ -851,12 +971,12 @@
 	.finding-detail h4 {
 		margin: 0;
 		color: var(--lavender);
-		font: 8px var(--mono);
+		font: 10px var(--mono);
 		letter-spacing: 0.11em;
 		text-transform: uppercase;
 	}
 	.detail-heading strong {
-		font-size: 14px;
+		font-size: 16px;
 		line-height: 1.35;
 	}
 	dl,
@@ -870,15 +990,15 @@
 	dt {
 		margin-bottom: 4px;
 		color: var(--faint);
-		font: 8px var(--mono);
+		font: 10px var(--mono);
 		text-transform: uppercase;
 	}
 	dd,
 	.refutation p,
 	.relationships p {
 		color: var(--muted);
-		font-size: 10px;
-		line-height: 1.5;
+		font-size: 12px;
+		line-height: 1.6;
 	}
 	.anchor-list,
 	.evidence,
@@ -900,7 +1020,7 @@
 		color: var(--ink);
 		background: #0b0d17;
 		box-shadow: 0 0 0 1px var(--line);
-		font: 9px var(--mono);
+		font: 11px var(--mono);
 		text-align: left;
 		cursor: pointer;
 	}
@@ -925,17 +1045,17 @@
 	.evidence article span,
 	.evidence article small {
 		color: var(--faint);
-		font: 7px var(--mono);
+		font: 9px var(--mono);
 		text-transform: uppercase;
 	}
 	.evidence article p {
-		font-size: 10px;
+		font-size: 12px;
 		line-height: 1.45;
 	}
 	.provenance p {
 		display: grid;
 		gap: 3px;
-		font-size: 9px;
+		font-size: 11px;
 	}
 	.retrieved-context > p,
 	.analyzer-limitations > p {
@@ -945,44 +1065,42 @@
 		border-radius: 5px;
 		background: #0b0d17;
 		box-shadow: 0 0 0 1px var(--line);
-		font-size: 9px;
+		font-size: 11px;
 	}
 	.retrieved-context code,
 	.retrieved-context small,
 	.analyzer-limitations span {
 		color: var(--faint);
-		font-size: 8px;
+		font-size: 10px;
 	}
 	.provenance code,
 	.provenance small {
 		color: var(--faint);
-		font-size: 8px;
+		font-size: 10px;
 	}
 	.audit-grid {
 		display: grid;
 		grid-template-columns: repeat(4, 1fr);
-		max-width: 1500px;
+		max-width: 1600px;
 		margin: 18px auto 0;
-		gap: 1px;
-		border-radius: 9px;
-		overflow: hidden;
-		background: var(--line);
-		box-shadow: var(--shadow);
+		gap: 12px;
 	}
 	.audit-grid > div {
 		min-height: 145px;
 		padding: 18px;
+		border-radius: 10px;
 		background: var(--panel);
+		box-shadow: var(--shadow-border);
 	}
 	.audit-grid h3 {
 		margin: 9px 0 8px;
-		font-size: 14px;
+		font-size: 16px;
 	}
 	.audit-grid p:not(.eyebrow) {
 		margin-top: 9px;
 		color: var(--muted);
-		font-size: 10px;
-		line-height: 1.5;
+		font-size: 12px;
+		line-height: 1.6;
 	}
 	.audit-row {
 		display: grid;
@@ -1029,38 +1147,32 @@
 		background: var(--panel);
 		cursor: pointer;
 	}
-	@media (max-width: 1220px) {
+	@media (max-width: 1600px) {
 		.orientation {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
-			overflow: hidden;
 		}
 		.orientation__primary {
 			grid-column: 1 / -1;
 		}
 		.work-area {
-			grid-template-columns: 190px minmax(440px, 1fr);
+			grid-template-areas:
+				'navigator surface'
+				'ledger ledger';
+			grid-template-columns: 250px minmax(0, 1fr);
 		}
-		.ledger {
-			grid-column: 1 / -1;
-			display: grid;
-			grid-template-columns: 280px minmax(0, 1fr);
-			gap: 16px;
-			border-top: 1px solid var(--line);
-			border-left: 0;
+		.work-area--navigator-collapsed {
+			grid-template-areas:
+				'surface'
+				'ledger';
+			grid-template-columns: minmax(0, 1fr);
 		}
-		.lane-tabs {
-			grid-column: 1;
+		.work-area--ledger-collapsed {
+			grid-template-areas: 'navigator surface';
+			grid-template-columns: 250px minmax(0, 1fr);
 		}
-		.finding-list {
-			grid-column: 1;
-			max-height: 480px;
-		}
-		.finding-detail {
-			grid-column: 2;
-			grid-row: 1 / 3;
-			padding: 4px 0 0 16px;
-			border-top: 0;
-			border-left: 1px solid var(--line);
+		.work-area--navigator-collapsed.work-area--ledger-collapsed {
+			grid-template-areas: 'surface';
+			grid-template-columns: minmax(0, 1fr);
 		}
 		.audit-grid {
 			grid-template-columns: repeat(2, 1fr);
@@ -1080,11 +1192,24 @@
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 		.work-area {
+			grid-template-areas:
+				'navigator'
+				'surface'
+				'ledger';
 			grid-template-columns: 1fr;
 		}
-		.navigator {
-			border-right: 0;
-			border-bottom: 1px solid var(--line);
+		.work-area--navigator-collapsed {
+			grid-template-areas:
+				'surface'
+				'ledger';
+		}
+		.work-area--ledger-collapsed {
+			grid-template-areas:
+				'navigator'
+				'surface';
+		}
+		.work-area--navigator-collapsed.work-area--ledger-collapsed {
+			grid-template-areas: 'surface';
 		}
 		.nav-list {
 			grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1092,23 +1217,17 @@
 			overflow: auto;
 		}
 		.review-surface {
-			padding: 12px;
+			padding: 16px;
 		}
-		.ledger {
-			grid-column: auto;
-			grid-template-columns: 1fr;
-			border-top: 1px solid var(--line);
+		.surface-toolbar {
+			align-items: stretch;
+			flex-direction: column;
 		}
-		.lane-tabs,
-		.finding-list,
-		.finding-detail {
-			grid-column: 1;
+		.surface-toolbar__actions {
+			justify-content: space-between;
 		}
 		.finding-detail {
-			grid-row: auto;
 			padding: 16px 0 0;
-			border-top: 1px solid var(--line);
-			border-left: 0;
 		}
 		.audit-grid {
 			grid-template-columns: 1fr;

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import favicon from '$lib/assets/favicon.svg';
-	import type { LoadState } from '$lib/workbench/types';
+	import type { LoadState } from '$lib/types';
 
 	let { loadState }: { loadState: LoadState } = $props();
 </script>
@@ -14,7 +14,12 @@
 		<span class="status-dot" class:status-dot--live={loadState === 'ready'} aria-hidden="true"></span>
 		<span>{loadState === 'ready' ? 'LOCAL / CONNECTED' : 'LOCAL / ' + loadState.toUpperCase()}</span>
 	</div>
-	<div class="topbar__meta">EVIDENCE LEDGER <span class="topbar__version">V1</span></div>
+	<a
+		class="topbar__meta"
+		href="https://github.com/stormlightlabs"
+		target="_blank"
+		rel="noreferrer"
+		aria-label="Stormlight Labs on GitHub">STORMLIGHT LABS <span aria-hidden="true">↗</span></a>
 </header>
 
 <style>
@@ -27,7 +32,7 @@
 		border-bottom: 1px solid var(--line);
 		background: rgb(9 10 18 / 82%);
 		backdrop-filter: blur(18px);
-		font: 10px var(--mono);
+		font: 11px var(--mono);
 		letter-spacing: 0.12em;
 	}
 
@@ -58,9 +63,13 @@
 	.topbar__meta {
 		margin-left: auto;
 		color: var(--faint);
+		text-decoration: none;
+		transition-property: color;
+		transition-duration: 150ms;
+		transition-timing-function: ease-out;
 	}
 
-	.topbar__version {
+	.topbar__meta:hover {
 		color: var(--lavender);
 	}
 

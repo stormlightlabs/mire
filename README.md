@@ -94,6 +94,24 @@ the server with `Ctrl-C`. To request a specific loopback port, pass
 
 The browser workbench restores its canonical state from the local API.
 
+### Local Development
+
+Run the Go API and Svelte development server separately to use hot module reload
+without rebuilding the embedded frontend. Keep the same loopback hostname in
+both commands so the authenticated browser cookie is shared across ports.
+
+```sh
+# Terminal 1: note and open the one-time launch URL printed by this command.
+go run ./cmd/mire web <SESSION> --addr 127.0.0.1:55330
+
+# Terminal 2:
+MIRE_API_ORIGIN=http://127.0.0.1:55330 pnpm --dir app dev --host 127.0.0.1
+```
+
+After opening the one-time Go launch URL, visit `http://127.0.0.1:5173`.
+The development server proxies JSON and SSE requests to the authenticated Go
+process while Vite serves the current Svelte source directly.
+
 Use `MIRE_STATE_DIR` to point isolated development or test runs at a private
 state directory:
 

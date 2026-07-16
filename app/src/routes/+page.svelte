@@ -17,7 +17,8 @@
 		Round,
 		Session,
 		SlicesResource
-	} from '$lib/workbench/types';
+	} from '$lib/types';
+	import { getJSON } from '$lib/api/client';
 
 	let loadState = $state<LoadState>('loading');
 	let resourceState = $state<ResourceState>('idle');
@@ -28,14 +29,11 @@
 	let workspace = $state<ReviewWorkspace | null>(null);
 	let recentActivity = $state<Activity[]>([]);
 	let errorMessage = $state('');
+	let sessionRailOpen = $state(true);
 	let eventSource: EventSource | undefined;
 	let resourceController: AbortController | undefined;
 
-	async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
-		const response = await fetch(path, { signal, headers: { Accept: 'application/json' } });
-		if (!response.ok) throw new Error(`${path} returned ${response.status}.`);
-		return (await response.json()) as T;
-	}
+
 
 	function connectActivity(sessionID?: string) {
 		eventSource?.close();
@@ -145,12 +143,21 @@
 
 <div class="workbench-shell">
 	<WorkbenchTopbar {loadState} />
-	<div class="workspace-grid">
-		<SessionRail
-			sessions={bootstrap?.sessions ?? []}
-			selectedSessionId={selectedSession?.id}
-			{loadState}
-			onSelect={(session) => void loadSession(session)} />
+	<div class="workspace-grid" class:workspace-grid--rail-closed={!sessionRailOpen}>
+		{#if sessionRailOpen}
+			<SessionRail
+				sessions={bootstrap?.sessions ?? []}
+				selectedSessionId={selectedSession?.id}
+				{loadState}
+				onSelect={(session) => void loadSession(session)}
+				onCollapse={() => (sessionRailOpen = false)} />
+		{:else}
+			<button
+				class="session-rail-restore"
+				type="button"
+				aria-label="Show review sessions"
+				onclick={() => (sessionRailOpen = true)}>→</button>
+		{/if}
 		<main class="review-main">
 			{#if loadState === 'ready' || loadState === 'loading'}
 				<ReviewOverview
@@ -177,10 +184,32 @@
 	}
 	.workspace-grid {
 		display: grid;
-		grid-template-columns: minmax(230px, 270px) minmax(0, 1fr);
+		grid-template-columns: minmax(260px, 300px) minmax(0, 1fr);
 		height: calc(100dvh - 58px);
 		min-height: 0;
 		overflow: hidden;
+	}
+	.workspace-grid--rail-closed {
+		grid-template-columns: 48px minmax(0, 1fr);
+	}
+	.session-rail-restore {
+		display: grid;
+		width: 100%;
+		height: 48px;
+		place-items: center;
+		border: 0;
+		border-radius: 0 0 8px 0;
+		color: var(--muted);
+		background: var(--panel);
+		font: 15px var(--mono);
+		cursor: pointer;
+		transition:
+			color 150ms,
+			background-color 150ms;
+	}
+	.session-rail-restore:hover {
+		color: var(--ink);
+		background: var(--panel-hover);
 	}
 	.review-main {
 		width: 100%;
@@ -194,6 +223,13 @@
 		.workspace-grid {
 			grid-template-columns: 1fr;
 			grid-template-rows: auto minmax(0, 1fr);
+		}
+		.workspace-grid--rail-closed {
+			grid-template-rows: 44px minmax(0, 1fr);
+		}
+		.session-rail-restore {
+			width: 48px;
+			height: 44px;
 		}
 	}
 	@media (prefers-reduced-motion: reduce) {

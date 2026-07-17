@@ -4,6 +4,8 @@
 
 Mire is a difftool for humans and agents.
 
+![screenshot](.github/assets/screencap.png)
+
 ## Features
 
 - Review unstaged and untracked worktree changes, staged changes, revisions,

@@ -4,8 +4,8 @@ expression: "snapshot(App::ready(&changeset), 24, 9)"
 ---
  Mire review │ unified
  Files │ file.txt
-▌ M fi…│@@ -1,2 +1,2 @@
-  M im…│    1       -old
+▌ M …xt│@@ -1,2 +1,2 @@
+  M …in│    1       -old
        │          1 +new
        │    2     2  con
        │            \ No

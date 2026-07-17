@@ -105,7 +105,7 @@ fn row_line<'a>(stream: &'a ReviewStream<'a>, key: RowKey, width: u16, app: &App
         RowKey::Binary { .. } => Line::styled("     Binary files differ", theme.marker),
         RowKey::Hunk { file, hunk } => hunk_line(stream, file, hunk, width, theme),
         RowKey::UnifiedLine { file, hunk, line, range } => {
-            context.unified_line(SourcePosition { file, hunk, line }, range)
+            context.unified_line(SourcePosition { file, hunk, line }, range, width)
         }
         RowKey::SplitLine { file, hunk, old, new, old_range, new_range } => context.split_line(
             file,
@@ -233,7 +233,7 @@ fn hunk_line(stream: &ReviewStream<'_>, file: usize, hunk: usize, width: u16, th
 }
 
 impl RenderContext<'_, '_, '_, '_> {
-    fn unified_line(&self, position: SourcePosition, range: TextRange) -> Line<'static> {
+    fn unified_line(&self, position: SourcePosition, range: TextRange, width: u16) -> Line<'static> {
         let source_line = &self.stream.hunk(position.file, position.hunk).lines()[position.line];
         let old = source_line
             .old_line()
@@ -251,7 +251,7 @@ impl RenderContext<'_, '_, '_, '_> {
         let counterpart = paired_line(self.stream, position.file, position.hunk, position.line);
         let mut spans = vec![Span::styled(gutter, style)];
         spans.extend(self.styled_source(position, range, counterpart, style));
-        Line::from(spans)
+        fit_line(spans, usize::from(width), style)
     }
 
     fn split_line(&self, file: usize, hunk: usize, old: SplitSource, new: SplitSource, width: u16) -> Line<'static> {
@@ -285,7 +285,7 @@ impl RenderContext<'_, '_, '_, '_> {
         let source_spans = self.styled_source(SourcePosition { file, hunk, line: index }, range, counterpart, style);
         spans.extend(clip_spans(source_spans, width.saturating_sub(gutter_width)));
         let used = gutter_width + spans.iter().skip(1).map(Span::width).sum::<usize>();
-        spans.push(Span::raw(" ".repeat(width.saturating_sub(used))));
+        spans.push(Span::styled(" ".repeat(width.saturating_sub(used)), style));
         spans
     }
 
@@ -546,6 +546,54 @@ mod tests {
     }
 
     #[test]
+    fn changed_backgrounds_fill_unified_rows_and_split_cells() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let theme = Theme::dark();
+
+        let mut unified = App::ready(&changeset);
+        unified.resize(64, 12);
+        let unified_area = unified.areas().review;
+        let mut terminal = Terminal::new(TestBackend::new(64, 12)).unwrap();
+        terminal.draw(|frame| render(frame, &unified, &theme)).unwrap();
+        let buffer = terminal.backend().buffer();
+        for x in unified_area.x..unified_area.right() {
+            assert!([theme.deletion.bg, theme.intraline.bg].contains(&buffer[(x, unified_area.y + 2)].style().bg));
+            assert!([theme.addition.bg, theme.intraline.bg].contains(&buffer[(x, unified_area.y + 3)].style().bg));
+        }
+        assert_eq!(
+            buffer[(unified_area.right() - 1, unified_area.y + 2)].style().bg,
+            theme.deletion.bg
+        );
+        assert_eq!(
+            buffer[(unified_area.right() - 1, unified_area.y + 3)].style().bg,
+            theme.addition.bg
+        );
+
+        let mut split = App::ready(&changeset);
+        split.resize(120, 12);
+        let split_area = split.areas().review;
+        let cell_width = split_area.width.saturating_sub(3) / 2;
+        let mut terminal = Terminal::new(TestBackend::new(120, 12)).unwrap();
+        terminal.draw(|frame| render(frame, &split, &theme)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let changed_row = split_area.y + 2;
+        for x in split_area.x..split_area.x + cell_width {
+            assert!([theme.deletion.bg, theme.intraline.bg].contains(&buffer[(x, changed_row)].style().bg));
+        }
+        for x in split_area.x + cell_width + 3..split_area.right() {
+            assert!([theme.addition.bg, theme.intraline.bg].contains(&buffer[(x, changed_row)].style().bg));
+        }
+        assert_eq!(
+            buffer[(split_area.x + cell_width - 1, changed_row)].style().bg,
+            theme.deletion.bg
+        );
+        assert_eq!(
+            buffer[(split_area.right() - 1, changed_row)].style().bg,
+            theme.addition.bg
+        );
+    }
+
+    #[test]
     fn named_theme_styles_cover_states_help_and_both_review_layouts() {
         let theme = Theme::resolve(crate::ThemeFamily::Catppuccin, Some(crate::ColorMode::Dark));
 
@@ -600,16 +648,17 @@ mod tests {
 
         let styles = rendered_styles(app, 120, 12, &theme);
         assert!(has_style(&styles, theme.search_match));
-        assert!(
-            styles
-                .iter()
-                .any(|style| { style.bg == theme.intraline.bg && style.add_modifier.contains(Modifier::UNDERLINED) })
-        );
-        assert!(
-            styles
-                .iter()
-                .any(|style| { style.fg.is_some() && style.fg != theme.addition.fg && style.bg == theme.addition.bg })
-        );
+        assert!(styles.iter().any(|style| {
+            style.bg == theme.intraline.bg
+                && style.add_modifier.contains(Modifier::BOLD)
+                && !style.add_modifier.contains(Modifier::UNDERLINED)
+        }));
+        let addition_styles = styles
+            .iter()
+            .filter(|style| style.bg == theme.addition.bg)
+            .collect::<Vec<_>>();
+        assert!(!addition_styles.is_empty());
+        assert!(addition_styles.iter().all(|style| style.fg == theme.addition.fg));
     }
 
     fn snapshot(mut app: App<'_>, width: u16, height: u16) -> String {

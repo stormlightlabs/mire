@@ -17,8 +17,10 @@ const ICEBERG_DARK: Palette = Palette {
     mauve: rgb(160, 147, 199),
     pink: rgb(242, 101, 181),
     green: rgb(180, 190, 130),
+    addition_bg: rgb(46, 49, 48),
     yellow: rgb(226, 164, 120),
     red: rgb(226, 120, 120),
+    deletion_bg: rgb(53, 38, 46),
     blue: rgb(132, 160, 198),
     teal: rgb(137, 184, 194),
     peach: rgb(226, 164, 120),
@@ -37,8 +39,10 @@ const NORD_LIGHT: Palette = Palette {
     mauve: rgb(151, 54, 91),
     pink: rgb(153, 50, 75),
     green: rgb(79, 137, 76),
+    addition_bg: rgb(206, 219, 215),
     yellow: rgb(154, 117, 0),
     red: rgb(153, 50, 75),
+    deletion_bg: rgb(218, 206, 215),
     blue: rgb(59, 110, 168),
     teal: rgb(57, 142, 172),
     peach: rgb(172, 68, 38),
@@ -57,8 +61,10 @@ const ELDRITCH_MINIMAL: Palette = Palette {
     mauve: rgb(164, 140, 242),
     pink: rgb(242, 101, 181),
     green: rgb(55, 244, 153),
+    addition_bg: rgb(28, 58, 57),
     yellow: rgb(241, 252, 121),
     red: rgb(241, 108, 117),
+    deletion_bg: rgb(56, 37, 52),
     blue: rgb(4, 209, 249),
     teal: rgb(4, 209, 249),
     peach: rgb(247, 198, 127),
@@ -77,8 +83,10 @@ const ELDRITCH_DUSK: Palette = Palette {
     mauve: rgb(138, 105, 247),
     pink: rgb(251, 91, 182),
     green: rgb(56, 255, 159),
+    addition_bg: rgb(212, 245, 230),
     yellow: rgb(255, 249, 82),
     red: rgb(251, 91, 102),
+    deletion_bg: rgb(242, 220, 222),
     blue: rgb(10, 214, 255),
     teal: rgb(10, 214, 255),
     peach: rgb(255, 175, 77),
@@ -97,8 +105,10 @@ const CATPPUCCIN_MOCHA: Palette = Palette {
     mauve: rgb(203, 166, 247),
     pink: rgb(245, 194, 231),
     green: rgb(166, 227, 161),
+    addition_bg: rgb(50, 60, 63),
     yellow: rgb(249, 226, 175),
     red: rgb(243, 139, 168),
+    deletion_bg: rgb(62, 47, 64),
     blue: rgb(137, 180, 250),
     teal: rgb(148, 226, 213),
     peach: rgb(250, 179, 135),
@@ -117,8 +127,10 @@ const CATPPUCCIN_LATTE: Palette = Palette {
     mauve: rgb(136, 57, 239),
     pink: rgb(234, 118, 203),
     green: rgb(64, 160, 43),
+    addition_bg: rgb(213, 229, 220),
     yellow: rgb(223, 142, 29),
     red: rgb(210, 15, 57),
+    deletion_bg: rgb(235, 207, 219),
     blue: rgb(30, 102, 245),
     teal: rgb(23, 146, 153),
     peach: rgb(254, 100, 11),
@@ -230,8 +242,10 @@ struct Palette {
     mauve: Color,
     pink: Color,
     green: Color,
+    addition_bg: Color,
     yellow: Color,
     red: Color,
+    deletion_bg: Color,
     blue: Color,
     teal: Color,
     peach: Color,
@@ -366,7 +380,7 @@ impl Theme {
             error: Style::new().add_modifier(Modifier::BOLD),
             footer: Style::new(),
             search_match: Style::new().add_modifier(Modifier::REVERSED),
-            intraline: Style::new().add_modifier(Modifier::UNDERLINED),
+            intraline: Style::new().add_modifier(Modifier::BOLD),
         }
     }
 
@@ -396,13 +410,13 @@ impl Theme {
             error: Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
             footer: Style::new(),
             search_match: Style::new().add_modifier(Modifier::REVERSED),
-            intraline: Style::new().add_modifier(Modifier::UNDERLINED),
+            intraline: Style::new().add_modifier(Modifier::BOLD),
         }
     }
 
     /// Adds syntax color to a diff style when the active theme supports it.
     pub fn syntax(self, scope: usize, base: Style) -> Style {
-        if !self.syntax_colors {
+        if !self.syntax_colors || base == self.addition || base == self.deletion {
             return base;
         }
         let name = inkjet::constants::HIGHLIGHT_NAMES.get(scope).copied().unwrap_or("");
@@ -505,23 +519,9 @@ impl Theme {
             } else {
                 Style::new().fg(palette.blue).bg(palette.surface_dim)
             },
-            addition: if light_variant {
-                Style::new()
-                    .fg(palette.text)
-                    .bg(palette.surface0)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::new().fg(palette.green).bg(palette.panel_bg)
-            },
+            addition: Style::new().fg(palette.text).bg(palette.addition_bg),
             addition_meta,
-            deletion: if light_variant {
-                Style::new()
-                    .fg(palette.text)
-                    .bg(palette.surface0)
-                    .add_modifier(Modifier::ITALIC)
-            } else {
-                Style::new().fg(palette.red).bg(palette.panel_bg)
-            },
+            deletion: Style::new().fg(palette.text).bg(palette.deletion_bg),
             deletion_meta,
             context: Style::new().fg(palette.text).bg(palette.panel_bg),
             marker: if light_variant {
@@ -541,10 +541,7 @@ impl Theme {
                 .fg(emphasis_text)
                 .bg(palette.yellow)
                 .add_modifier(Modifier::BOLD),
-            intraline: Style::new()
-                .bg(palette.surface0)
-                .add_modifier(Modifier::UNDERLINED)
-                .add_modifier(Modifier::BOLD),
+            intraline: Style::new().bg(palette.surface1).add_modifier(Modifier::BOLD),
         }
     }
 }
@@ -685,13 +682,11 @@ mod tests {
                     theme.syntax.function,
                     theme.syntax.r#type,
                 ] {
-                    for background in [theme.context.bg, theme.addition.bg, theme.deletion.bg] {
-                        let style = Style::new().fg(foreground).bg(background.unwrap());
-                        assert!(
-                            contrast(style) >= 3.0,
-                            "{family}/{mode:?} has low syntax contrast: {style:?}"
-                        );
-                    }
+                    let style = Style::new().fg(foreground).bg(theme.context.bg.unwrap());
+                    assert!(
+                        contrast(style) >= 3.0,
+                        "{family}/{mode:?} has low syntax contrast: {style:?}"
+                    );
                 }
             }
         }

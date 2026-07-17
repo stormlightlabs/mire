@@ -221,6 +221,29 @@ fn push_title_segment(spans: &mut Vec<Span<'static>>, value: String, style: Styl
     spans.push(Span::styled(value, style));
 }
 
+fn truncate_path(value: &str, width: usize) -> String {
+    if Span::raw(value).width() <= width {
+        return value.to_owned();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let target = width.saturating_sub(1);
+    let mut suffix = Vec::new();
+    let mut used = 0_usize;
+    for character in value.chars().rev() {
+        let character_width = Span::raw(character.to_string()).width().max(1);
+        if used.saturating_add(character_width) > target {
+            break;
+        }
+        suffix.push(character);
+        used += character_width;
+    }
+    let mut result = String::from("…");
+    result.extend(suffix.into_iter().rev());
+    result
+}
+
 fn sidebar_header(width: u16, position: usize, total: usize, theme: &Theme) -> Line<'static> {
     let left = " Files";
     let right = format!("{position}/{total} ");
@@ -258,7 +281,7 @@ fn sidebar_file_line(file: &FileDiff, width: u16, selected: bool, theme: &Theme)
     let gap_width = usize::from(metadata_width > 0);
     let prefix_width = 4;
     let path_width = available.saturating_sub(prefix_width + gap_width + metadata_width);
-    let path = truncate_text(&file_path(file), path_width);
+    let path = truncate_path(&file_path(file), path_width);
     let used = prefix_width + Span::raw(&path).width() + metadata_width;
     let gap = available.saturating_sub(used);
     let marker_style = if selected { theme.accent } else { theme.muted };
@@ -304,6 +327,8 @@ mod tests {
         assert_eq!(diff_stats(&changeset.files()[0]), Some((1, 1)));
         assert_eq!(truncate_text("界abcdef", 5), "界ab…");
         assert_eq!(Span::raw(truncate_text("界abcdef", 5)).width(), 5);
+        assert_eq!(truncate_path("crates/ui/src/app.rs", 12), "…/src/app.rs");
+        assert_eq!(Span::raw(truncate_path("目录/界abcdef.rs", 8)).width(), 8);
     }
 
     #[test]

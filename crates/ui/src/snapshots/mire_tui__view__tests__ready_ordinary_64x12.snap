@@ -1,16 +1,16 @@
 ---
 source: crates/ui/src/view.rs
-expression: "snapshot(&app, 64, 12)"
+expression: "snapshot(App::ready(&changeset), 64, 12)"
 ---
- Mire review                                                    
---- modified: file.txt                                          
-@@ -1,2 +1,2 @@ heading                                         
-    1       -old                                                
-          1 +new                                                
-    2     2  context                                            
-            \ No newline at end of both files                   
---- modified: image.bin                                         
-     Binary files differ                                        
-                                                                
-                                                                
- j/k or arrows: scroll | PgUp/PgDn | Home/End | q: quit
+ Mire review | unified | focus: review
+ Files          --- modified: file.txt
+> file.txt      @@ -1,2 +1,2 @@ heading
+  image.bin         1       -old
+                          1 +new
+                    2     2  context
+                            \ No newline at end of both files
+                --- modified: image.bin
+                     Binary files differ
+
+
+ Tab: focus | j/k: move | [ ]: files | n/N: hunks | 1/2/3: layou

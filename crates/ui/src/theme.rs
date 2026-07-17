@@ -5,6 +5,8 @@ use terminal_colorsaurus::{QueryOptions, ThemeMode, theme_mode};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Theme {
     pub title: Style,
+    pub selected: Style,
+    pub divider: Style,
     pub file: Style,
     pub hunk: Style,
     pub addition: Style,
@@ -36,6 +38,11 @@ impl Theme {
                 .fg(Color::Black)
                 .bg(Color::White)
                 .add_modifier(Modifier::BOLD),
+            selected: Style::new()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+            divider: Style::new().fg(Color::DarkGray),
             file: Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
             hunk: Style::new().fg(Color::LightBlue),
             addition: Style::new().fg(Color::LightGreen),
@@ -54,6 +61,11 @@ impl Theme {
                 .fg(Color::White)
                 .bg(Color::Black)
                 .add_modifier(Modifier::BOLD),
+            selected: Style::new()
+                .fg(Color::White)
+                .bg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+            divider: Style::new().fg(Color::DarkGray),
             file: Style::new().fg(Color::Blue).add_modifier(Modifier::BOLD),
             hunk: Style::new().fg(Color::Blue),
             addition: Style::new().fg(Color::Green),
@@ -69,6 +81,8 @@ impl Theme {
     pub const fn plain() -> Self {
         Self {
             title: Style::new().add_modifier(Modifier::BOLD),
+            selected: Style::new().add_modifier(Modifier::REVERSED),
+            divider: Style::new(),
             file: Style::new().add_modifier(Modifier::BOLD),
             hunk: Style::new(),
             addition: Style::new(),

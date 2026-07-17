@@ -1,0 +1,28 @@
+---
+source: crates/ui/src/view.rs
+expression: "snapshot(app, 90, 24)"
+---
+ Mire review | unified | focus: review
+ Files                 Navigation and layout
+> file.txt             q / Esc      quit
+  image.bin            ?            toggle help
+                       Tab          switch sidebar/review focus
+                       j / Down     scroll or select next file
+                       k / Up       scroll or select previous file
+                       PgDn         page down
+                       PgUp         page up
+                       g / Home     first row
+                       G / End      last row
+                       ]            next file
+                       [            previous file
+                       n            next hunk
+                       N            previous hunk
+                       1            unified layout
+                       2            split layout
+                       3            automatic layout
+                       wheel        scroll review or sidebar
+                       left click   select a sidebar or review file
+
+
+
+ Tab: focus | j/k: move | [ ]: files | n/N: hunks | 1/2/3: layout | ?: help | q: quit

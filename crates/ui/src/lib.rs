@@ -1,6 +1,8 @@
 //! Terminal application state, virtualized review rows, and rendering.
 
 mod app;
+mod layout;
+mod navigation;
 mod stream;
 mod terminal;
 mod theme;
@@ -11,7 +13,7 @@ use std::io;
 use mire_core::Changeset;
 
 pub use app::{App, AppState};
-pub use stream::{ReviewStream, RowKind};
+pub use stream::{LayoutMode, ReviewStream, RowKind};
 pub use theme::Theme;
 pub use view::render;
 

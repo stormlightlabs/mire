@@ -1,9 +1,9 @@
 ---
 source: crates/ui/src/view.rs
-expression: "snapshot(&App::loading(), 32, 5)"
+expression: "snapshot(App::loading(), 32, 5)"
 ---
- Mire review                    
-Loading review...               
-                                
-                                
- j/k or arrows: scroll | PgUp/Pg
+ Mire review | unavailable | foc
+            Loading review...
+
+
+ Tab: focus | j/k: move | [ ]: f

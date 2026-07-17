@@ -59,14 +59,18 @@ pub fn run(changeset: &Changeset) -> io::Result<()> {
 fn run_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, changeset: &Changeset, theme: &Theme) -> io::Result<()> {
     terminal.draw(|frame| render(frame, &App::loading(), theme))?;
     let mut app = App::ready(changeset);
+    let size = terminal.size()?;
+    app.resize(size.width, size.height);
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
         if !event::poll(EVENT_POLL_INTERVAL)? {
             continue;
         }
-        if let Event::Key(key) = event::read()? {
-            let viewport_height = terminal.size()?.height.saturating_sub(2) as usize;
-            app.handle_key(key, viewport_height);
+        match event::read()? {
+            Event::Key(key) => app.handle_key(key),
+            Event::Mouse(mouse) => app.handle_mouse(mouse),
+            Event::Resize(width, height) => app.resize(width, height),
+            Event::FocusGained | Event::FocusLost | Event::Paste(_) => {}
         }
     }
     Ok(())

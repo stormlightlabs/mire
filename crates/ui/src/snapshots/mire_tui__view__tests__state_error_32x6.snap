@@ -1,10 +1,10 @@
 ---
 source: crates/ui/src/view.rs
-expression: "snapshot(&App::error(\"broken input\"), 32, 6)"
+expression: "snapshot(App::error(\"broken input\"), 32, 6)"
 ---
- Mire review                    
-Unable to display review:       
-broken input                    
-                                
-                                
- j/k or arrows: scroll | PgUp/Pg
+ Mire review | unavailable | foc
+            Unable to display re
+            broken input
+
+
+ Tab: focus | j/k: move | [ ]: f

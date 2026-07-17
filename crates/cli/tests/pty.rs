@@ -27,6 +27,9 @@ fn terminal_review_enters_renders_and_restores_the_alternate_screen() {
     drop(pair.slave);
 
     thread::sleep(Duration::from_millis(100));
+    writer.write_all(b"2").expect("split-layout key can be sent");
+    writer.flush().expect("split-layout key can be flushed");
+    thread::sleep(Duration::from_millis(50));
     writer.write_all(b"q").expect("quit key can be sent");
     writer.flush().expect("quit key can be flushed");
     let status = child.wait().expect("terminal review exits");
@@ -38,6 +41,10 @@ fn terminal_review_enters_renders_and_restores_the_alternate_screen() {
     assert!(contains(&output, b"\x1b[?1049h"), "alternate screen was not entered");
     assert!(contains(&output, b"\x1b[?1049l"), "alternate screen was not restored");
     assert!(contains(&output, b"Mire review"), "review frame was not rendered");
+    assert!(
+        contains(&output, b"split"),
+        "split layout was not rendered after its key binding"
+    );
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {

@@ -147,17 +147,19 @@ Verification:
 
 **Blocked by:** M1.4
 
+**Status:** Complete
+
 Add file/hunk navigation and unified, split, and automatic layouts driven by one
 row-generation model.
 
 Acceptance criteria:
 
-- [ ] Selecting a sidebar file jumps within the continuous stream.
-- [ ] Keyboard and mouse cover the same primary navigation actions.
-- [ ] Resize preserves the logical selection and scroll anchor.
-- [ ] Split and unified rows align additions, deletions, and context without
+- [x] Selecting a sidebar file jumps within the continuous stream.
+- [x] Keyboard and mouse cover the same primary navigation actions.
+- [x] Resize preserves the logical selection and scroll anchor.
+- [x] Split and unified rows align additions, deletions, and context without
   losing source line identity.
-- [ ] Help lists every active binding and conflicts are tested.
+- [x] Help lists every active binding and conflicts are tested.
 
 Verification:
 

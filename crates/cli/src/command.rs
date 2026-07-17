@@ -10,7 +10,11 @@ use mire_tui::ThemeFamily;
 use thiserror::Error;
 
 use crate::git::{self, DiffRequest, GitError, ShowRequest};
-use crate::review_file::{ReviewFileError, read_review};
+use crate::protocol::{
+    ContextSelection, NoteBatch, ProtocolError, context_json, import_error_json, import_result_json, notes_json,
+    notes_markdown,
+};
+use crate::review_file::{DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, read_review, write_review_atomic};
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 enum ThemeArgument {
@@ -24,18 +28,33 @@ enum ThemeArgument {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum OutputFormat {
     Json,
+    Markdown,
 }
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Export bounded context from a durable review.
+    Context(ContextArgs),
     /// Review worktree or revision differences from Git.
     Diff(DiffArgs),
     /// Normalize patch input for inspection.
     Patch(PatchArgs),
+    /// Import, list, or export durable review notes.
+    Notes(NotesArgs),
     /// Open a durable review file.
     Review(ReviewArgs),
     /// Review one Git commit.
     Show(ShowArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum NotesCommand {
+    /// Atomically append a schema-versioned note batch.
+    Import(NoteImportArgs),
+    /// List notes as deterministic JSON.
+    List(NoteListArgs),
+    /// Export notes as JSON or standalone Markdown.
+    Export(NoteExportArgs),
 }
 
 #[derive(Debug, Error)]
@@ -48,10 +67,20 @@ enum AppError {
     Git(GitError),
     #[error("cannot load review: {0}")]
     ReviewFile(ReviewFileError),
+    #[error("cannot read protocol input from {input:?}: {source}")]
+    ProtocolInputIo { input: OsString, source: io::Error },
+    #[error("protocol input from {input:?} exceeds the {limit}-byte limit")]
+    ProtocolInputTooLarge { input: OsString, limit: usize },
+    #[error("invalid note batch JSON: {0}")]
+    ProtocolJson(serde_json::Error),
+    #[error("review protocol failed: {0}")]
+    Protocol(ProtocolError),
+    #[error("note import was rejected")]
+    ImportRejected { report: Vec<u8> },
     #[error("cannot write JSON output: {0}")]
     Output(serde_json::Error),
-    #[error("cannot finish JSON output: {0}")]
-    OutputNewline(io::Error),
+    #[error("cannot write command output: {0}")]
+    OutputIo(io::Error),
     #[error("terminal interface failed: {0}")]
     Terminal(io::Error),
 }
@@ -67,9 +96,14 @@ impl AppError {
         match self {
             Self::InputIo { .. } => 3,
             Self::Patch(_) => 4,
-            Self::Output(_) | Self::OutputNewline(_) | Self::Terminal(_) => 5,
+            Self::Output(_) | Self::OutputIo(_) | Self::Terminal(_) => 5,
             Self::Git(_) => 6,
             Self::ReviewFile(_) => 7,
+            Self::ProtocolInputIo { .. }
+            | Self::ProtocolInputTooLarge { .. }
+            | Self::ProtocolJson(_)
+            | Self::Protocol(_)
+            | Self::ImportRejected { .. } => 8,
         }
     }
 }
@@ -85,6 +119,24 @@ struct Cli {
 }
 
 #[derive(Args, Debug)]
+struct ContextArgs {
+    /// JSON review file to inspect.
+    review: OsString,
+    /// Include the complete normalized patch capture.
+    #[arg(long, conflicts_with = "file", requires = "max_bytes")]
+    patch: bool,
+    /// Include one complete normalized file diff.
+    #[arg(long, value_name = "PATH", conflicts_with = "patch", requires = "max_bytes")]
+    file: Option<OsString>,
+    /// Maximum serialized bytes for an expanded context request.
+    #[arg(long, value_name = "BYTES")]
+    max_bytes: Option<usize>,
+    /// Structured output format.
+    #[arg(long, value_name = "FORMAT", value_parser = parse_json_format, default_value = "json")]
+    format: Option<OutputFormat>,
+}
+
+#[derive(Args, Debug)]
 struct DiffArgs {
     /// Compare the staged index with HEAD.
     #[arg(long, conflicts_with = "revisions")]
@@ -96,7 +148,7 @@ struct DiffArgs {
     #[arg(last = true, value_name = "PATH")]
     paths: Vec<OsString>,
     /// Structured output format.
-    #[arg(long, value_enum)]
+    #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
     format: Option<OutputFormat>,
     /// Override syntax detection for the interactive viewer.
     #[arg(long, value_parser = parse_language)]
@@ -108,7 +160,7 @@ struct PatchArgs {
     /// Patch file to read, or - for standard input.
     input: OsString,
     /// Structured output format.
-    #[arg(long, value_enum)]
+    #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
     format: Option<OutputFormat>,
     /// Override syntax detection for the interactive viewer.
     #[arg(long, value_parser = parse_language)]
@@ -116,11 +168,43 @@ struct PatchArgs {
 }
 
 #[derive(Args, Debug)]
+struct NotesArgs {
+    #[command(subcommand)]
+    command: NotesCommand,
+}
+
+#[derive(Args, Debug)]
+struct NoteImportArgs {
+    /// JSON review file to update atomically.
+    review: OsString,
+    /// Note batch JSON file, or - for standard input.
+    input: OsString,
+}
+
+#[derive(Args, Debug)]
+struct NoteListArgs {
+    /// JSON review file to inspect.
+    review: OsString,
+    /// Structured output format.
+    #[arg(long, value_name = "FORMAT", value_parser = parse_json_format, default_value = "json")]
+    format: Option<OutputFormat>,
+}
+
+#[derive(Args, Debug)]
+struct NoteExportArgs {
+    /// JSON review file to export.
+    review: OsString,
+    /// Export format.
+    #[arg(long, value_enum, default_value = "json")]
+    format: OutputFormat,
+}
+
+#[derive(Args, Debug)]
 struct ReviewArgs {
     /// JSON review file to open.
     input: OsString,
     /// Structured output format.
-    #[arg(long, value_enum)]
+    #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
     format: Option<OutputFormat>,
 }
 
@@ -132,7 +216,7 @@ struct ShowArgs {
     #[arg(last = true, value_name = "PATH")]
     paths: Vec<OsString>,
     /// Structured output format.
-    #[arg(long, value_enum)]
+    #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
     format: Option<OutputFormat>,
     /// Override syntax detection for the interactive viewer.
     #[arg(long, value_parser = parse_language)]
@@ -151,7 +235,11 @@ pub fn run(args: impl Iterator<Item = OsString>) -> ExitCode {
     match execute(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            let _ = writeln!(io::stderr().lock(), "mire: {error}");
+            if let AppError::ImportRejected { report } = &error {
+                let _ = io::stderr().lock().write_all(report);
+            } else {
+                let _ = writeln!(io::stderr().lock(), "mire: {error}");
+            }
             ExitCode::from(error.exit_code())
         }
     }
@@ -160,12 +248,25 @@ pub fn run(args: impl Iterator<Item = OsString>) -> ExitCode {
 fn execute(cli: Cli) -> Result<(), AppError> {
     let theme = ThemeFamily::from(cli.theme);
     let (changeset, format, language) = match cli.command {
+        Command::Context(ContextArgs { review, patch, file, max_bytes, format }) => {
+            let _ = format;
+            let review = read_review(Path::new(&review)).map_err(AppError::ReviewFile)?;
+            let selection = if patch {
+                ContextSelection::Patch
+            } else if let Some(path) = file.as_deref() {
+                ContextSelection::File(path)
+            } else {
+                ContextSelection::Manifest
+            };
+            return write_bytes(&context_json(&review, selection, max_bytes).map_err(AppError::Protocol)?);
+        }
         Command::Diff(DiffArgs { staged, revisions, paths, format, language }) => (
             git::load_diff(DiffRequest { staged, revisions, paths }).map_err(AppError::Git)?,
             format,
             language,
         ),
         Command::Patch(PatchArgs { input, format, language }) => (load_patch(&input)?, format, language),
+        Command::Notes(NotesArgs { command }) => return execute_notes(command),
         Command::Review(ReviewArgs { input, format }) => {
             let review = read_review(Path::new(&input)).map_err(AppError::ReviewFile)?;
             return if format.is_some() || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
@@ -207,7 +308,51 @@ fn write_review(review: &Review) -> Result<(), AppError> {
     let stdout = io::stdout();
     let mut output = stdout.lock();
     serde_json::to_writer(&mut output, review).map_err(AppError::Output)?;
-    writeln!(output).map_err(AppError::OutputNewline)
+    writeln!(output).map_err(AppError::OutputIo)
+}
+
+fn execute_notes(command: NotesCommand) -> Result<(), AppError> {
+    match command {
+        NotesCommand::Import(NoteImportArgs { review, input }) => import_notes(&review, &input),
+        NotesCommand::List(NoteListArgs { review, format }) => {
+            let _ = format;
+            let review = read_review(Path::new(&review)).map_err(AppError::ReviewFile)?;
+            write_bytes(&notes_json(&review).map_err(AppError::Protocol)?)
+        }
+        NotesCommand::Export(NoteExportArgs { review, format }) => {
+            let review = read_review(Path::new(&review)).map_err(AppError::ReviewFile)?;
+            let bytes = match format {
+                OutputFormat::Json => notes_json(&review).map_err(AppError::Protocol)?,
+                OutputFormat::Markdown => notes_markdown(&review),
+            };
+            write_bytes(&bytes)
+        }
+    }
+}
+
+fn import_notes(review_path: &OsStr, input: &OsStr) -> Result<(), AppError> {
+    let review = read_review(Path::new(review_path)).map_err(AppError::ReviewFile)?;
+    let bytes = read_protocol_input(input, DEFAULT_MAX_REVIEW_FILE_BYTES)?;
+    let batch: NoteBatch = serde_json::from_slice(&bytes).map_err(AppError::ProtocolJson)?;
+    let notes = batch.into_notes().map_err(AppError::Protocol)?;
+    let imported = notes.len();
+    let updated = match review.import_notes(notes) {
+        Ok(updated) => updated,
+        Err(error) => {
+            let report = import_error_json(&error).map_err(AppError::Protocol)?;
+            return Err(AppError::ImportRejected { report });
+        }
+    };
+    write_review_atomic(Path::new(review_path), &updated).map_err(AppError::ReviewFile)?;
+    write_bytes(&import_result_json(&updated, imported).map_err(AppError::Protocol)?)
+}
+
+fn parse_json_format(value: &str) -> Result<OutputFormat, String> {
+    if value == "json" {
+        Ok(OutputFormat::Json)
+    } else {
+        Err(format!("unsupported format {value:?}; possible values: json"))
+    }
 }
 
 fn parse_language(value: &str) -> Result<String, String> {
@@ -253,7 +398,26 @@ fn write_changeset(changeset: &Changeset) -> Result<(), AppError> {
     let stdout = io::stdout();
     let mut output = stdout.lock();
     serde_json::to_writer(&mut output, changeset).map_err(AppError::Output)?;
-    writeln!(output).map_err(AppError::OutputNewline)
+    writeln!(output).map_err(AppError::OutputIo)
+}
+
+fn write_bytes(bytes: &[u8]) -> Result<(), AppError> {
+    io::stdout().lock().write_all(bytes).map_err(AppError::OutputIo)
+}
+
+fn read_protocol_input(input: &OsStr, limit: usize) -> Result<Vec<u8>, AppError> {
+    let bytes = if input == "-" {
+        read_bounded(io::stdin().lock(), limit)
+            .map_err(|source| AppError::ProtocolInputIo { input: input.to_owned(), source })?
+    } else {
+        let file = File::open(Path::new(input))
+            .map_err(|source| AppError::ProtocolInputIo { input: input.to_owned(), source })?;
+        read_bounded(file, limit).map_err(|source| AppError::ProtocolInputIo { input: input.to_owned(), source })?
+    };
+    if bytes.len() > limit {
+        return Err(AppError::ProtocolInputTooLarge { input: input.to_owned(), limit });
+    }
+    Ok(bytes)
 }
 
 fn read_input(input: &OsStr, limit: usize) -> Result<Vec<u8>, AppError> {

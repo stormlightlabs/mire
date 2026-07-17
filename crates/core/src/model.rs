@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt;
 use std::num::NonZeroU64;
 
 use serde::de::{self, Deserializer};
@@ -112,6 +113,15 @@ impl Fingerprint {
     /// Returns the digest bytes.
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
+    }
+}
+
+impl fmt::Display for Fingerprint {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for byte in self.0 {
+            write!(formatter, "{byte:02x}")?;
+        }
+        Ok(())
     }
 }
 
@@ -831,6 +841,11 @@ mod tests {
         assert_eq!(BytePath::new(b"a//b".to_vec()), Err(BytePathError::EmptyComponent));
         assert_eq!(BytePath::new(b"bad\0name".to_vec()), Err(BytePathError::Nul));
         assert!(BytePath::new(b"src/non-utf8-\xff.rs".to_vec()).is_ok());
+    }
+
+    #[test]
+    fn fingerprints_display_as_lowercase_hexadecimal() {
+        assert_eq!(FINGERPRINT.to_string(), "ab".repeat(32));
     }
 
     #[test]

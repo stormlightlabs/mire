@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::num::NonZeroU64;
 
 use serde::de::{self, Deserializer};
@@ -80,6 +81,38 @@ pub enum ReviewError {
         recorded: NoteStatus,
         history: NoteStatus,
     },
+    /// The review revision cannot be incremented again.
+    #[error("review revision cannot be incremented beyond {0}")]
+    RevisionOverflow(u64),
+    /// The event sequence cannot be incremented again.
+    #[error("note event sequence cannot be incremented beyond {0}")]
+    EventSequenceOverflow(u64),
+}
+
+impl ReviewError {
+    pub const fn error_code(&self) -> &'static str {
+        match self {
+            ReviewError::UnsupportedSchemaMajor { .. } => "unsupported_schema_major",
+            ReviewError::ZeroNumber { .. } => "zero_number",
+            ReviewError::ReversedLineRange { .. } => "reversed_line_range",
+            ReviewError::FileSideNotFound { .. } => "file_side_not_found",
+            ReviewError::HunkNotFound => "hunk_not_found",
+            ReviewError::AmbiguousAnchor => "ambiguous_anchor",
+            ReviewError::LineRangeNotFound { .. } => "line_range_not_found",
+            ReviewError::ContentFingerprintMismatch => "content_fingerprint_mismatch",
+            ReviewError::InvalidTextField { .. } => "invalid_text_field",
+            ReviewError::NoteBodyTooLarge { .. } => "note_body_too_large",
+            ReviewError::TooManyNotes { .. } => "too_many_notes",
+            ReviewError::DuplicateNoteId(_) => "duplicate_note_id",
+            ReviewError::EventSequence { .. } => "event_sequence",
+            ReviewError::UnknownEventNote(_) => "unknown_event_note",
+            ReviewError::InvalidCreationEvents { .. } => "invalid_creation_events",
+            ReviewError::StatusHistory { .. } => "status_history",
+            ReviewError::FinalStatus { .. } => "final_status",
+            ReviewError::RevisionOverflow(_) => "revision_overflow",
+            ReviewError::EventSequenceOverflow(_) => "event_sequence_overflow",
+        }
+    }
 }
 
 /// The old or new side selected by an anchor.
@@ -90,6 +123,15 @@ pub enum AnchorSide {
     Old,
     /// The post-change side of a file.
     New,
+}
+
+impl fmt::Display for AnchorSide {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Old => formatter.write_str("old side"),
+            Self::New => formatter.write_str("new side"),
+        }
+    }
 }
 
 /// A review note's current decision state.
@@ -106,6 +148,17 @@ pub enum NoteStatus {
     AcceptedRisk,
 }
 
+impl fmt::Display for NoteStatus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Open => formatter.write_str("open"),
+            Self::Resolved => formatter.write_str("resolved"),
+            Self::Dismissed => formatter.write_str("dismissed"),
+            Self::AcceptedRisk => formatter.write_str("accepted-risk"),
+        }
+    }
+}
+
 /// The impact assigned to a review note.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -120,6 +173,18 @@ pub enum NoteSeverity {
     High,
     /// A release-blocking correctness, safety, or data-loss issue.
     Critical,
+}
+
+impl fmt::Display for NoteSeverity {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Note => formatter.write_str("Note"),
+            Self::Low => formatter.write_str("Low"),
+            Self::Medium => formatter.write_str("Medium"),
+            Self::High => formatter.write_str("High"),
+            Self::Critical => formatter.write_str("Critical"),
+        }
+    }
 }
 
 /// How a note entered the review without implying that its claim is verified.
@@ -145,6 +210,20 @@ pub enum Provenance {
         /// Producer recorded by the imported document, when present.
         producer: Option<String>,
     },
+}
+
+impl fmt::Display for Provenance {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Human => formatter.write_str("human"),
+            Self::Agent { producer } => write!(formatter, "agent ({producer})"),
+            Self::Analyzer { producer } => write!(formatter, "analyzer ({producer})"),
+            Self::Interchange { format, producer: Some(producer) } => {
+                write!(formatter, "{format} interchange ({producer})")
+            }
+            Self::Interchange { format, producer: None } => write!(formatter, "{format} interchange"),
+        }
+    }
 }
 
 /// A state transition retained in a review's note history.
@@ -220,6 +299,39 @@ impl<'de> Deserialize<'de> for NoteId {
     {
         let value = String::deserialize(deserializer)?;
         Self::new(value).map_err(de::Error::custom)
+    }
+}
+
+/// One rejected note from an otherwise atomic batch import.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NoteImportFailure {
+    note_id: NoteId,
+    error: ReviewError,
+}
+
+impl NoteImportFailure {
+    /// Returns the identifier of the rejected note.
+    pub const fn note_id(&self) -> &NoteId {
+        &self.note_id
+    }
+
+    /// Returns why the note was rejected.
+    pub const fn error(&self) -> &ReviewError {
+        &self.error
+    }
+}
+
+/// All note failures found while validating one atomic import batch.
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+#[error("batch import rejected {count} note(s)", count = .failures.len())]
+pub struct NoteImportError {
+    failures: Vec<NoteImportFailure>,
+}
+
+impl NoteImportError {
+    /// Returns every rejected note in input order.
+    pub fn failures(&self) -> &[NoteImportFailure] {
+        &self.failures
     }
 }
 
@@ -470,6 +582,59 @@ impl Review {
         &self.events
     }
 
+    /// Validates and appends a batch of notes without partially applying it.
+    pub fn import_notes(&self, imported: Vec<ReviewNote>) -> std::result::Result<Self, NoteImportError> {
+        if imported.is_empty() {
+            return Ok(self.clone());
+        }
+        let failures = validate_imported_notes(self, &imported);
+        if !failures.is_empty() {
+            return Err(NoteImportError { failures });
+        }
+
+        let first_note_id = imported[0].id.clone();
+        let revision = self.revision.get().checked_add(1).ok_or_else(|| NoteImportError {
+            failures: vec![NoteImportFailure {
+                note_id: first_note_id.clone(),
+                error: ReviewError::RevisionOverflow(self.revision.get()),
+            }],
+        })?;
+        let mut sequence = self.events.last().map_or(0, NoteEvent::sequence);
+        let mut events = self.events.clone();
+        for note in &imported {
+            sequence = sequence.checked_add(1).ok_or_else(|| NoteImportError {
+                failures: vec![NoteImportFailure {
+                    note_id: note.id.clone(),
+                    error: ReviewError::EventSequenceOverflow(sequence),
+                }],
+            })?;
+            events.push(
+                NoteEvent::new(
+                    sequence,
+                    note.id.clone(),
+                    note.author.clone(),
+                    NoteEventKind::Created { status: note.status },
+                )
+                .map_err(|error| NoteImportError {
+                    failures: vec![NoteImportFailure { note_id: note.id.clone(), error }],
+                })?,
+            );
+        }
+        let mut notes = self.notes.clone();
+        notes.extend(imported);
+        let mut review = Self::new(
+            ReviewRevision::new(revision).map_err(|error| NoteImportError {
+                failures: vec![NoteImportFailure { note_id: first_note_id.clone(), error }],
+            })?,
+            self.changeset.clone(),
+            notes,
+            events,
+        )
+        .map_err(|error| NoteImportError { failures: vec![NoteImportFailure { note_id: first_note_id, error }] })?;
+        review.extensions = self.extensions.clone();
+        Ok(review)
+    }
+
     /// Validates limits, anchors, identifiers, attribution, and event history.
     pub fn validate(&self) -> Result<()> {
         if self.schema_version.major != CURRENT_REVIEW_SCHEMA_VERSION.major {
@@ -641,15 +806,51 @@ fn validate_notes(changeset: &Changeset, notes: &[ReviewNote]) -> Result<()> {
         if !identifiers.insert(note.id.as_str()) {
             return Err(ReviewError::DuplicateNoteId(note.id.as_str().to_owned()));
         }
-        note.anchor.validate(changeset)?;
-        validate_text("author identifier", note.author.id(), 256)?;
-        if let Some(name) = note.author.display_name() {
-            validate_text("author display name", name, 256)?;
-        }
-        validate_note_body(note.body())?;
-        validate_provenance(note.provenance())?;
+        validate_note(changeset, note)?;
     }
     Ok(())
+}
+
+fn validate_imported_notes(review: &Review, imported: &[ReviewNote]) -> Vec<NoteImportFailure> {
+    let mut identifiers = review
+        .notes
+        .iter()
+        .map(|note| note.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut failures = Vec::new();
+    if review.notes.len().saturating_add(imported.len()) > MAX_REVIEW_NOTES {
+        if let Some(note) = imported.first() {
+            failures.push(NoteImportFailure {
+                note_id: note.id.clone(),
+                error: ReviewError::TooManyNotes {
+                    actual: review.notes.len().saturating_add(imported.len()),
+                    limit: MAX_REVIEW_NOTES,
+                },
+            });
+        }
+    }
+    for note in imported {
+        if !identifiers.insert(note.id.as_str()) {
+            failures.push(NoteImportFailure {
+                note_id: note.id.clone(),
+                error: ReviewError::DuplicateNoteId(note.id.as_str().to_owned()),
+            });
+        }
+        if let Err(error) = validate_note(review.changeset(), note) {
+            failures.push(NoteImportFailure { note_id: note.id.clone(), error });
+        }
+    }
+    failures
+}
+
+fn validate_note(changeset: &Changeset, note: &ReviewNote) -> Result<()> {
+    note.anchor.validate(changeset)?;
+    validate_text("author identifier", note.author.id(), 256)?;
+    if let Some(name) = note.author.display_name() {
+        validate_text("author display name", name, 256)?;
+    }
+    validate_note_body(note.body())?;
+    validate_provenance(note.provenance())
 }
 
 fn validate_events(notes: &[ReviewNote], events: &[NoteEvent]) -> Result<()> {
@@ -787,6 +988,18 @@ mod tests {
 
         let status_error = serde_json::from_str::<NoteStatus>(r#""waived""#).unwrap_err();
         assert!(status_error.to_string().contains("unknown variant `waived`"));
+    }
+
+    #[test]
+    fn review_labels_have_stable_human_readable_text() {
+        assert_eq!(AnchorSide::New.to_string(), "new side");
+        assert_eq!(NoteStatus::AcceptedRisk.to_string(), "accepted-risk");
+        assert_eq!(NoteSeverity::Critical.to_string(), "Critical");
+        assert_eq!(Provenance::Human.to_string(), "human");
+        assert_eq!(
+            Provenance::Interchange { format: "sarif".to_owned(), producer: Some("scanner".to_owned()) }.to_string(),
+            "sarif interchange (scanner)"
+        );
     }
 
     #[test]

@@ -613,6 +613,7 @@ dependencies = [
  "mire-core",
  "mire-tui",
  "portable-pty",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
 ]

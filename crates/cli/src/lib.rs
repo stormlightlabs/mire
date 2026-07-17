@@ -2,6 +2,7 @@
 
 mod command;
 mod git;
+mod protocol;
 mod review_file;
 
 pub use command::run;

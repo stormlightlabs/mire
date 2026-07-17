@@ -126,17 +126,25 @@ Verification:
 
 **Blocked by:** M2.2, M1.6
 
+**Status:** Complete
+
 Add range selection, a note editor, note navigation, filters, and status changes
 to the review stream.
 
 Acceptance criteria:
 
-- [ ] A human can create, edit, resolve, dismiss, reopen, and accept risk on a
+- [x] A human can create, edit, resolve, dismiss, reopen, and accept risk on a
       note without changing source files.
-- [ ] Filters cover author kind, status, severity, annotation kind, and file.
-- [ ] Notes remain adjacent to code in unified and split layouts.
-- [ ] Keyboard and mouse parity applies to primary note actions.
-- [ ] Save failure keeps unsaved text available for recovery.
+- [x] Filters cover author kind, status, severity, annotation kind, and file.
+- [x] Notes remain adjacent to code in unified and split layouts.
+- [x] Keyboard and mouse parity applies to primary note actions.
+- [x] Save failure keeps unsaved text available for recovery.
+
+`mire review <review-file>` now opens an editable review stream. Range selection,
+note editing, note navigation, status decisions, and facet filters all operate on
+the captured changeset. Each accepted action advances the review revision and
+uses the existing atomic writer. Failed saves leave the editor and in-memory
+review intact so the reviewer can retry without retyping the note.
 
 Verification:
 
@@ -277,5 +285,4 @@ Verification:
 
 ## Current frontier
 
-M2.3 can start immediately because its review protocol and TUI readability
-dependencies are complete.
+M3.1 can start now that durable note interaction is complete.

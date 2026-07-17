@@ -5,7 +5,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use mire_core::{Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, PatchError, PatchLimits, Review, parse_patch};
+use mire_core::{
+    Author, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, PatchError, PatchLimits, Review, parse_patch,
+};
 use mire_tui::ThemeFamily;
 use thiserror::Error;
 
@@ -268,13 +270,15 @@ fn execute(cli: Cli) -> Result<(), AppError> {
         Command::Patch(PatchArgs { input, format, language }) => (load_patch(&input)?, format, language),
         Command::Notes(NotesArgs { command }) => return execute_notes(command),
         Command::Review(ReviewArgs { input, format }) => {
-            let review = read_review(Path::new(&input)).map_err(AppError::ReviewFile)?;
+            let review_path = Path::new(&input).to_owned();
+            let review = read_review(&review_path).map_err(AppError::ReviewFile)?;
             return if format.is_some() || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
                 write_review(&review)
             } else {
-                mire_tui::run_with_options(
-                    review.changeset(),
-                    mire_tui::AppOptions { language_override: None, theme },
+                mire_tui::run_review_with_options(
+                    &review,
+                    mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
+                    |updated| write_review_atomic(&review_path, updated),
                 )
                 .map_err(AppError::Terminal)
             };
@@ -288,9 +292,21 @@ fn execute(cli: Cli) -> Result<(), AppError> {
     if format.is_some() || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         write_changeset(&changeset)
     } else {
-        mire_tui::run_with_options(&changeset, mire_tui::AppOptions { language_override: language, theme })
-            .map_err(AppError::Terminal)
+        mire_tui::run_with_options(
+            &changeset,
+            mire_tui::AppOptions { language_override: language, theme, human_author: None },
+        )
+        .map_err(AppError::Terminal)
     }
+}
+
+fn local_author() -> Author {
+    let identifier = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .ok()
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+        .unwrap_or_else(|| "local-human".to_owned());
+    Author::new(identifier, None).expect("environment author was bounded or replaced with a static fallback")
 }
 
 impl From<ThemeArgument> for ThemeFamily {

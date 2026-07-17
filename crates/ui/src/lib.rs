@@ -4,6 +4,8 @@ mod app;
 mod chrome;
 mod layout;
 mod navigation;
+mod note_filter;
+mod notes;
 mod stream;
 mod syntax;
 mod terminal;
@@ -12,9 +14,10 @@ mod view;
 
 use std::io;
 
-use mire_core::Changeset;
+use mire_core::{Changeset, Review};
 
 pub use app::{App, AppOptions, AppState};
+pub use notes::{EditorTarget, LineSelection, NoteEditor};
 pub use stream::{LayoutMode, ReviewStream, RowKind};
 pub use theme::{ColorMode, ParseThemeFamilyError, Theme, ThemeFamily, ThemeVariant};
 pub use view::render;
@@ -27,4 +30,13 @@ pub fn run(changeset: &Changeset) -> io::Result<()> {
 /// Opens an interactive review with explicit presentation preferences.
 pub fn run_with_options(changeset: &Changeset, options: AppOptions) -> io::Result<()> {
     terminal::run(changeset, options)
+}
+
+/// Opens an editable durable review and saves every accepted note action through the supplied boundary.
+pub fn run_review_with_options<F, E>(review: &Review, options: AppOptions, save: F) -> io::Result<()>
+where
+    F: FnMut(&Review) -> Result<(), E>,
+    E: std::fmt::Display,
+{
+    terminal::run_review(review, options, save)
 }

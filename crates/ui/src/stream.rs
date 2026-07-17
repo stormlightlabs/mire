@@ -1,4 +1,6 @@
-use mire_core::{Changeset, FileContent, FileDiff, Hunk, LineKind};
+use std::collections::{BTreeMap, BTreeSet};
+
+use mire_core::{AnchorSide, Changeset, FileContent, FileDiff, Fingerprint, Hunk, LineKind, ReviewNote};
 use ratatui::text::Span;
 
 const LINE_GUTTER_WIDTH: usize = 13;
@@ -39,6 +41,8 @@ pub enum RowKind {
     MissingNewline,
     /// Context omitted by the current context setting.
     ContextGap,
+    /// A review note placed immediately after its anchored range.
+    Note,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -77,6 +81,10 @@ pub enum RowKey {
         hunk: usize,
         hidden: usize,
     },
+    Note {
+        file: usize,
+        note: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -86,6 +94,7 @@ pub enum RowAnchor {
     Hunk { file: usize, hunk: usize },
     Line { file: usize, hunk: usize, line: usize },
     MissingNewline { file: usize, hunk: usize, line: usize },
+    Note { file: usize, note: usize },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -209,13 +218,38 @@ impl<'a> ReviewStream<'a> {
         Self::with_options(changeset, layout, StreamOptions { context_lines, wrap_width })
     }
 
+    /// Indexes code and the selected review notes as one adjacent stream.
+    pub fn with_notes_presentation(
+        changeset: &'a Changeset, notes: &[ReviewNote], visible_notes: &[usize], layout: ResolvedLayout,
+        context_lines: usize, wrap_width: Option<u16>,
+    ) -> Self {
+        let expanded_hunks = note_hunks(changeset, notes, visible_notes);
+        let mut stream = Self::with_options_and_expanded_hunks(
+            changeset,
+            layout,
+            StreamOptions { context_lines, wrap_width },
+            &expanded_hunks,
+        );
+        attach_notes(&mut stream.rows, changeset, notes, visible_notes);
+        stream
+    }
+
     fn with_options(changeset: &'a Changeset, layout: ResolvedLayout, options: StreamOptions) -> Self {
+        Self::with_options_and_expanded_hunks(changeset, layout, options, &BTreeSet::new())
+    }
+
+    fn with_options_and_expanded_hunks(
+        changeset: &'a Changeset, layout: ResolvedLayout, options: StreamOptions,
+        expanded_hunks: &BTreeSet<(usize, usize)>,
+    ) -> Self {
         let mut rows = Vec::new();
         for (file_index, file) in changeset.files().iter().enumerate() {
             rows.push(RowKey::File { file: file_index });
             match file.content() {
                 FileContent::Binary => rows.push(RowKey::Binary { file: file_index }),
-                FileContent::Text { hunks } => index_hunks(&mut rows, file_index, hunks, layout, options),
+                FileContent::Text { hunks } => {
+                    index_hunks(&mut rows, file_index, hunks, layout, options, expanded_hunks)
+                }
             }
         }
         Self { changeset, layout, rows }
@@ -246,6 +280,7 @@ impl RowKey {
             Self::UnifiedLine { .. } | Self::SplitLine { .. } => RowKind::Line,
             Self::MissingNewline { .. } => RowKind::MissingNewline,
             Self::ContextGap { .. } => RowKind::ContextGap,
+            Self::Note { .. } => RowKind::Note,
         }
     }
 
@@ -258,6 +293,7 @@ impl RowKey {
             | Self::SplitLine { file, .. }
             | Self::MissingNewline { file, .. }
             | Self::ContextGap { file, .. } => file,
+            Self::Note { file, .. } => file,
         }
     }
 
@@ -274,6 +310,7 @@ impl RowKey {
             }
             Self::MissingNewline { file, hunk, line } => RowAnchor::MissingNewline { file, hunk, line },
             Self::ContextGap { file, hunk, .. } => RowAnchor::Hunk { file, hunk },
+            Self::Note { file, note } => RowAnchor::Note { file, note },
         }
     }
 
@@ -299,19 +336,141 @@ impl RowKey {
             (Self::ContextGap { file, hunk, .. }, RowAnchor::Hunk { file: target_file, hunk: target_hunk }) => {
                 file == target_file && hunk == target_hunk
             }
+            (Self::Note { file, note }, RowAnchor::Note { file: target_file, note: target_note }) => {
+                file == target_file && note == target_note
+            }
             _ => false,
         }
     }
 }
 
-fn index_hunks(rows: &mut Vec<RowKey>, file: usize, hunks: &[Hunk], layout: ResolvedLayout, options: StreamOptions) {
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct NotePlacement {
+    path: Vec<u8>,
+    side: AnchorSide,
+    hunk: Fingerprint,
+    line: u64,
+}
+
+fn attach_notes(rows: &mut Vec<RowKey>, changeset: &Changeset, notes: &[ReviewNote], visible_notes: &[usize]) {
+    let mut pending = BTreeMap::<NotePlacement, Vec<usize>>::new();
+    for note_index in visible_notes.iter().copied() {
+        let Some(note) = notes.get(note_index) else {
+            continue;
+        };
+        let anchor = note.anchor();
+        let placement = NotePlacement {
+            path: anchor.path().as_bytes().to_vec(),
+            side: anchor.side(),
+            hunk: anchor.hunk_fingerprint(),
+            line: anchor.range().end().get(),
+        };
+        pending.entry(placement).or_default().push(note_index);
+    }
+    if pending.is_empty() {
+        return;
+    }
+
+    let original = std::mem::take(rows);
+    let mut combined = Vec::with_capacity(original.len().saturating_add(visible_notes.len()));
+    for (index, row) in original.iter().copied().enumerate() {
+        combined.push(row);
+        let coordinates = row_note_placements(row, changeset);
+        let next = original.get(index + 1).copied();
+        for placement in coordinates {
+            if next.is_some_and(|next_row| row_note_placements(next_row, changeset).contains(&placement)) {
+                continue;
+            }
+            if let Some(note_indices) = pending.remove(&placement) {
+                let file = row.file();
+                combined.extend(note_indices.into_iter().map(|note| RowKey::Note { file, note }));
+            }
+        }
+    }
+    *rows = combined;
+}
+
+fn row_note_placements(row: RowKey, changeset: &Changeset) -> Vec<NotePlacement> {
+    let (file, hunk, old, new) = match row {
+        RowKey::UnifiedLine { file, hunk, line, .. } => (file, hunk, Some(line), Some(line)),
+        RowKey::SplitLine { file, hunk, old, new, .. } => (file, hunk, old, new),
+        _ => return Vec::new(),
+    };
+    let diff = &changeset.files()[file];
+    let FileContent::Text { hunks } = diff.content() else {
+        return Vec::new();
+    };
+    let source = &hunks[hunk];
+    let mut placements = Vec::with_capacity(2);
+    if let (Some(line), Some(side)) = (old, diff.old_side()) {
+        if let Some(number) = source.lines()[line].old_line() {
+            placements.push(note_placement(
+                side.path.as_bytes(),
+                AnchorSide::Old,
+                source,
+                number.get(),
+            ));
+        }
+    }
+    if let (Some(line), Some(side)) = (new, diff.new_side()) {
+        if let Some(number) = source.lines()[line].new_line() {
+            placements.push(note_placement(
+                side.path.as_bytes(),
+                AnchorSide::New,
+                source,
+                number.get(),
+            ));
+        }
+    }
+    placements
+}
+
+fn note_placement(path: &[u8], side: AnchorSide, hunk: &Hunk, line: u64) -> NotePlacement {
+    NotePlacement { path: path.to_vec(), side, hunk: hunk.fingerprint(), line }
+}
+
+fn index_hunks(
+    rows: &mut Vec<RowKey>, file: usize, hunks: &[Hunk], layout: ResolvedLayout, options: StreamOptions,
+    expanded_hunks: &BTreeSet<(usize, usize)>,
+) {
     for (hunk_index, hunk) in hunks.iter().enumerate() {
         rows.push(RowKey::Hunk { file, hunk: hunk_index });
+        let options = if expanded_hunks.contains(&(file, hunk_index)) {
+            StreamOptions { context_lines: usize::MAX, ..options }
+        } else {
+            options
+        };
         match layout {
             ResolvedLayout::Unified => index_unified_hunk(rows, file, hunk_index, hunk, options),
             ResolvedLayout::Split => index_split_hunk(rows, file, hunk_index, hunk, options),
         }
     }
+}
+
+fn note_hunks(changeset: &Changeset, notes: &[ReviewNote], visible_notes: &[usize]) -> BTreeSet<(usize, usize)> {
+    let mut result = BTreeSet::new();
+    for note_index in visible_notes {
+        let Some(note) = notes.get(*note_index) else {
+            continue;
+        };
+        for (file_index, file) in changeset.files().iter().enumerate() {
+            let path_matches = file.old_side().is_some_and(|side| side.path == *note.anchor().path())
+                || file.new_side().is_some_and(|side| side.path == *note.anchor().path());
+            if !path_matches {
+                continue;
+            }
+            let FileContent::Text { hunks } = file.content() else {
+                continue;
+            };
+            if let Some(hunk) = hunks
+                .iter()
+                .position(|hunk| hunk.fingerprint() == note.anchor().hunk_fingerprint())
+            {
+                result.insert((file_index, hunk));
+            }
+        }
+    }
+    result
 }
 
 fn index_unified_hunk(rows: &mut Vec<RowKey>, file: usize, hunk: usize, source: &Hunk, options: StreamOptions) {

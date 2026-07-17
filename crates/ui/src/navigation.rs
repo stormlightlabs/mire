@@ -177,6 +177,13 @@ pub fn help_entries() -> impl Iterator<Item = (&'static str, &'static str)> {
         .chain([
             ("wheel", "scroll review or sidebar"),
             ("left click", "select a sidebar or review file"),
+            ("v / c", "select a range / create note"),
+            ("p / P", "next / previous note"),
+            ("e", "edit selected note"),
+            ("r / d / o / a", "resolve / dismiss / reopen / accept risk"),
+            ("f", "filter notes"),
+            ("right click", "create or edit a note"),
+            ("note buttons", "edit or change note status"),
         ])
 }
 

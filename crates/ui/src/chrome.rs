@@ -23,6 +23,15 @@ const FULL_FOOTER: &[(&str, &str)] = &[
     ("?", "help"),
     ("q", "quit"),
 ];
+const REVIEW_FOOTER: &[(&str, &str)] = &[
+    ("j/k", "move"),
+    ("v/c", "range/note"),
+    ("p/P", "notes"),
+    ("r/d/o/a", "status"),
+    ("f", "filter"),
+    ("?", "help"),
+    ("q", "quit"),
+];
 const COMPACT_FOOTER: &[(&str, &str)] = &[
     ("Tab", "focus"),
     ("j/k", "move"),
@@ -44,7 +53,15 @@ pub fn render_title(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Th
     };
     let mut spans = vec![Span::styled(" Mire review", theme.accent)];
     push_title_segment(&mut spans, layout.to_owned(), theme.muted, theme);
-    if app.search_input() {
+    if let Some(error) = app.note_error() {
+        push_title_segment(&mut spans, format!("unsaved: {error}"), theme.error, theme);
+    } else if app.filter_visible() {
+        push_title_segment(&mut spans, app.filter_summary(), theme.accent, theme);
+    } else if let Some(selection) = app.selection_label() {
+        push_title_segment(&mut spans, selection, theme.accent, theme);
+    } else if app.is_dirty() {
+        push_title_segment(&mut spans, "unsaved".to_owned(), theme.error, theme);
+    } else if app.search_input() {
         push_title_segment(&mut spans, format!("/{}█", app.search_query()), theme.accent, theme);
     } else if let Some((current, total)) = app.search_status() {
         push_title_segment(
@@ -78,8 +95,10 @@ pub fn render_title(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Th
 }
 
 /// Renders keyboard hints selected for the available terminal width.
-pub fn render_footer(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-    let entries = if area.width >= 100 {
+pub fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Theme) {
+    let entries = if app.review().is_some() && area.width >= 100 {
+        REVIEW_FOOTER
+    } else if area.width >= 100 {
         FULL_FOOTER
     } else if area.width >= 48 {
         COMPACT_FOOTER

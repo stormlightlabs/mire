@@ -2,10 +2,12 @@ use std::borrow::Cow;
 
 use mire_core::{FileDiff, FileStatus, LineKind, MissingNewline};
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
+use crate::EditorTarget;
 use crate::app::{App, AppState};
 use crate::chrome::{
     diff_stats, file_path, fit_line, render_footer, render_help, render_sidebar, render_sidebar_divider, render_title,
@@ -69,7 +71,13 @@ pub fn render(frame: &mut Frame<'_>, app: &App<'_>, theme: &Theme) {
             );
         }
     }
-    render_footer(frame, areas.footer, theme);
+    if app.filter_visible() {
+        render_filter_dialog(frame, areas.review, app, theme);
+    }
+    if app.editor().is_some() {
+        render_note_editor(frame, areas.review, app, theme);
+    }
+    render_footer(frame, areas.footer, app, theme);
 }
 
 fn render_stream(
@@ -77,7 +85,15 @@ fn render_stream(
 ) {
     let visible = stream
         .visible_keys(app.scroll(), usize::from(area.height))
-        .map(|key| row_line(stream, key, area.width, app, theme))
+        .enumerate()
+        .map(|(offset, key)| {
+            let line = row_line(stream, key, area.width, app, theme);
+            if app.row_selected(app.scroll().saturating_add(offset)) {
+                line.patch_style(theme.selected)
+            } else {
+                line
+            }
+        })
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(visible), area);
 }
@@ -108,7 +124,90 @@ fn row_line<'a>(stream: &'a ReviewStream<'a>, key: RowKey, width: u16, app: &App
         RowKey::ContextGap { hidden, .. } => {
             Line::styled(format!("            ⋯ {hidden} context lines hidden"), theme.marker)
         }
+        RowKey::Note { note, .. } => note_line(app, note, width, theme),
     }
+}
+
+fn note_line(app: &App<'_>, note_index: usize, width: u16, theme: &Theme) -> Line<'static> {
+    let Some(note) = app.note(note_index) else {
+        return Line::styled("  unavailable note", theme.error);
+    };
+    let author = note.author().display_name().unwrap_or_else(|| note.author().id());
+    let body = truncate_text(note.body(), usize::from(width).saturating_sub(52));
+    fit_line(
+        vec![
+            Span::styled("[edit]", theme.accent),
+            Span::styled("[open]", theme.muted),
+            Span::styled("[resolve]", theme.accent),
+            Span::styled("[dismiss]", theme.muted),
+            Span::styled("[risk] ", theme.error),
+            Span::styled(
+                format!(
+                    "{} {} {} · {author}: ",
+                    note.status(),
+                    note.severity(),
+                    note.annotation_kind()
+                ),
+                theme.muted,
+            ),
+            Span::styled(body, theme.panel),
+        ],
+        usize::from(width),
+        theme.panel,
+    )
+}
+
+fn render_note_editor(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Theme) {
+    let Some(editor) = app.editor() else {
+        return;
+    };
+    let target = match editor.target() {
+        EditorTarget::New(selection) => format!("New note · {}", selection.label()),
+        EditorTarget::Existing(note_id) => format!("Edit {}", note_id.as_str()),
+    };
+    let dialog = centered(area, 72, 7);
+    frame.render_widget(Clear, dialog);
+    let error = app
+        .note_error()
+        .map_or(String::new(), |error| format!("\nError: {error}"));
+    let text = format!(
+        "{target}\nSeverity: {} · Kind: {}\n\n{}█{error}\n\nEnter save · Esc cancel · Tab severity · Shift-Tab kind",
+        editor.severity(),
+        editor.annotation_kind(),
+        editor.body()
+    );
+    frame.render_widget(
+        Paragraph::new(text)
+            .style(theme.panel)
+            .block(Block::new().borders(Borders::ALL).border_style(theme.accent)),
+        dialog,
+    );
+}
+
+fn render_filter_dialog(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Theme) {
+    let dialog = centered(area, 72, 5);
+    frame.render_widget(Clear, dialog);
+    let text = format!(
+        "Note filters\n{}\n\na author · s status · v severity · k kind · i file · c clear · Enter close",
+        app.filter_summary()
+    );
+    frame.render_widget(
+        Paragraph::new(text)
+            .style(theme.panel)
+            .block(Block::new().borders(Borders::ALL).border_style(theme.accent)),
+        dialog,
+    );
+}
+
+fn centered(area: Rect, maximum_width: u16, height: u16) -> Rect {
+    let width = area.width.min(maximum_width).max(1);
+    let height = area.height.min(height).max(1);
+    Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    )
 }
 
 fn hunk_line(stream: &ReviewStream<'_>, file: usize, hunk: usize, width: u16, theme: &Theme) -> Line<'static> {

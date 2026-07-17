@@ -11,7 +11,7 @@ use thiserror::Error;
 use crate::{BytePath, Changeset, DiffLine, FileContent, Fingerprint, LineNumber, SchemaVersion};
 
 /// The review-file JSON schema emitted by this version of Mire.
-pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 0 };
+pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 1 };
 /// Maximum number of notes accepted in one review file.
 pub const MAX_REVIEW_NOTES: usize = 10_000;
 /// Maximum UTF-8 byte length of one note body.
@@ -58,6 +58,9 @@ pub enum ReviewError {
     /// Two notes use the same stable identifier.
     #[error("duplicate note identifier {0:?}")]
     DuplicateNoteId(String),
+    /// A requested note does not exist in the review.
+    #[error("review note {0:?} was not found")]
+    NoteNotFound(String),
     /// Event sequences are not strictly increasing.
     #[error("note event sequence {current} does not follow {previous}")]
     EventSequence { previous: u64, current: u64 },
@@ -104,6 +107,7 @@ impl ReviewError {
             ReviewError::NoteBodyTooLarge { .. } => "note_body_too_large",
             ReviewError::TooManyNotes { .. } => "too_many_notes",
             ReviewError::DuplicateNoteId(_) => "duplicate_note_id",
+            ReviewError::NoteNotFound(_) => "note_not_found",
             ReviewError::EventSequence { .. } => "event_sequence",
             ReviewError::UnknownEventNote(_) => "unknown_event_note",
             ReviewError::InvalidCreationEvents { .. } => "invalid_creation_events",
@@ -116,7 +120,7 @@ impl ReviewError {
 }
 
 /// The old or new side selected by an anchor.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnchorSide {
     /// The pre-change side of a file.
@@ -187,6 +191,53 @@ impl fmt::Display for NoteSeverity {
     }
 }
 
+/// The intent of an annotation, independent of its impact or decision state.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnnotationKind {
+    /// General review context or feedback.
+    #[default]
+    Comment,
+    /// A concrete defect or risk.
+    Defect,
+    /// A proposed code or design change.
+    Suggestion,
+    /// A question that needs an answer.
+    Question,
+}
+
+impl fmt::Display for AnnotationKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Comment => formatter.write_str("comment"),
+            Self::Defect => formatter.write_str("defect"),
+            Self::Suggestion => formatter.write_str("suggestion"),
+            Self::Question => formatter.write_str("question"),
+        }
+    }
+}
+
+/// The broad producer category used for review filtering.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthorKind {
+    /// A person entered the note directly.
+    Human,
+    /// An autonomous or assisted agent produced the note.
+    Agent,
+    /// An analyzer or interchange adapter produced the note.
+    Tool,
+}
+
+impl fmt::Display for AuthorKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Human => formatter.write_str("human"),
+            Self::Agent => formatter.write_str("agent"),
+            Self::Tool => formatter.write_str("tool"),
+        }
+    }
+}
+
 /// How a note entered the review without implying that its claim is verified.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -210,6 +261,17 @@ pub enum Provenance {
         /// Producer recorded by the imported document, when present.
         producer: Option<String>,
     },
+}
+
+impl Provenance {
+    /// Returns the broad producer category without discarding detailed provenance.
+    pub const fn author_kind(&self) -> AuthorKind {
+        match self {
+            Self::Human => AuthorKind::Human,
+            Self::Agent { .. } => AuthorKind::Agent,
+            Self::Analyzer { .. } | Self::Interchange { .. } => AuthorKind::Tool,
+        }
+    }
 }
 
 impl fmt::Display for Provenance {
@@ -434,6 +496,8 @@ pub struct ReviewNote {
     anchor: Anchor,
     author: Author,
     severity: NoteSeverity,
+    #[serde(default)]
+    annotation_kind: AnnotationKind,
     status: NoteStatus,
     body: String,
     provenance: Provenance,
@@ -449,7 +513,17 @@ impl ReviewNote {
     ) -> Result<Self> {
         validate_note_body(&body)?;
         validate_provenance(&provenance)?;
-        Ok(Self { id, anchor, author, severity, status, body, provenance, extensions: BTreeMap::new() })
+        Ok(Self {
+            id,
+            anchor,
+            author,
+            severity,
+            annotation_kind: AnnotationKind::default(),
+            status,
+            body,
+            provenance,
+            extensions: BTreeMap::new(),
+        })
     }
 
     /// Returns the stable note identifier.
@@ -470,6 +544,17 @@ impl ReviewNote {
     /// Returns the assigned severity.
     pub const fn severity(&self) -> NoteSeverity {
         self.severity
+    }
+
+    /// Returns the annotation's intent.
+    pub const fn annotation_kind(&self) -> AnnotationKind {
+        self.annotation_kind
+    }
+
+    /// Assigns an annotation intent while preserving the rest of the note.
+    pub fn with_annotation_kind(mut self, annotation_kind: AnnotationKind) -> Self {
+        self.annotation_kind = annotation_kind;
+        self
     }
 
     /// Returns the current decision state.
@@ -635,6 +720,52 @@ impl Review {
         Ok(review)
     }
 
+    /// Replaces the editable content of one note and advances the review revision.
+    pub fn edit_note(
+        &self, note_id: &NoteId, body: String, severity: NoteSeverity, annotation_kind: AnnotationKind,
+    ) -> Result<Self> {
+        validate_note_body(&body)?;
+        let Some(position) = self.notes.iter().position(|note| note.id == *note_id) else {
+            return Err(ReviewError::NoteNotFound(note_id.as_str().to_owned()));
+        };
+        if self.notes[position].body == body
+            && self.notes[position].severity == severity
+            && self.notes[position].annotation_kind == annotation_kind
+        {
+            return Ok(self.clone());
+        }
+        let mut notes = self.notes.clone();
+        notes[position].body = body;
+        notes[position].severity = severity;
+        notes[position].annotation_kind = annotation_kind;
+        self.rebuild(self.next_revision()?, notes, self.events.clone())
+    }
+
+    /// Changes one note's disposition and appends an attributed status event.
+    pub fn change_note_status(&self, note_id: &NoteId, status: NoteStatus, author: Author) -> Result<Self> {
+        let Some(position) = self.notes.iter().position(|note| note.id == *note_id) else {
+            return Err(ReviewError::NoteNotFound(note_id.as_str().to_owned()));
+        };
+        let previous = self.notes[position].status;
+        if previous == status {
+            return Ok(self.clone());
+        }
+        let previous_sequence = self.events.last().map_or(0, NoteEvent::sequence);
+        let sequence = previous_sequence
+            .checked_add(1)
+            .ok_or(ReviewError::EventSequenceOverflow(previous_sequence))?;
+        let mut notes = self.notes.clone();
+        notes[position].status = status;
+        let mut events = self.events.clone();
+        events.push(NoteEvent::new(
+            sequence,
+            note_id.clone(),
+            author,
+            NoteEventKind::StatusChanged { from: previous, to: status },
+        )?);
+        self.rebuild(self.next_revision()?, notes, events)
+    }
+
     /// Validates limits, anchors, identifiers, attribution, and event history.
     pub fn validate(&self) -> Result<()> {
         if self.schema_version.major != CURRENT_REVIEW_SCHEMA_VERSION.major {
@@ -653,6 +784,21 @@ impl Review {
     fn canonicalize(&mut self) {
         self.notes.sort_by(|left, right| left.id.cmp(&right.id));
         self.events.sort_by_key(NoteEvent::sequence);
+    }
+
+    fn next_revision(&self) -> Result<ReviewRevision> {
+        let revision = self
+            .revision
+            .get()
+            .checked_add(1)
+            .ok_or_else(|| ReviewError::RevisionOverflow(self.revision.get()))?;
+        ReviewRevision::new(revision)
+    }
+
+    fn rebuild(&self, revision: ReviewRevision, notes: Vec<ReviewNote>, events: Vec<NoteEvent>) -> Result<Self> {
+        let mut review = Self::new(revision, self.changeset.clone(), notes, events)?;
+        review.extensions = self.extensions.clone();
+        Ok(review)
     }
 }
 
@@ -996,6 +1142,15 @@ mod tests {
         assert_eq!(NoteStatus::AcceptedRisk.to_string(), "accepted-risk");
         assert_eq!(NoteSeverity::Critical.to_string(), "Critical");
         assert_eq!(Provenance::Human.to_string(), "human");
+        assert_eq!(Provenance::Human.author_kind(), AuthorKind::Human);
+        assert_eq!(
+            Provenance::Agent { producer: "agent".to_owned() }.author_kind(),
+            AuthorKind::Agent
+        );
+        assert_eq!(
+            Provenance::Analyzer { producer: "tool".to_owned() }.author_kind(),
+            AuthorKind::Tool
+        );
         assert_eq!(
             Provenance::Interchange { format: "sarif".to_owned(), producer: Some("scanner".to_owned()) }.to_string(),
             "sarif interchange (scanner)"
@@ -1023,6 +1178,73 @@ mod tests {
         let event = NoteEvent::new(1, note_id, author, NoteEventKind::Created { status: NoteStatus::Open }).unwrap();
         let error = Review::new(ReviewRevision::new(1).unwrap(), changeset, vec![note], vec![event]).unwrap_err();
         assert!(matches!(error, ReviewError::FinalStatus { .. }));
+    }
+
+    #[test]
+    fn note_edits_and_status_changes_advance_revision_without_losing_history() {
+        let changeset = changeset();
+        let path = BytePath::new(b"src/lib.rs".to_vec()).unwrap();
+        let range = LineRange::new(LineNumber::new(2).unwrap(), LineNumber::new(2).unwrap()).unwrap();
+        let anchor = Anchor::new(&changeset, path, AnchorSide::New, range, FINGERPRINT).unwrap();
+        let note_id = NoteId::new("note-1").unwrap();
+        let author = Author::new("reviewer", None).unwrap();
+        let note = ReviewNote::new(
+            note_id.clone(),
+            anchor,
+            author.clone(),
+            NoteSeverity::Low,
+            NoteStatus::Open,
+            "Original".to_owned(),
+            Provenance::Human,
+        )
+        .unwrap();
+        let review = empty_review().import_notes(vec![note]).unwrap();
+
+        let edited = review
+            .edit_note(
+                &note_id,
+                "Updated".to_owned(),
+                NoteSeverity::High,
+                AnnotationKind::Defect,
+            )
+            .unwrap();
+        assert_eq!(edited.revision().get(), 3);
+        assert_eq!(edited.notes()[0].body(), "Updated");
+        assert_eq!(edited.notes()[0].annotation_kind(), AnnotationKind::Defect);
+        assert_eq!(edited.events().len(), 1, "body edits do not invent status events");
+
+        let resolved = edited
+            .change_note_status(&note_id, NoteStatus::Resolved, author)
+            .unwrap();
+        assert_eq!(resolved.revision().get(), 4);
+        assert_eq!(resolved.notes()[0].status(), NoteStatus::Resolved);
+        assert!(matches!(
+            resolved.events()[1].event(),
+            NoteEventKind::StatusChanged { from: NoteStatus::Open, to: NoteStatus::Resolved }
+        ));
+        resolved.validate().unwrap();
+    }
+
+    #[test]
+    fn old_note_json_defaults_annotation_kind_to_comment() {
+        let changeset = changeset();
+        let path = BytePath::new(b"src/lib.rs".to_vec()).unwrap();
+        let range = LineRange::new(LineNumber::new(2).unwrap(), LineNumber::new(2).unwrap()).unwrap();
+        let anchor = Anchor::new(&changeset, path, AnchorSide::New, range, FINGERPRINT).unwrap();
+        let note = ReviewNote::new(
+            NoteId::new("note-1").unwrap(),
+            anchor,
+            Author::new("reviewer", None).unwrap(),
+            NoteSeverity::Note,
+            NoteStatus::Open,
+            "Body".to_owned(),
+            Provenance::Human,
+        )
+        .unwrap();
+        let json = serde_json::to_string(&note).unwrap();
+        let without_kind = json.replace("\"annotation_kind\":\"comment\",", "");
+        let decoded: ReviewNote = serde_json::from_str(&without_kind).unwrap();
+        assert_eq!(decoded.annotation_kind(), AnnotationKind::Comment);
     }
 
     fn empty_review() -> Review {

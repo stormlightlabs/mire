@@ -11,7 +11,7 @@ pub use model::{
 };
 pub use patch::{DEFAULT_MAX_PATCH_BYTES, PatchError, PatchInput, PatchLimits, parse_patch};
 pub use review::{
-    Anchor, AnchorSide, Author, CURRENT_REVIEW_SCHEMA_VERSION, LineRange, MAX_NOTE_BODY_BYTES, MAX_REVIEW_NOTES,
-    NoteEvent, NoteEventKind, NoteId, NoteImportError, NoteImportFailure, NoteSeverity, NoteStatus, Provenance, Review,
-    ReviewError, ReviewNote, ReviewRevision,
+    Anchor, AnchorSide, AnnotationKind, Author, AuthorKind, CURRENT_REVIEW_SCHEMA_VERSION, LineRange,
+    MAX_NOTE_BODY_BYTES, MAX_REVIEW_NOTES, NoteEvent, NoteEventKind, NoteId, NoteImportError, NoteImportFailure,
+    NoteSeverity, NoteStatus, Provenance, Review, ReviewError, ReviewNote, ReviewRevision,
 };

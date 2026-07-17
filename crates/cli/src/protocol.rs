@@ -10,7 +10,7 @@ use serde_json::json;
 use thiserror::Error;
 
 /// Protocol schema emitted by non-interactive review commands.
-pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 0 };
+pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 1 };
 
 type Result<T> = std::result::Result<T, ProtocolError>;
 
@@ -135,6 +135,7 @@ struct NoteSummary<'a> {
     start: u64,
     end: u64,
     severity: mire_core::NoteSeverity,
+    annotation_kind: mire_core::AnnotationKind,
     status: NoteStatus,
     provenance: &'a Provenance,
 }
@@ -148,6 +149,7 @@ impl<'a> From<&'a ReviewNote> for NoteSummary<'a> {
             start: note.anchor().range().start().get(),
             end: note.anchor().range().end().get(),
             severity: note.severity(),
+            annotation_kind: note.annotation_kind(),
             status: note.status(),
             provenance: note.provenance(),
         }
@@ -288,9 +290,10 @@ pub fn notes_markdown(review: &Review) -> Vec<u8> {
     for note in review.notes() {
         let anchor = note.anchor();
         output.push_str(&format!(
-            "\n## {}: {}\n\n- Status: `{}`\n- Author: {}\n- Provenance: {}\n- Location: `{}` ({}, lines {}–{})\n\n{}\n",
+            "\n## {}: {}\n\n- Kind: `{}`\n- Status: `{}`\n- Author: {}\n- Provenance: {}\n- Location: `{}` ({}, lines {}–{})\n\n{}\n",
             note.severity(),
             note.id().as_str(),
+            note.annotation_kind(),
             note.status(),
             note.author().display_name().unwrap_or(note.author().id()),
             note.provenance(),

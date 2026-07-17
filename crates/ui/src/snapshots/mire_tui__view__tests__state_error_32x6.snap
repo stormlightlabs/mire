@@ -7,4 +7,4 @@ expression: "snapshot(App::error(\"broken input\"), 32, 6)"
             broken input
 
 
- Tab: focus | j/k: move | [ ]: f
+ Tab focus | j/k move | [ ] file

@@ -9,7 +9,7 @@ use mire_core::Changeset;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use crate::{App, Theme, render};
+use crate::{App, AppOptions, Theme, render};
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -45,10 +45,12 @@ impl Drop for TerminalSession {
     }
 }
 
-pub fn run(changeset: &Changeset) -> io::Result<()> {
+pub fn run(changeset: &Changeset, options: AppOptions) -> io::Result<()> {
     let theme = Theme::detect();
     let mut session = TerminalSession::enter()?;
-    let result = catch_unwind(AssertUnwindSafe(|| run_loop(&mut session.terminal, changeset, &theme)));
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        run_loop(&mut session.terminal, changeset, options, &theme)
+    }));
     drop(session);
     match result {
         Ok(result) => result,
@@ -56,9 +58,11 @@ pub fn run(changeset: &Changeset) -> io::Result<()> {
     }
 }
 
-fn run_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, changeset: &Changeset, theme: &Theme) -> io::Result<()> {
+fn run_loop(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>, changeset: &Changeset, options: AppOptions, theme: &Theme,
+) -> io::Result<()> {
     terminal.draw(|frame| render(frame, &App::loading(), theme))?;
-    let mut app = App::ready(changeset);
+    let mut app = App::ready_with_options(changeset, options);
     let size = terminal.size()?;
     app.resize(size.width, size.height);
     while !app.should_quit() {

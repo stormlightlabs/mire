@@ -2,7 +2,7 @@
 source: crates/ui/src/view.rs
 expression: "snapshot(app, 90, 24)"
 ---
- Mire review | unified | focus: review
+ Mire review | unified | focus: review | context: 3 | wrap: off
  Files                 Navigation and layout
 > file.txt             q / Esc      quit
   image.bin            ?            toggle help
@@ -15,14 +15,14 @@ expression: "snapshot(app, 90, 24)"
                        G / End      last row
                        ]            next file
                        [            previous file
-                       n            next hunk
-                       N            previous hunk
+                       }            next hunk
+                       {            previous hunk
+                       /            search
+                       n            next search match
+                       N            previous search match
+                       +            show more context
+                       -            show less context
+                       w            toggle line wrapping
                        1            unified layout
                        2            split layout
-                       3            automatic layout
-                       wheel        scroll review or sidebar
-                       left click   select a sidebar or review file
-
-
-
- Tab: focus | j/k: move | [ ]: files | n/N: hunks | 1/2/3: layout | ?: help | q: quit
+ Tab focus | j/k move | [ ] files | { } hunks | / search | +/- context | w wrap | ? help |

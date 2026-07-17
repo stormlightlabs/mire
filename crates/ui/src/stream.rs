@@ -1,4 +1,7 @@
 use mire_core::{Changeset, FileContent, FileDiff, Hunk, LineKind};
+use ratatui::text::Span;
+
+const LINE_GUTTER_WIDTH: usize = 13;
 
 /// The layout used to turn one changeset into visible review rows.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -34,6 +37,8 @@ pub enum RowKind {
     Line,
     /// A missing-final-newline marker attached to the preceding line.
     MissingNewline,
+    /// Context omitted by the current context setting.
+    ContextGap,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -52,17 +57,25 @@ pub enum RowKey {
         file: usize,
         hunk: usize,
         line: usize,
+        range: TextRange,
     },
     SplitLine {
         file: usize,
         hunk: usize,
         old: Option<usize>,
         new: Option<usize>,
+        old_range: Option<TextRange>,
+        new_range: Option<TextRange>,
     },
     MissingNewline {
         file: usize,
         hunk: usize,
         line: usize,
+    },
+    ContextGap {
+        file: usize,
+        hunk: usize,
+        hidden: usize,
     },
 }
 
@@ -75,6 +88,12 @@ pub enum RowAnchor {
     MissingNewline { file: usize, hunk: usize, line: usize },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TextRange {
+    pub start: usize,
+    pub end: usize,
+}
+
 /// A lightweight row index over an immutable changeset.
 ///
 /// The index stores source coordinates rather than rendered text or widgets.
@@ -84,6 +103,18 @@ pub struct ReviewStream<'a> {
     changeset: &'a Changeset,
     layout: ResolvedLayout,
     rows: Vec<RowKey>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct StreamOptions {
+    context_lines: usize,
+    wrap_width: Option<u16>,
+}
+
+impl Default for StreamOptions {
+    fn default() -> Self {
+        Self { context_lines: 3, wrap_width: None }
+    }
 }
 
 impl LayoutMode {
@@ -168,12 +199,23 @@ impl ReviewStream<'_> {
 impl<'a> ReviewStream<'a> {
     /// Indexes every logical row without constructing off-screen widgets.
     pub fn new(changeset: &'a Changeset, layout: ResolvedLayout) -> Self {
+        Self::with_options(changeset, layout, StreamOptions::default())
+    }
+
+    /// Indexes rows with explicit context and wrapping presentation options.
+    pub fn with_presentation(
+        changeset: &'a Changeset, layout: ResolvedLayout, context_lines: usize, wrap_width: Option<u16>,
+    ) -> Self {
+        Self::with_options(changeset, layout, StreamOptions { context_lines, wrap_width })
+    }
+
+    fn with_options(changeset: &'a Changeset, layout: ResolvedLayout, options: StreamOptions) -> Self {
         let mut rows = Vec::new();
         for (file_index, file) in changeset.files().iter().enumerate() {
             rows.push(RowKey::File { file: file_index });
             match file.content() {
                 FileContent::Binary => rows.push(RowKey::Binary { file: file_index }),
-                FileContent::Text { hunks } => index_hunks(&mut rows, file_index, hunks, layout),
+                FileContent::Text { hunks } => index_hunks(&mut rows, file_index, hunks, layout, options),
             }
         }
         Self { changeset, layout, rows }
@@ -203,6 +245,7 @@ impl RowKey {
             Self::Hunk { .. } => RowKind::Hunk,
             Self::UnifiedLine { .. } | Self::SplitLine { .. } => RowKind::Line,
             Self::MissingNewline { .. } => RowKind::MissingNewline,
+            Self::ContextGap { .. } => RowKind::ContextGap,
         }
     }
 
@@ -213,7 +256,8 @@ impl RowKey {
             | Self::Hunk { file, .. }
             | Self::UnifiedLine { file, .. }
             | Self::SplitLine { file, .. }
-            | Self::MissingNewline { file, .. } => file,
+            | Self::MissingNewline { file, .. }
+            | Self::ContextGap { file, .. } => file,
         }
     }
 
@@ -222,13 +266,14 @@ impl RowKey {
             Self::File { file } => RowAnchor::File { file },
             Self::Binary { file } => RowAnchor::Binary { file },
             Self::Hunk { file, hunk } => RowAnchor::Hunk { file, hunk },
-            Self::UnifiedLine { file, hunk, line } => RowAnchor::Line { file, hunk, line },
+            Self::UnifiedLine { file, hunk, line, .. } => RowAnchor::Line { file, hunk, line },
             Self::SplitLine { file, hunk, old: Some(line), .. }
-            | Self::SplitLine { file, hunk, old: None, new: Some(line) } => RowAnchor::Line { file, hunk, line },
+            | Self::SplitLine { file, hunk, old: None, new: Some(line), .. } => RowAnchor::Line { file, hunk, line },
             Self::SplitLine { old: None, new: None, .. } => {
                 unreachable!("split rows always contain an old or new source line")
             }
             Self::MissingNewline { file, hunk, line } => RowAnchor::MissingNewline { file, hunk, line },
+            Self::ContextGap { file, hunk, .. } => RowAnchor::Hunk { file, hunk },
         }
     }
 
@@ -240,47 +285,74 @@ impl RowKey {
                 file == target_file && hunk == target_hunk
             }
             (
-                Self::UnifiedLine { file, hunk, line },
+                Self::UnifiedLine { file, hunk, line, .. },
                 RowAnchor::Line { file: target_file, hunk: target_hunk, line: target_line },
             ) => file == target_file && hunk == target_hunk && line == target_line,
             (
-                Self::SplitLine { file, hunk, old, new },
+                Self::SplitLine { file, hunk, old, new, .. },
                 RowAnchor::Line { file: target_file, hunk: target_hunk, line: target_line },
             ) => file == target_file && hunk == target_hunk && (old == Some(target_line) || new == Some(target_line)),
             (
                 Self::MissingNewline { file, hunk, line },
                 RowAnchor::MissingNewline { file: target_file, hunk: target_hunk, line: target_line },
             ) => file == target_file && hunk == target_hunk && line == target_line,
+            (Self::ContextGap { file, hunk, .. }, RowAnchor::Hunk { file: target_file, hunk: target_hunk }) => {
+                file == target_file && hunk == target_hunk
+            }
             _ => false,
         }
     }
 }
 
-fn index_hunks(rows: &mut Vec<RowKey>, file: usize, hunks: &[Hunk], layout: ResolvedLayout) {
+fn index_hunks(rows: &mut Vec<RowKey>, file: usize, hunks: &[Hunk], layout: ResolvedLayout, options: StreamOptions) {
     for (hunk_index, hunk) in hunks.iter().enumerate() {
         rows.push(RowKey::Hunk { file, hunk: hunk_index });
         match layout {
-            ResolvedLayout::Unified => index_unified_hunk(rows, file, hunk_index, hunk),
-            ResolvedLayout::Split => index_split_hunk(rows, file, hunk_index, hunk),
+            ResolvedLayout::Unified => index_unified_hunk(rows, file, hunk_index, hunk, options),
+            ResolvedLayout::Split => index_split_hunk(rows, file, hunk_index, hunk, options),
         }
     }
 }
 
-fn index_unified_hunk(rows: &mut Vec<RowKey>, file: usize, hunk: usize, source: &Hunk) {
+fn index_unified_hunk(rows: &mut Vec<RowKey>, file: usize, hunk: usize, source: &Hunk, options: StreamOptions) {
+    let mut hidden = 0;
     for (line_index, line) in source.lines().iter().enumerate() {
-        rows.push(RowKey::UnifiedLine { file, hunk, line: line_index });
+        if !context_visible(source.lines(), line_index, options.context_lines) {
+            hidden += 1;
+            continue;
+        }
+        push_context_gap(rows, file, hunk, &mut hidden);
+        let width = options
+            .wrap_width
+            .map(|width| usize::from(width).saturating_sub(LINE_GUTTER_WIDTH));
+        for range in text_ranges(line.content(), width) {
+            rows.push(RowKey::UnifiedLine { file, hunk, line: line_index, range });
+        }
         if !matches!(line.missing_newline(), mire_core::MissingNewline::None) {
             rows.push(RowKey::MissingNewline { file, hunk, line: line_index });
         }
     }
+    push_context_gap(rows, file, hunk, &mut hidden);
 }
 
-fn index_split_hunk(rows: &mut Vec<RowKey>, file: usize, hunk: usize, source: &Hunk) {
+fn index_split_hunk(rows: &mut Vec<RowKey>, file: usize, hunk: usize, source: &Hunk, options: StreamOptions) {
     let lines = source.lines();
     let mut index = 0;
     while index < lines.len() {
         if matches!(lines[index].kind(), LineKind::Context) {
-            rows.push(RowKey::SplitLine { file, hunk, old: Some(index), new: Some(index) });
+            if !context_visible(lines, index, options.context_lines) {
+                let mut hidden = 1;
+                while index + hidden < lines.len()
+                    && matches!(lines[index + hidden].kind(), LineKind::Context)
+                    && !context_visible(lines, index + hidden, options.context_lines)
+                {
+                    hidden += 1;
+                }
+                rows.push(RowKey::ContextGap { file, hunk, hidden });
+                index += hidden;
+                continue;
+            }
+            push_split_rows(rows, file, hunk, lines, Some(index), Some(index), options.wrap_width);
             push_missing_newline(rows, file, hunk, index, lines[index].missing_newline());
             index += 1;
             continue;
@@ -299,7 +371,7 @@ fn index_split_hunk(rows: &mut Vec<RowKey>, file: usize, hunk: usize, source: &H
         for pair in 0..deletions.len().max(additions.len()) {
             let old = deletions.get(pair).copied();
             let new = additions.get(pair).copied();
-            rows.push(RowKey::SplitLine { file, hunk, old, new });
+            push_split_rows(rows, file, hunk, lines, old, new, options.wrap_width);
             if let Some(line) = old {
                 push_missing_newline(rows, file, hunk, line, lines[line].missing_newline());
             }
@@ -308,6 +380,71 @@ fn index_split_hunk(rows: &mut Vec<RowKey>, file: usize, hunk: usize, source: &H
             }
         }
     }
+}
+
+fn push_split_rows(
+    rows: &mut Vec<RowKey>, file: usize, hunk: usize, lines: &[mire_core::DiffLine], old: Option<usize>,
+    new: Option<usize>, wrap_width: Option<u16>,
+) {
+    let width = wrap_width
+        .map(|width| usize::from(width).saturating_sub(3) / 2)
+        .map(|width| width.saturating_sub(7));
+    let old_ranges = old.map_or_else(Vec::new, |line| text_ranges(lines[line].content(), width));
+    let new_ranges = new.map_or_else(Vec::new, |line| text_ranges(lines[line].content(), width));
+    for segment in 0..old_ranges.len().max(new_ranges.len()).max(1) {
+        rows.push(RowKey::SplitLine {
+            file,
+            hunk,
+            old,
+            new,
+            old_range: old_ranges.get(segment).copied(),
+            new_range: new_ranges.get(segment).copied(),
+        });
+    }
+}
+
+fn context_visible(lines: &[mire_core::DiffLine], index: usize, limit: usize) -> bool {
+    if !matches!(lines[index].kind(), LineKind::Context) {
+        return true;
+    }
+    let before = lines[..index]
+        .iter()
+        .rev()
+        .take_while(|line| matches!(line.kind(), LineKind::Context))
+        .count();
+    let after = lines[index + 1..]
+        .iter()
+        .take_while(|line| matches!(line.kind(), LineKind::Context))
+        .count();
+    before < limit || after < limit
+}
+
+fn push_context_gap(rows: &mut Vec<RowKey>, file: usize, hunk: usize, hidden: &mut usize) {
+    if *hidden > 0 {
+        rows.push(RowKey::ContextGap { file, hunk, hidden: *hidden });
+        *hidden = 0;
+    }
+}
+
+fn text_ranges(bytes: &[u8], width: Option<usize>) -> Vec<TextRange> {
+    let Some(width) = width.filter(|width| *width > 0) else {
+        return vec![TextRange { start: 0, end: bytes.len() }];
+    };
+    let source = String::from_utf8_lossy(bytes);
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    let mut display_width = 0;
+    for (index, character) in source.char_indices() {
+        let character_width = Span::raw(character.to_string()).width().max(1);
+        if display_width + character_width > width && index > start {
+            ranges.push(TextRange { start, end: index });
+            start = index;
+            display_width = 0;
+        }
+        display_width += character_width;
+    }
+    ranges.push(TextRange { start, end: source.len() });
+    ranges
 }
 
 fn push_missing_newline(
@@ -342,7 +479,11 @@ mod tests {
             PatchLimits::default(),
         )
         .unwrap();
-        let stream = ReviewStream::new(&changeset, ResolvedLayout::Unified);
+        let stream = ReviewStream::with_options(
+            &changeset,
+            ResolvedLayout::Unified,
+            StreamOptions { context_lines: 100, wrap_width: None },
+        );
 
         assert_eq!(stream.visible_kinds(50, 7).count(), 7);
         assert_eq!(stream.visible_kinds(10_000, 7).count(), 0);
@@ -361,15 +502,15 @@ mod tests {
 
         assert_eq!(unified.len(), 7);
         assert_eq!(split.len(), 6);
+        assert!(split.rows.iter().any(|row| matches!(
+            row,
+            RowKey::SplitLine { file: 0, hunk: 0, old: Some(1), new: Some(3), .. }
+        )));
         assert!(
             split
                 .rows
-                .contains(&RowKey::SplitLine { file: 0, hunk: 0, old: Some(1), new: Some(3) })
-        );
-        assert!(
-            split
-                .rows
-                .contains(&RowKey::SplitLine { file: 0, hunk: 0, old: Some(2), new: None })
+                .iter()
+                .any(|row| matches!(row, RowKey::SplitLine { file: 0, hunk: 0, old: Some(2), new: None, .. }))
         );
         for line in 0..5 {
             let anchor = RowAnchor::Line { file: 0, hunk: 0, line };
@@ -382,5 +523,13 @@ mod tests {
     fn layout_automatic_uses_review_width() {
         assert_eq!(LayoutMode::Automatic.resolve(71), ResolvedLayout::Unified);
         assert_eq!(LayoutMode::Automatic.resolve(72), ResolvedLayout::Split);
+    }
+
+    #[test]
+    fn wrapping_uses_terminal_display_width() {
+        assert_eq!(
+            text_ranges("界x".as_bytes(), Some(2)),
+            vec![TextRange { start: 0, end: 3 }, TextRange { start: 3, end: 4 }]
+        );
     }
 }

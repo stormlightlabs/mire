@@ -79,6 +79,9 @@ struct DiffArgs {
     /// Structured output format.
     #[arg(long, value_enum)]
     format: Option<OutputFormat>,
+    /// Override syntax detection for the interactive viewer.
+    #[arg(long, value_parser = parse_language)]
+    language: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -88,6 +91,9 @@ struct PatchArgs {
     /// Structured output format.
     #[arg(long, value_enum)]
     format: Option<OutputFormat>,
+    /// Override syntax detection for the interactive viewer.
+    #[arg(long, value_parser = parse_language)]
+    language: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -100,6 +106,9 @@ struct ShowArgs {
     /// Structured output format.
     #[arg(long, value_enum)]
     format: Option<OutputFormat>,
+    /// Override syntax detection for the interactive viewer.
+    #[arg(long, value_parser = parse_language)]
+    language: Option<String>,
 }
 
 pub fn run(args: impl Iterator<Item = OsString>) -> ExitCode {
@@ -121,21 +130,58 @@ pub fn run(args: impl Iterator<Item = OsString>) -> ExitCode {
 }
 
 fn execute(cli: Cli) -> Result<(), AppError> {
-    let (changeset, format) = match cli.command {
-        Command::Diff(DiffArgs { staged, revisions, paths, format }) => (
+    let (changeset, format, language) = match cli.command {
+        Command::Diff(DiffArgs { staged, revisions, paths, format, language }) => (
             git::load_diff(DiffRequest { staged, revisions, paths }).map_err(AppError::Git)?,
             format,
+            language,
         ),
-        Command::Patch(PatchArgs { input, format }) => (load_patch(&input)?, format),
-        Command::Show(ShowArgs { revision, paths, format }) => (
+        Command::Patch(PatchArgs { input, format, language }) => (load_patch(&input)?, format, language),
+        Command::Show(ShowArgs { revision, paths, format, language }) => (
             git::load_show(ShowRequest { revision, paths }).map_err(AppError::Git)?,
             format,
+            language,
         ),
     };
     if format.is_some() || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         write_changeset(&changeset)
     } else {
-        mire_tui::run(&changeset).map_err(AppError::Terminal)
+        mire_tui::run_with_options(&changeset, mire_tui::AppOptions { language_override: language })
+            .map_err(AppError::Terminal)
+    }
+}
+
+fn parse_language(value: &str) -> Result<String, String> {
+    const LANGUAGES: &[&str] = &[
+        "bash",
+        "sh",
+        "css",
+        "html",
+        "javascript",
+        "js",
+        "json",
+        "markdown",
+        "md",
+        "plain",
+        "plaintext",
+        "python",
+        "py",
+        "rust",
+        "rs",
+        "toml",
+        "tsx",
+        "typescript",
+        "ts",
+        "yaml",
+        "yml",
+    ];
+    if LANGUAGES.contains(&value) {
+        Ok(value.to_owned())
+    } else {
+        Err(format!(
+            "unsupported language {value:?}; supported values: {}",
+            LANGUAGES.join(", ")
+        ))
     }
 }
 
@@ -203,5 +249,17 @@ mod tests {
         };
         assert_eq!(arguments.revisions, ["main...HEAD"]);
         assert_eq!(arguments.paths, ["src/lib.rs"]);
+    }
+
+    #[test]
+    fn clap_accepts_supported_language_overrides_and_rejects_unknown_ones() {
+        let cli = Cli::try_parse_from(["mire", "patch", "-", "--language", "typescript"]).unwrap();
+        let Command::Patch(arguments) = cli.command else {
+            panic!("patch command is parsed");
+        };
+        assert_eq!(arguments.language.as_deref(), Some("typescript"));
+
+        let error = Cli::try_parse_from(["mire", "patch", "-", "--language", "brainfuck"]).unwrap_err();
+        assert!(error.to_string().contains("unsupported language"));
     }
 }

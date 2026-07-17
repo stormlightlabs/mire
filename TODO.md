@@ -171,22 +171,30 @@ Verification:
 
 **Blocked by:** M1.5
 
+**Status:** Complete
+
 Add multi-language syntax and intraline highlighting, search, context expansion,
 line wrapping, and theme behavior with bounded caches.
 
 Acceptance criteria:
 
-- [ ] Inkjet is built with an explicit language feature set rather than its
+- [x] Inkjet is built with an explicit language feature set rather than its
   all-languages default.
-- [ ] Detection uses paths and shebangs, supports a user override, and treats
+- [x] Detection uses paths and shebangs, supports a user override, and treats
   unknown files as plain text.
-- [ ] Highlighting failure falls back to readable plain diff rows without
+- [x] Highlighting failure falls back to readable plain diff rows without
   changing anchors.
-- [ ] Search moves through matches across file boundaries.
-- [ ] Context and wrapping preserve anchors and navigation targets.
-- [ ] Long lines and large files stay responsive under recorded fixture
+- [x] Search moves through matches across file boundaries.
+- [x] Context and wrapping preserve anchors and navigation targets.
+- [x] Long lines and large files stay responsive under recorded fixture
   measurements.
-- [ ] Light, dark, low-color, and `NO_COLOR` output remain legible.
+- [x] Light, dark, low-color, and `NO_COLOR` output remain legible.
+
+Inkjet uses an explicit set of Bash, CSS, HTML, JavaScript, JSON, Python, Rust,
+TOML, TSX, TypeScript, and YAML grammars. Markdown uses Mire's small semantic
+highlighter because Inkjet 0.11.1 does not ship a Markdown grammar. Unknown and
+unsupported files stay plain. `similar` supplies word-level intraline ranges;
+neither dependency leaks into `mire-core`.
 
 Verification:
 
@@ -194,6 +202,13 @@ Verification:
 - Run the large-stream benchmark and record startup, memory, and frame results.
 - Complete a real-terminal smoke review of Rust, TypeScript, Python, Markdown,
   an extensionless script, and an unknown format.
+
+Recorded on 2026-07-17 with Divan 0.1.21 and the release benchmark's 200-file,
+15,000-line fixture (189,860 patch bytes). Median/mean times were 11.82/11.79 ms
+for parsing, 1.189/1.197 ms for review startup, and 332.1/484.4 us for a rendered
+frame. The slowest recorded frame took 15.48 ms. macOS reported 14,008,320 bytes
+peak resident memory. The mixed-language fixture also passed a pseudo-terminal
+smoke run with `NO_COLOR`, including terminal restoration.
 
 ## Milestone 2: Durable human, agent, and tool notes
 

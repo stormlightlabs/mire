@@ -2,7 +2,7 @@
 source: crates/ui/src/view.rs
 expression: "snapshot(App::ready(&changeset), 120, 12)"
 ---
- Mire review | split | focus: review
+ Mire review | split | focus: review | context: 3 | wrap: off
  Files                        --- modified: file.txt
 > file.txt                    @@ -1,2 +1,2 @@ heading
   image.bin                       1 -old                                  │     1 +new
@@ -13,4 +13,4 @@ expression: "snapshot(App::ready(&changeset), 120, 12)"
 
 
 
- Tab: focus | j/k: move | [ ]: files | n/N: hunks | 1/2/3: layout | ?: help | q: quit
+ Tab focus | j/k move | [ ] files | { } hunks | / search | +/- context | w wrap | ? help | q quit

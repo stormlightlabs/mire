@@ -6,4 +6,4 @@ expression: "snapshot(App::ready(&empty), 32, 5)"
             No changes to review
 
 
- Tab: focus | j/k: move | [ ]: f
+ Tab focus | j/k move | [ ] file

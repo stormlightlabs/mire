@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crossterm::event::{KeyEvent, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
 use mire_core::Changeset;
 use ratatui::layout::{Position, Rect};
@@ -5,9 +7,20 @@ use ratatui::layout::{Position, Rect};
 use crate::layout::UiAreas;
 use crate::navigation::{Action, Focus, action_for};
 use crate::stream::{LayoutMode, ReviewStream, RowAnchor};
+use crate::syntax::SyntaxCache;
 
 const DEFAULT_TERMINAL_HEIGHT: u16 = 24;
 const DEFAULT_TERMINAL_WIDTH: u16 = 80;
+const DEFAULT_CONTEXT_LINES: usize = 3;
+const MAX_CONTEXT_LINES: usize = 100;
+const MAX_SEARCH_MATCHES: usize = 100_000;
+
+/// Presentation preferences supplied when an interactive review starts.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AppOptions {
+    /// Inkjet language name or alias applied to every text file.
+    pub language_override: Option<String>,
+}
 
 /// The deterministic content state shown by the review application.
 #[derive(Debug)]
@@ -23,7 +36,6 @@ pub enum AppState<'a> {
 }
 
 /// Terminal-only interaction state kept separate from the changeset model.
-#[derive(Debug)]
 pub struct App<'a> {
     state: AppState<'a>,
     focus: Focus,
@@ -35,22 +47,34 @@ pub struct App<'a> {
     terminal_width: u16,
     terminal_height: u16,
     help_visible: bool,
+    search_input: bool,
+    search_query: String,
+    search_matches: Vec<RowAnchor>,
+    search_match: Option<usize>,
+    context_lines: usize,
+    wrap_lines: bool,
+    syntax_cache: RefCell<SyntaxCache>,
     should_quit: bool,
 }
 
 impl<'a> App<'a> {
     /// Creates the initial loading state.
     pub fn loading() -> Self {
-        Self::with_state(AppState::Loading)
+        Self::with_state(AppState::Loading, AppOptions::default())
     }
 
     /// Creates an error state with a user-facing message.
     pub fn error(message: impl Into<String>) -> Self {
-        Self::with_state(AppState::Error(message.into()))
+        Self::with_state(AppState::Error(message.into()), AppOptions::default())
     }
 
     /// Creates an empty or ready application from an immutable changeset.
     pub fn ready(changeset: &'a Changeset) -> Self {
+        Self::ready_with_options(changeset, AppOptions::default())
+    }
+
+    /// Creates an application with explicit presentation preferences.
+    pub fn ready_with_options(changeset: &'a Changeset, options: AppOptions) -> Self {
         let areas = UiAreas::new(Rect::new(0, 0, DEFAULT_TERMINAL_WIDTH, DEFAULT_TERMINAL_HEIGHT));
         let layout = LayoutMode::Automatic.resolve(areas.review.width);
         let state = if changeset.files().is_empty() {
@@ -58,7 +82,7 @@ impl<'a> App<'a> {
         } else {
             AppState::Ready(ReviewStream::new(changeset, layout))
         };
-        Self::with_state(state)
+        Self::with_state(state, options)
     }
 
     /// Returns the content currently displayed by the application.
@@ -96,6 +120,47 @@ impl<'a> App<'a> {
         self.help_visible
     }
 
+    /// Returns the active search text, including input that has not been submitted.
+    pub fn search_query(&self) -> &str {
+        &self.search_query
+    }
+
+    /// Reports whether keyboard text is being entered into search.
+    pub const fn search_input(&self) -> bool {
+        self.search_input
+    }
+
+    /// Returns current and total search match positions.
+    pub fn search_status(&self) -> Option<(usize, usize)> {
+        self.search_match.map(|index| (index + 1, self.search_matches.len()))
+    }
+
+    /// Returns the number of context lines retained at each edge of a context run.
+    pub const fn context_lines(&self) -> usize {
+        self.context_lines
+    }
+
+    /// Reports whether long source lines wrap into anchored continuation rows.
+    pub const fn wrap_lines(&self) -> bool {
+        self.wrap_lines
+    }
+
+    /// Returns semantic syntax ranges for one source line.
+    pub fn syntax_ranges(&self, file: usize, hunk: usize, line: usize) -> Vec<(usize, usize, usize)> {
+        let AppState::Ready(stream) = &self.state else {
+            return Vec::new();
+        };
+        let source = String::from_utf8_lossy(stream.hunk(file, hunk).lines()[line].content());
+        let Ok(mut cache) = self.syntax_cache.try_borrow_mut() else {
+            return Vec::new();
+        };
+        cache
+            .ranges(file, hunk, line, stream.file(file), &source)
+            .iter()
+            .map(|range| (range.start, range.end, range.scope))
+            .collect()
+    }
+
     /// Reports whether the user requested that the application close.
     pub const fn should_quit(&self) -> bool {
         self.should_quit
@@ -121,7 +186,9 @@ impl<'a> App<'a> {
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return;
         }
-        if let Some(action) = action_for(key) {
+        if self.search_input {
+            self.handle_search_key(key);
+        } else if let Some(action) = action_for(key) {
             self.apply(action);
         }
     }
@@ -145,7 +212,8 @@ impl<'a> App<'a> {
         }
     }
 
-    fn with_state(state: AppState<'a>) -> Self {
+    fn with_state(state: AppState<'a>, options: AppOptions) -> Self {
+        let syntax_cache = RefCell::new(SyntaxCache::new(options.language_override.as_deref()));
         Self {
             state,
             focus: Focus::Review,
@@ -157,6 +225,13 @@ impl<'a> App<'a> {
             terminal_width: DEFAULT_TERMINAL_WIDTH,
             terminal_height: DEFAULT_TERMINAL_HEIGHT,
             help_visible: false,
+            search_input: false,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            search_match: None,
+            context_lines: DEFAULT_CONTEXT_LINES,
+            wrap_lines: false,
+            syntax_cache,
             should_quit: false,
         }
     }
@@ -178,6 +253,21 @@ impl<'a> App<'a> {
             Action::PreviousFile => self.select_file_by(-1),
             Action::NextHunk => self.jump_hunk(true),
             Action::PreviousHunk => self.jump_hunk(false),
+            Action::StartSearch => {
+                self.search_input = true;
+                self.search_query.clear();
+                self.search_matches.clear();
+                self.search_match = None;
+            }
+            Action::NextMatch => self.move_match(true),
+            Action::PreviousMatch => self.move_match(false),
+            Action::MoreContext => self.set_context(self.context_lines.saturating_add(1)),
+            Action::LessContext => self.set_context(self.context_lines.saturating_sub(1)),
+            Action::ToggleWrap => {
+                self.wrap_lines = !self.wrap_lines;
+                self.rebuild_stream(self.current_anchor());
+                self.clamp_scroll();
+            }
             Action::UnifiedLayout => self.set_layout(LayoutMode::Unified),
             Action::SplitLayout => self.set_layout(LayoutMode::Split),
             Action::AutomaticLayout => self.set_layout(LayoutMode::Automatic),
@@ -197,11 +287,15 @@ impl<'a> App<'a> {
         };
         let changeset = stream.changeset();
         let layout = self.layout_mode.resolve(self.areas().review.width);
-        if layout == stream.layout() {
-            return;
-        }
-        let replacement = ReviewStream::new(changeset, layout);
-        self.scroll = anchor.and_then(|value| replacement.index_of_anchor(value)).unwrap_or(0);
+        let replacement = ReviewStream::with_presentation(
+            changeset,
+            layout,
+            self.context_lines,
+            self.wrap_lines.then_some(self.areas().review.width),
+        );
+        self.scroll = anchor
+            .and_then(|value| replacement.index_of_anchor(value))
+            .unwrap_or(self.scroll);
         self.scroll_anchor = anchor;
         self.state = AppState::Ready(replacement);
     }
@@ -234,6 +328,95 @@ impl<'a> App<'a> {
             self.jump_to_row(row);
             self.ensure_sidebar_selection_visible();
         }
+    }
+
+    fn handle_search_key(&mut self, key: KeyEvent) {
+        match key.code {
+            crossterm::event::KeyCode::Enter => {
+                self.search_input = false;
+                self.rebuild_search_matches();
+                self.move_match(true);
+            }
+            crossterm::event::KeyCode::Esc => {
+                self.search_input = false;
+            }
+            crossterm::event::KeyCode::Backspace => {
+                self.search_query.pop();
+            }
+            crossterm::event::KeyCode::Char(character) => self.search_query.push(character),
+            _ => {}
+        }
+    }
+
+    fn rebuild_search_matches(&mut self) {
+        self.search_matches.clear();
+        self.search_match = None;
+        let query = self.search_query.clone();
+        if query.is_empty() {
+            return;
+        }
+        let AppState::Ready(stream) = &self.state else {
+            return;
+        };
+        for (file, diff) in stream.changeset().files().iter().enumerate() {
+            let mire_core::FileContent::Text { hunks } = diff.content() else {
+                continue;
+            };
+            for (hunk, source) in hunks.iter().enumerate() {
+                for (line, source_line) in source.lines().iter().enumerate() {
+                    if contains_query(&String::from_utf8_lossy(source_line.content()), &query) {
+                        self.search_matches.push(RowAnchor::Line { file, hunk, line });
+                        if self.search_matches.len() == MAX_SEARCH_MATCHES {
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn move_match(&mut self, forward: bool) {
+        if self.search_matches.is_empty() {
+            return;
+        }
+        let next = match (self.search_match, forward) {
+            (Some(index), true) => (index + 1) % self.search_matches.len(),
+            (Some(0), false) | (None, false) => self.search_matches.len() - 1,
+            (Some(index), false) => index - 1,
+            (None, true) => 0,
+        };
+        self.search_match = Some(next);
+        let anchor = self.search_matches[next];
+        let AppState::Ready(stream) = &self.state else {
+            return;
+        };
+        if let Some(row) = stream.index_of_anchor(anchor) {
+            self.selected_file = anchor_file(anchor);
+            self.jump_to_row(row);
+            self.ensure_sidebar_selection_visible();
+        } else {
+            let selected_file = anchor_file(anchor);
+            self.set_context(MAX_CONTEXT_LINES);
+            let AppState::Ready(stream) = &self.state else {
+                return;
+            };
+            if let Some(row) = stream.index_of_anchor(anchor) {
+                self.selected_file = selected_file;
+                self.jump_to_row(row);
+                self.ensure_sidebar_selection_visible();
+            }
+        }
+    }
+
+    fn set_context(&mut self, context_lines: usize) {
+        let context_lines = context_lines.min(MAX_CONTEXT_LINES);
+        if context_lines == self.context_lines {
+            return;
+        }
+        let anchor = self.current_anchor();
+        self.context_lines = context_lines;
+        self.rebuild_stream(anchor);
+        self.clamp_scroll();
     }
 
     fn select_file_by(&mut self, delta: isize) {
@@ -357,6 +540,24 @@ impl<'a> App<'a> {
     }
 }
 
+const fn anchor_file(anchor: RowAnchor) -> usize {
+    match anchor {
+        RowAnchor::File { file }
+        | RowAnchor::Binary { file }
+        | RowAnchor::Hunk { file, .. }
+        | RowAnchor::Line { file, .. }
+        | RowAnchor::MissingNewline { file, .. } => file,
+    }
+}
+
+fn contains_query(source: &str, query: &str) -> bool {
+    if source.is_ascii() && query.is_ascii() {
+        source.to_ascii_lowercase().contains(&query.to_ascii_lowercase())
+    } else {
+        source.contains(query)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyModifiers, MouseEventKind};
@@ -439,9 +640,44 @@ mod tests {
         let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
         let mut app = App::ready(&changeset);
         app.resize(50, 6);
-        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('}'), KeyModifiers::NONE));
         assert_eq!(app.selected_file(), 0);
+        app.handle_key(KeyEvent::new(KeyCode::Char('}'), KeyModifiers::NONE));
+        assert_eq!(app.selected_file(), 1);
+    }
+
+    #[test]
+    fn search_moves_forward_and_backward_across_file_boundaries() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let mut app = App::ready(&changeset);
+        for key in ['/', 'e'] {
+            app.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.selected_file(), 0);
+        assert_eq!(app.search_status(), Some((1, 4)));
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
         assert_eq!(app.selected_file(), 1);
+        app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::NONE));
+        assert_eq!(app.selected_file(), 0);
+    }
+
+    #[test]
+    fn wrapping_and_context_controls_preserve_changed_line_anchors() {
+        let patch = b"--- a/file.txt\n+++ b/file.txt\n@@ -1,9 +1,9 @@\n one\n two\n three\n four\n-old value that is deliberately much longer than the review pane\n+new value that is deliberately much longer than the review pane\n six\n seven\n eight\n nine\n";
+        let changeset = parse_patch(patch, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let mut app = App::ready(&changeset);
+        let target = RowAnchor::Line { file: 0, hunk: 0, line: 4 };
+        let AppState::Ready(stream) = app.state() else {
+            panic!("text patch is ready");
+        };
+        app.jump_to_row(stream.index_of_anchor(target).expect("changed line is indexed"));
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE));
+        assert_eq!(app.current_anchor(), Some(target));
+        app.handle_key(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::NONE));
+        assert_eq!(app.current_anchor(), Some(target));
     }
 }

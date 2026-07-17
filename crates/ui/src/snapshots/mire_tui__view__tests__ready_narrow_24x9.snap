@@ -10,4 +10,4 @@ expression: "snapshot(App::ready(&changeset), 24, 9)"
                 2     2
 
             --- modified
- Tab: focus | j/k: move
+ Tab focus | j/k move |

@@ -8,6 +8,7 @@ use crate::layout::UiAreas;
 use crate::navigation::{Action, Focus, action_for};
 use crate::stream::{LayoutMode, ReviewStream, RowAnchor};
 use crate::syntax::SyntaxCache;
+use crate::theme::ThemeFamily;
 
 const DEFAULT_TERMINAL_HEIGHT: u16 = 24;
 const DEFAULT_TERMINAL_WIDTH: u16 = 80;
@@ -20,6 +21,8 @@ const MAX_SEARCH_MATCHES: usize = 100_000;
 pub struct AppOptions {
     /// Inkjet language name or alias applied to every text file.
     pub language_override: Option<String>,
+    /// Built-in theme family selected for interactive rendering.
+    pub theme: ThemeFamily,
 }
 
 /// The deterministic content state shown by the review application.

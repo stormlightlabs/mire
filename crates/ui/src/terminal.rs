@@ -46,7 +46,7 @@ impl Drop for TerminalSession {
 }
 
 pub fn run(changeset: &Changeset, options: AppOptions) -> io::Result<()> {
-    let theme = Theme::detect();
+    let theme = Theme::detect(options.theme);
     let mut session = TerminalSession::enter()?;
     let result = catch_unwind(AssertUnwindSafe(|| {
         run_loop(&mut session.terminal, changeset, options, &theme)

@@ -6,10 +6,20 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use mire_core::{Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, PatchError, PatchLimits, Review, parse_patch};
+use mire_tui::ThemeFamily;
 use thiserror::Error;
 
 use crate::git::{self, DiffRequest, GitError, ShowRequest};
 use crate::review_file::{ReviewFileError, read_review};
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum ThemeArgument {
+    #[default]
+    Auto,
+    Iceberg,
+    Eldritch,
+    Catppuccin,
+}
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum OutputFormat {
@@ -65,8 +75,11 @@ impl AppError {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "mire", version, about = "Review changesets without modifying them")]
+#[command(name = "mire", version, about = "a terminal difftool")]
 struct Cli {
+    /// Viewer & highlighter theme.
+    #[arg(long, global = true, value_enum, default_value_t)]
+    theme: ThemeArgument,
     #[command(subcommand)]
     command: Command,
 }
@@ -145,6 +158,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> ExitCode {
 }
 
 fn execute(cli: Cli) -> Result<(), AppError> {
+    let theme = ThemeFamily::from(cli.theme);
     let (changeset, format, language) = match cli.command {
         Command::Diff(DiffArgs { staged, revisions, paths, format, language }) => (
             git::load_diff(DiffRequest { staged, revisions, paths }).map_err(AppError::Git)?,
@@ -157,7 +171,11 @@ fn execute(cli: Cli) -> Result<(), AppError> {
             return if format.is_some() || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
                 write_review(&review)
             } else {
-                mire_tui::run(review.changeset()).map_err(AppError::Terminal)
+                mire_tui::run_with_options(
+                    review.changeset(),
+                    mire_tui::AppOptions { language_override: None, theme },
+                )
+                .map_err(AppError::Terminal)
             };
         }
         Command::Show(ShowArgs { revision, paths, format, language }) => (
@@ -169,8 +187,19 @@ fn execute(cli: Cli) -> Result<(), AppError> {
     if format.is_some() || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         write_changeset(&changeset)
     } else {
-        mire_tui::run_with_options(&changeset, mire_tui::AppOptions { language_override: language })
+        mire_tui::run_with_options(&changeset, mire_tui::AppOptions { language_override: language, theme })
             .map_err(AppError::Terminal)
+    }
+}
+
+impl From<ThemeArgument> for ThemeFamily {
+    fn from(value: ThemeArgument) -> Self {
+        match value {
+            ThemeArgument::Auto => Self::Auto,
+            ThemeArgument::Iceberg => Self::Iceberg,
+            ThemeArgument::Eldritch => Self::Eldritch,
+            ThemeArgument::Catppuccin => Self::Catppuccin,
+        }
     }
 }
 
@@ -291,5 +320,27 @@ mod tests {
 
         let error = Cli::try_parse_from(["mire", "patch", "-", "--language", "brainfuck"]).unwrap_err();
         assert!(error.to_string().contains("unsupported language"));
+    }
+
+    #[test]
+    fn clap_accepts_every_theme_before_or_after_interactive_subcommands() {
+        for theme in ["auto", "iceberg", "eldritch", "catppuccin"] {
+            let before = Cli::try_parse_from(["mire", "--theme", theme, "patch", "-"]).unwrap();
+            assert_eq!(ThemeFamily::from(before.theme).as_str(), theme);
+
+            let after = Cli::try_parse_from(["mire", "patch", "-", "--theme", theme]).unwrap();
+            assert_eq!(ThemeFamily::from(after.theme).as_str(), theme);
+        }
+    }
+
+    #[test]
+    fn clap_defaults_to_auto_and_lists_allowed_themes_for_invalid_input() {
+        let cli = Cli::try_parse_from(["mire", "patch", "-"]).unwrap();
+        assert!(matches!(cli.theme, ThemeArgument::Auto));
+
+        let error = Cli::try_parse_from(["mire", "patch", "-", "--theme", "dracula"]).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("invalid value 'dracula'"));
+        assert!(message.contains("possible values: auto, iceberg, eldritch, catppuccin"));
     }
 }

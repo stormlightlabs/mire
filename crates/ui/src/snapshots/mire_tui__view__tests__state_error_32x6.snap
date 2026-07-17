@@ -2,9 +2,9 @@
 source: crates/ui/src/view.rs
 expression: "snapshot(App::error(\"broken input\"), 32, 6)"
 ---
- Mire review | unavailable | foc
-            Unable to display re
-            broken input
+ Mire review │ unavailable
+  Unable to display review:
+  broken input
 
 
- Tab focus | j/k move | [ ] file
+ ? help  q quit

@@ -1,6 +1,7 @@
 //! Terminal application state, virtualized review rows, and rendering.
 
 mod app;
+mod chrome;
 mod layout;
 mod navigation;
 mod stream;
@@ -15,7 +16,7 @@ use mire_core::Changeset;
 
 pub use app::{App, AppOptions, AppState};
 pub use stream::{LayoutMode, ReviewStream, RowKind};
-pub use theme::Theme;
+pub use theme::{ColorMode, ParseThemeFamilyError, Theme, ThemeFamily, ThemeVariant};
 pub use view::render;
 
 /// Opens an interactive review and restores the terminal before returning.

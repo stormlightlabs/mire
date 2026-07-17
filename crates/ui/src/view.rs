@@ -4,16 +4,16 @@ use mire_core::{FileDiff, FileStatus, LineKind, MissingNewline};
 use ratatui::Frame;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Paragraph};
 
 use crate::app::{App, AppState};
-use crate::navigation::{Focus, help_entries};
+use crate::chrome::{
+    diff_stats, file_path, fit_line, render_footer, render_help, render_sidebar, render_sidebar_divider, render_title,
+    truncate_text,
+};
 use crate::stream::TextRange;
 use crate::stream::{ReviewStream, RowKey};
 use crate::theme::Theme;
-
-const FOOTER: &str =
-    " Tab focus | j/k move | [ ] files | { } hunks | / search | +/- context | w wrap | ? help | q quit ";
 
 #[derive(Clone, Copy)]
 struct SourcePosition {
@@ -37,36 +37,25 @@ struct RenderContext<'stream, 'changeset, 'app, 'theme> {
 /// Renders the application into a Ratatui frame.
 pub fn render(frame: &mut Frame<'_>, app: &App<'_>, theme: &Theme) {
     let areas = app.areas();
-    let layout = match app.state() {
-        AppState::Ready(stream) => stream.layout().label(),
-        AppState::Loading | AppState::Empty | AppState::Error(_) => "unavailable",
-    };
-    let focus = match app.focus() {
-        Focus::Review => "review",
-        Focus::Sidebar => "files",
-    };
-    let search = if app.search_input() {
-        format!(" | /{}█", app.search_query())
-    } else if let Some((current, total)) = app.search_status() {
-        format!(" | /{} ({current}/{total})", app.search_query())
-    } else {
-        String::new()
-    };
-    frame.render_widget(
-        Paragraph::new(format!(
-            " Mire review | {layout} | focus: {focus} | context: {} | wrap: {}{search} ",
-            app.context_lines(),
-            if app.wrap_lines() { "on" } else { "off" }
-        ))
-        .style(theme.title),
-        areas.title,
-    );
+    frame.render_widget(Block::new().style(theme.application), frame.area());
+    render_title(frame, areas.title, app, theme);
 
     match app.state() {
-        AppState::Loading => frame.render_widget(Paragraph::new("Loading review..."), areas.review),
-        AppState::Empty => frame.render_widget(Paragraph::new("No changes to review."), areas.review),
+        AppState::Loading => {
+            frame.render_widget(
+                Paragraph::new("  Loading review...").style(theme.application),
+                areas.body,
+            );
+        }
+        AppState::Empty => {
+            frame.render_widget(
+                Paragraph::new("  No changes to review.").style(theme.application),
+                areas.body,
+            );
+        }
         AppState::Ready(stream) => {
             render_sidebar(frame, areas.sidebar, stream, app, theme);
+            render_sidebar_divider(frame, areas.sidebar_divider, theme);
             if app.help_visible() {
                 render_help(frame, areas.review, theme);
             } else {
@@ -75,32 +64,12 @@ pub fn render(frame: &mut Frame<'_>, app: &App<'_>, theme: &Theme) {
         }
         AppState::Error(message) => {
             frame.render_widget(
-                Paragraph::new(format!("Unable to display review:\n{message}")).style(theme.error),
-                areas.review,
+                Paragraph::new(format!("  Unable to display review:\n  {message}")).style(theme.error),
+                areas.body,
             );
         }
     }
-    frame.render_widget(Paragraph::new(FOOTER).style(theme.footer), areas.footer);
-}
-
-fn render_sidebar(
-    frame: &mut Frame<'_>, area: ratatui::layout::Rect, stream: &ReviewStream<'_>, app: &App<'_>, theme: &Theme,
-) {
-    let mut lines = vec![Line::styled(" Files", theme.file)];
-    let height = usize::from(area.height.saturating_sub(1));
-    let end = app
-        .sidebar_offset()
-        .saturating_add(height)
-        .min(stream.changeset().files().len());
-    for file in app.sidebar_offset()..end {
-        let marker = if file == app.selected_file() { ">" } else { " " };
-        let style = if file == app.selected_file() { theme.selected } else { theme.context };
-        lines.push(Line::styled(
-            format!("{marker} {}", file_path(stream.file(file))),
-            style,
-        ));
-    }
-    frame.render_widget(Paragraph::new(lines), area);
+    render_footer(frame, areas.footer, theme);
 }
 
 fn render_stream(
@@ -113,18 +82,12 @@ fn render_stream(
     frame.render_widget(Paragraph::new(visible), area);
 }
 
-fn render_help(frame: &mut Frame<'_>, area: ratatui::layout::Rect, theme: &Theme) {
-    let mut lines = vec![Line::styled(" Navigation and layout", theme.file)];
-    lines.extend(help_entries().map(|(keys, description)| Line::from(format!(" {keys:<12} {description}"))));
-    frame.render_widget(Paragraph::new(lines), area);
-}
-
 fn row_line<'a>(stream: &'a ReviewStream<'a>, key: RowKey, width: u16, app: &App<'a>, theme: &Theme) -> Line<'static> {
     let context = RenderContext { stream, app, theme };
     match key {
-        RowKey::File { file } => file_line(stream.file(file), theme.file),
+        RowKey::File { file } => file_line(stream.file(file), width, theme),
         RowKey::Binary { .. } => Line::styled("     Binary files differ", theme.marker),
-        RowKey::Hunk { file, hunk } => hunk_line(stream, file, hunk, theme),
+        RowKey::Hunk { file, hunk } => hunk_line(stream, file, hunk, width, theme),
         RowKey::UnifiedLine { file, hunk, line, range } => {
             context.unified_line(SourcePosition { file, hunk, line }, range)
         }
@@ -148,19 +111,24 @@ fn row_line<'a>(stream: &'a ReviewStream<'a>, key: RowKey, width: u16, app: &App
     }
 }
 
-fn hunk_line(stream: &ReviewStream<'_>, file: usize, hunk: usize, theme: &Theme) -> Line<'static> {
+fn hunk_line(stream: &ReviewStream<'_>, file: usize, hunk: usize, width: u16, theme: &Theme) -> Line<'static> {
     let hunk = stream.hunk(file, hunk);
     let section = String::from_utf8_lossy(hunk.section());
-    Line::styled(
-        format!(
-            "@@ -{},{} +{},{} @@{}{}",
-            hunk.old_start(),
-            hunk.old_line_count(),
-            hunk.new_start(),
-            hunk.new_line_count(),
-            if section.is_empty() { "" } else { " " },
-            section
-        ),
+    let prefix = if width >= 32 { " ▾ " } else { "" };
+    fit_line(
+        vec![Span::styled(
+            format!(
+                "{prefix}@@ -{},{} +{},{} @@{}{}",
+                hunk.old_start(),
+                hunk.old_line_count(),
+                hunk.new_start(),
+                hunk.new_line_count(),
+                if section.is_empty() { "" } else { " " },
+                section
+            ),
+            theme.hunk,
+        )],
+        usize::from(width),
         theme.hunk,
     )
 }
@@ -379,29 +347,43 @@ fn match_ranges(source: &str, query: &str) -> Vec<(usize, usize)> {
         .collect()
 }
 
-fn file_line(file: &FileDiff, style: Style) -> Line<'static> {
-    let status = match file.status() {
+fn file_line(file: &FileDiff, width: u16, theme: &Theme) -> Line<'static> {
+    let available = usize::from(width);
+    let mut metadata = vec![Span::styled(file_status_label(file.status()), theme.muted)];
+    if let Some((additions, deletions)) = diff_stats(file) {
+        if additions > 0 {
+            metadata.push(Span::raw(" "));
+            metadata.push(Span::styled(format!("+{additions}"), theme.addition_meta));
+        }
+        if deletions > 0 {
+            metadata.push(Span::raw(" "));
+            metadata.push(Span::styled(format!("-{deletions}"), theme.deletion_meta));
+        }
+    }
+    if available < 32 {
+        metadata.clear();
+    }
+    let metadata_width = metadata.iter().map(Span::width).sum::<usize>();
+    let path_width = available.saturating_sub(metadata_width.saturating_add(3));
+    let path = truncate_text(&file_path(file), path_width);
+    let path_width = Span::raw(&path).width();
+    let gap = available.saturating_sub(path_width + metadata_width + 2);
+    let mut spans = vec![
+        Span::raw(" "),
+        Span::styled(path, theme.accent),
+        Span::raw(" ".repeat(gap.max(1))),
+    ];
+    spans.extend(metadata);
+    fit_line(spans, available, theme.file)
+}
+
+fn file_status_label(status: FileStatus) -> &'static str {
+    match status {
         FileStatus::Added => "added",
         FileStatus::Deleted => "deleted",
         FileStatus::Modified => "modified",
         FileStatus::Renamed => "renamed",
         FileStatus::Copied => "copied",
-    };
-    Line::styled(format!("--- {status}: {} ", file_path(file)), style)
-}
-
-fn file_path(file: &FileDiff) -> Cow<'_, str> {
-    let old = file
-        .old_side()
-        .map(|side| String::from_utf8_lossy(side.path.as_bytes()));
-    let new = file
-        .new_side()
-        .map(|side| String::from_utf8_lossy(side.path.as_bytes()));
-    match (old, new) {
-        (Some(old), Some(new)) if old != new => Cow::Owned(format!("{old} -> {new}")),
-        (_, Some(new)) => new,
-        (Some(old), None) => old,
-        (None, None) => Cow::Borrowed("<unknown>"),
     }
 }
 
@@ -420,6 +402,7 @@ mod tests {
     use mire_core::{ChangesetSource, PatchLimits, parse_patch};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::style::Modifier;
 
     use super::*;
 
@@ -463,6 +446,73 @@ mod tests {
         assert_eq!(clipped[0].content, "界a");
     }
 
+    #[test]
+    fn named_theme_styles_cover_states_help_and_both_review_layouts() {
+        let theme = Theme::resolve(crate::ThemeFamily::Catppuccin, Some(crate::ColorMode::Dark));
+
+        let loading = rendered_styles(App::loading(), 32, 5, &theme);
+        assert!(has_style(&loading, theme.application));
+        assert!(has_style(&loading, theme.title));
+        assert!(has_style(&loading, theme.footer));
+
+        let error = rendered_styles(App::error("broken input"), 32, 6, &theme);
+        assert!(has_style(&error, theme.error));
+
+        let empty = parse_patch(b"", ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let empty_styles = rendered_styles(App::ready(&empty), 32, 5, &theme);
+        assert!(has_style(&empty_styles, theme.application));
+
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let narrow = rendered_styles(App::ready(&changeset), 24, 9, &theme);
+        assert!(has_style(&narrow, theme.addition));
+        assert!(has_style(&narrow, theme.deletion));
+
+        let wide = rendered_styles(App::ready(&changeset), 120, 12, &theme);
+        for style in [
+            theme.panel,
+            theme.selected,
+            theme.file,
+            theme.hunk,
+            theme.addition,
+            theme.deletion,
+            theme.marker,
+        ] {
+            assert!(has_style(&wide, style), "wide review omitted {style:?}");
+        }
+
+        let mut help = App::ready(&changeset);
+        help.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        let help_styles = rendered_styles(help, 90, 24, &theme);
+        assert!(has_style(&help_styles, theme.panel));
+        assert!(has_style(&help_styles, theme.file));
+    }
+
+    #[test]
+    fn named_theme_styles_cover_search_syntax_and_intraline_emphasis() {
+        let theme = Theme::resolve(crate::ThemeFamily::Eldritch, Some(crate::ColorMode::Light));
+        let patch = b"diff --git a/file.rs b/file.rs\n--- a/file.rs\n+++ b/file.rs\n@@ -1 +1 @@\n-let old = 1;\n+let new = 2;\n";
+        let changeset = parse_patch(patch, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let mut app = App::ready(&changeset);
+        app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        for character in "new".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        let styles = rendered_styles(app, 120, 12, &theme);
+        assert!(has_style(&styles, theme.search_match));
+        assert!(
+            styles
+                .iter()
+                .any(|style| { style.bg == theme.intraline.bg && style.add_modifier.contains(Modifier::UNDERLINED) })
+        );
+        assert!(
+            styles
+                .iter()
+                .any(|style| { style.fg.is_some() && style.fg != theme.addition.fg && style.bg == theme.addition.bg })
+        );
+    }
+
     fn snapshot(mut app: App<'_>, width: u16, height: u16) -> String {
         app.resize(width, height);
         let backend = TestBackend::new(width, height);
@@ -479,5 +529,22 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn rendered_styles(mut app: App<'_>, width: u16, height: u16, theme: &Theme) -> Vec<Style> {
+        app.resize(width, height);
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| render(frame, &app, theme)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .flat_map(|y| (0..width).map(move |x| buffer[(x, y)].style()))
+            .collect()
+    }
+
+    fn has_style(styles: &[Style], expected: Style) -> bool {
+        styles.iter().any(|style| {
+            style.fg == expected.fg && style.bg == expected.bg && style.add_modifier.contains(expected.add_modifier)
+        })
     }
 }

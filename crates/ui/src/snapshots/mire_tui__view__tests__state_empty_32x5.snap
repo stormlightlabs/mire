@@ -2,8 +2,8 @@
 source: crates/ui/src/view.rs
 expression: "snapshot(App::ready(&empty), 32, 5)"
 ---
- Mire review | unavailable | foc
-            No changes to review
+ Mire review │ unavailable
+  No changes to review.
 
 
- Tab focus | j/k move | [ ] file
+ ? help  q quit

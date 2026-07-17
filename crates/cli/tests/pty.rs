@@ -7,6 +7,30 @@ use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 #[test]
 fn terminal_review_enters_renders_and_restores_the_alternate_screen() {
+    let (success, output) = run_terminal_review(&[("NO_COLOR", "1")]);
+
+    assert!(success, "PTY review failed");
+    assert!(contains(&output, b"\x1b[?1049h"), "alternate screen was not entered");
+    assert!(contains(&output, b"\x1b[?1049l"), "alternate screen was not restored");
+    assert!(contains(&output, b"Mire review"), "review frame was not rendered");
+    assert!(
+        contains(&output, b"split"),
+        "split layout was not rendered after its key binding"
+    );
+    assert!(!contains(&output, b"38;2"), "NO_COLOR emitted an RGB foreground");
+    assert!(!contains(&output, b"48;2"), "NO_COLOR emitted an RGB background");
+}
+
+#[test]
+fn dumb_terminal_overrides_a_named_true_color_theme() {
+    let (success, output) = run_terminal_review(&[("TERM", "dumb")]);
+
+    assert!(success, "PTY review failed");
+    assert!(!contains(&output, b"38;2"), "TERM=dumb emitted an RGB foreground");
+    assert!(!contains(&output, b"48;2"), "TERM=dumb emitted an RGB background");
+}
+
+fn run_terminal_review(environment: &[(&str, &str)]) -> (bool, Vec<u8>) {
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
@@ -14,7 +38,11 @@ fn terminal_review_enters_renders_and_restores_the_alternate_screen() {
     let mut command = CommandBuilder::new(binary());
     command.arg("patch");
     command.arg(fixture_path("text_edges.patch"));
-    command.env("NO_COLOR", "1");
+    command.arg("--theme");
+    command.arg("catppuccin");
+    for (name, value) in environment {
+        command.env(name, value);
+    }
 
     let mut reader = pair.master.try_clone_reader().expect("PTY output can be read");
     let reader_thread = thread::spawn(move || {
@@ -37,14 +65,7 @@ fn terminal_review_enters_renders_and_restores_the_alternate_screen() {
     drop(pair.master);
     let output = reader_thread.join().expect("PTY reader does not panic");
 
-    assert!(status.success(), "PTY review failed with {status:?}");
-    assert!(contains(&output, b"\x1b[?1049h"), "alternate screen was not entered");
-    assert!(contains(&output, b"\x1b[?1049l"), "alternate screen was not restored");
-    assert!(contains(&output, b"Mire review"), "review frame was not rendered");
-    assert!(
-        contains(&output, b"split"),
-        "split layout was not rendered after its key binding"
-    );
+    (status.success(), output)
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {

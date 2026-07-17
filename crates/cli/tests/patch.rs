@@ -136,6 +136,44 @@ fn invalid_formats_have_a_stable_exit_and_actionable_help() {
     assert!(stderr(&output).contains("try '--help'"));
 }
 
+#[test]
+fn theme_selection_does_not_change_structured_output() {
+    let path = fixture_path("mixed_languages.patch");
+    let expected = run_file(&path);
+    assert!(expected.status.success(), "baseline: {}", stderr(&expected));
+
+    for theme in ["auto", "iceberg", "eldritch", "catppuccin"] {
+        let before = Command::new(binary())
+            .args(["--theme", theme, "patch"])
+            .arg(&path)
+            .args(["--format", "json"])
+            .output()
+            .expect("mire runs");
+        assert!(before.status.success(), "{theme} before command: {}", stderr(&before));
+        assert_eq!(before.stdout, expected.stdout, "{theme} changed JSON output");
+
+        let after = Command::new(binary())
+            .arg("patch")
+            .arg(&path)
+            .args(["--format", "json", "--theme", theme])
+            .output()
+            .expect("mire runs");
+        assert!(after.status.success(), "{theme} after command: {}", stderr(&after));
+        assert_eq!(after.stdout, expected.stdout, "{theme} changed JSON output");
+    }
+}
+
+#[test]
+fn invalid_themes_list_every_allowed_identifier() {
+    let output = Command::new(binary())
+        .args(["patch", "-", "--theme", "dracula"])
+        .output()
+        .expect("mire runs");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("invalid value 'dracula'"));
+    assert!(stderr(&output).contains("possible values: auto, iceberg, eldritch, catppuccin"));
+}
+
 fn run_file(path: &Path) -> Output {
     Command::new(binary())
         .arg("patch")

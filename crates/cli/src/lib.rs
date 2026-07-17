@@ -4,6 +4,7 @@ mod command;
 mod git;
 mod protocol;
 mod review_file;
+mod watch;
 
 pub use command::run;
 pub use review_file::{DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, read_review, write_review_atomic};

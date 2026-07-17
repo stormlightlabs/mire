@@ -1,7 +1,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{self, IsTerminal, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
@@ -17,6 +17,7 @@ use crate::protocol::{
     notes_markdown,
 };
 use crate::review_file::{DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, read_review, write_review_atomic};
+use crate::watch::{WatchError, WatchSet};
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 enum ThemeArgument {
@@ -47,6 +48,8 @@ enum Command {
     Review(ReviewArgs),
     /// Review one Git commit.
     Show(ShowArgs),
+    /// Watch a Git worktree or revision comparison for changes.
+    Watch(WatchArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -85,6 +88,12 @@ enum AppError {
     OutputIo(io::Error),
     #[error("terminal interface failed: {0}")]
     Terminal(io::Error),
+    #[error("watch mode requires an interactive terminal and cannot be combined with structured output")]
+    WatchRequiresTerminal,
+    #[error("watch mode cannot read a patch from standard input")]
+    WatchStdin,
+    #[error("cannot start watch mode: {0}")]
+    Watch(WatchError),
 }
 
 impl From<&AppError> for u8 {
@@ -98,7 +107,12 @@ impl AppError {
         match self {
             Self::InputIo { .. } => 3,
             Self::Patch(_) => 4,
-            Self::Output(_) | Self::OutputIo(_) | Self::Terminal(_) => 5,
+            Self::Output(_)
+            | Self::OutputIo(_)
+            | Self::Terminal(_)
+            | Self::WatchRequiresTerminal
+            | Self::WatchStdin
+            | Self::Watch(_) => 5,
             Self::Git(_) => 6,
             Self::ReviewFile(_) => 7,
             Self::ProtocolInputIo { .. }
@@ -155,6 +169,9 @@ struct DiffArgs {
     /// Override syntax detection for the interactive viewer.
     #[arg(long, value_parser = parse_language)]
     language: Option<String>,
+    /// Reload the interactive review when the repository changes.
+    #[arg(long)]
+    watch: bool,
 }
 
 #[derive(Args, Debug)]
@@ -167,6 +184,9 @@ struct PatchArgs {
     /// Override syntax detection for the interactive viewer.
     #[arg(long, value_parser = parse_language)]
     language: Option<String>,
+    /// Reload the interactive review when the patch file changes.
+    #[arg(long)]
+    watch: bool,
 }
 
 #[derive(Args, Debug)]
@@ -208,6 +228,9 @@ struct ReviewArgs {
     /// Structured output format.
     #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
     format: Option<OutputFormat>,
+    /// Reload the interactive review when the review file changes.
+    #[arg(long)]
+    watch: bool,
 }
 
 #[derive(Args, Debug)]
@@ -220,6 +243,25 @@ struct ShowArgs {
     /// Structured output format.
     #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
     format: Option<OutputFormat>,
+    /// Override syntax detection for the interactive viewer.
+    #[arg(long, value_parser = parse_language)]
+    language: Option<String>,
+    /// Reload the interactive review when the repository changes.
+    #[arg(long)]
+    watch: bool,
+}
+
+#[derive(Args, Debug)]
+struct WatchArgs {
+    /// Compare the staged index with HEAD.
+    #[arg(long, conflicts_with = "revisions")]
+    staged: bool,
+    /// Git revision or revision range to compare.
+    #[arg(value_name = "REVISION")]
+    revisions: Vec<OsString>,
+    /// Repository-relative paths, supplied after --.
+    #[arg(last = true, value_name = "PATH")]
+    paths: Vec<OsString>,
     /// Override syntax detection for the interactive viewer.
     #[arg(long, value_parser = parse_language)]
     language: Option<String>,
@@ -249,7 +291,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> ExitCode {
 
 fn execute(cli: Cli) -> Result<(), AppError> {
     let theme = ThemeFamily::from(cli.theme);
-    let (changeset, format, language) = match cli.command {
+    match cli.command {
         Command::Context(ContextArgs { review, patch, file, max_bytes, format }) => {
             let _ = format;
             let review = read_review(Path::new(&review)).map_err(AppError::ReviewFile)?;
@@ -260,20 +302,54 @@ fn execute(cli: Cli) -> Result<(), AppError> {
             } else {
                 ContextSelection::Manifest
             };
-            return write_bytes(&context_json(&review, selection, max_bytes).map_err(AppError::Protocol)?);
+            write_bytes(&context_json(&review, selection, max_bytes).map_err(AppError::Protocol)?)
         }
-        Command::Diff(DiffArgs { staged, revisions, paths, format, language }) => (
-            git::load_diff(DiffRequest { staged, revisions, paths }).map_err(AppError::Git)?,
-            format,
-            language,
-        ),
-        Command::Patch(PatchArgs { input, format, language }) => (load_patch(&input)?, format, language),
-        Command::Notes(NotesArgs { command }) => return execute_notes(command),
-        Command::Review(ReviewArgs { input, format }) => {
+        Command::Diff(DiffArgs { staged, revisions, paths, format, language, watch }) => {
+            let request = DiffRequest { staged, revisions, paths };
+            let changeset = git::load_diff(request.clone()).map_err(AppError::Git)?;
+            let source = if watch {
+                Some(ReloadSource::GitDiff { root: git::repository_root().map_err(AppError::Git)?, request })
+            } else {
+                None
+            };
+            run_changeset(changeset, format, language, theme, source)
+        }
+        Command::Patch(PatchArgs { input, format, language, watch }) => {
+            if watch && input == "-" {
+                return Err(AppError::WatchStdin);
+            }
+            let changeset = load_patch(&input)?;
+            let source =
+                watch.then(|| ReloadSource::Patch { watch_path: watched_file_parent(Path::new(&input)), input });
+            run_changeset(changeset, format, language, theme, source)
+        }
+        Command::Notes(NotesArgs { command }) => execute_notes(command),
+        Command::Review(ReviewArgs { input, format, watch }) => {
             let review_path = Path::new(&input).to_owned();
             let review = read_review(&review_path).map_err(AppError::ReviewFile)?;
-            return if format.is_some() || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+            let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+            if watch && (format.is_some() || !interactive) {
+                return Err(AppError::WatchRequiresTerminal);
+            }
+            if format.is_some() || !interactive {
                 write_review(&review)
+            } else if watch {
+                let mut watcher = WatchSet::new(&watched_file_parent(&review_path), false).map_err(AppError::Watch)?;
+                mire_tui::run_review_watch_with_options(
+                    review,
+                    mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
+                    |updated| write_review_atomic(&review_path, updated),
+                    || {
+                        if !watcher.reload_due() {
+                            return mire_tui::WatchUpdate::Unchanged;
+                        }
+                        match read_review(&review_path) {
+                            Ok(review) => mire_tui::WatchUpdate::Loaded(review),
+                            Err(error) => mire_tui::WatchUpdate::Failed(error.to_string()),
+                        }
+                    },
+                )
+                .map_err(AppError::Terminal)
             } else {
                 mire_tui::run_review_with_options(
                     &review,
@@ -281,16 +357,84 @@ fn execute(cli: Cli) -> Result<(), AppError> {
                     |updated| write_review_atomic(&review_path, updated),
                 )
                 .map_err(AppError::Terminal)
-            };
+            }
         }
-        Command::Show(ShowArgs { revision, paths, format, language }) => (
-            git::load_show(ShowRequest { revision, paths }).map_err(AppError::Git)?,
-            format,
-            language,
-        ),
-    };
-    if format.is_some() || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        Command::Show(ShowArgs { revision, paths, format, language, watch }) => {
+            let request = ShowRequest { revision, paths };
+            let changeset = git::load_show(request.clone()).map_err(AppError::Git)?;
+            let source = if watch {
+                Some(ReloadSource::GitShow { root: git::repository_root().map_err(AppError::Git)?, request })
+            } else {
+                None
+            };
+            run_changeset(changeset, format, language, theme, source)
+        }
+        Command::Watch(WatchArgs { staged, revisions, paths, language }) => {
+            let request = DiffRequest { staged, revisions, paths };
+            let changeset = git::load_diff(request.clone()).map_err(AppError::Git)?;
+            let root = git::repository_root().map_err(AppError::Git)?;
+            run_changeset(
+                changeset,
+                None,
+                language,
+                theme,
+                Some(ReloadSource::GitDiff { root, request }),
+            )
+        }
+    }
+}
+
+#[derive(Debug)]
+enum ReloadSource {
+    GitDiff { root: PathBuf, request: DiffRequest },
+    GitShow { root: PathBuf, request: ShowRequest },
+    Patch { watch_path: PathBuf, input: OsString },
+}
+
+impl ReloadSource {
+    fn watch_path(&self) -> (&Path, bool) {
+        match self {
+            Self::GitDiff { root, .. } | Self::GitShow { root, .. } => (root, true),
+            Self::Patch { watch_path, .. } => (watch_path, false),
+        }
+    }
+
+    fn load(&self) -> Result<Changeset, AppError> {
+        match self {
+            Self::GitDiff { request, .. } => git::load_diff(request.clone()).map_err(AppError::Git),
+            Self::GitShow { request, .. } => git::load_show(request.clone()).map_err(AppError::Git),
+            Self::Patch { input, .. } => load_patch(input),
+        }
+    }
+}
+
+fn run_changeset(
+    changeset: Changeset, format: Option<OutputFormat>, language: Option<String>, theme: ThemeFamily,
+    source: Option<ReloadSource>,
+) -> Result<(), AppError> {
+    let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    if source.is_some() && (format.is_some() || !interactive) {
+        return Err(AppError::WatchRequiresTerminal);
+    }
+    if format.is_some() || !interactive {
         write_changeset(&changeset)
+    } else if let Some(source) = source {
+        let (path, recursive) = source.watch_path();
+        let mut watcher = WatchSet::new(path, recursive).map_err(AppError::Watch)?;
+        mire_tui::run_watch_with_options(
+            changeset,
+            mire_tui::AppOptions { language_override: language, theme, human_author: None },
+            || {
+                if !watcher.reload_due() {
+                    return mire_tui::WatchUpdate::Unchanged;
+                }
+                match source.load() {
+                    Ok(changeset) => mire_tui::WatchUpdate::Loaded(changeset),
+                    Err(error) => mire_tui::WatchUpdate::Failed(error.to_string()),
+                }
+            },
+        )
+        .map_err(AppError::Terminal)
     } else {
         mire_tui::run_with_options(
             &changeset,
@@ -298,6 +442,13 @@ fn execute(cli: Cli) -> Result<(), AppError> {
         )
         .map_err(AppError::Terminal)
     }
+}
+
+fn watched_file_parent(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .to_owned()
 }
 
 fn local_author() -> Author {
@@ -488,6 +639,22 @@ mod tests {
         };
         assert_eq!(arguments.revisions, ["main...HEAD"]);
         assert_eq!(arguments.paths, ["src/lib.rs"]);
+    }
+
+    #[test]
+    fn clap_accepts_standalone_and_command_specific_watch_modes() {
+        let cli = Cli::try_parse_from(["mire", "watch", "main...HEAD", "--", "src"]).unwrap();
+        let Command::Watch(arguments) = cli.command else {
+            panic!("watch command is parsed");
+        };
+        assert_eq!(arguments.revisions, ["main...HEAD"]);
+        assert_eq!(arguments.paths, ["src"]);
+
+        let cli = Cli::try_parse_from(["mire", "patch", "changes.patch", "--watch"]).unwrap();
+        let Command::Patch(arguments) = cli.command else {
+            panic!("patch command is parsed");
+        };
+        assert!(arguments.watch);
     }
 
     #[test]

@@ -60,7 +60,7 @@ pub enum GitError {
 }
 
 /// A Git-backed diff request from the command line.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DiffRequest {
     /// Whether Git should compare the staged index with `HEAD`.
     pub staged: bool,
@@ -71,7 +71,7 @@ pub struct DiffRequest {
 }
 
 /// A Git-backed commit review request from the command line.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ShowRequest {
     /// The commit to show, or `None` to use `HEAD`.
     pub revision: Option<OsString>,
@@ -153,6 +153,11 @@ pub fn load_show(request: ShowRequest) -> Result<Changeset> {
     let output = run_git(Some(&repository.root), &arguments, DEFAULT_MAX_PATCH_BYTES)?;
     ensure_success("show", &output, &[0])?;
     parse_patch(&output.stdout, source, PatchLimits::default()).map_err(GitError::Patch)
+}
+
+/// Returns the root watched for Git-backed review changes.
+pub fn repository_root() -> Result<PathBuf> {
+    discover_repository().map(|repository| repository.root)
 }
 
 fn discover_repository() -> Result<GitRepository> {

@@ -9,7 +9,7 @@ use mire_core::{Changeset, Review};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use crate::{App, AppOptions, Theme, render};
+use crate::{App, AppOptions, Theme, WatchUpdate, render};
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -75,6 +75,40 @@ where
     }
 }
 
+pub fn run_watch<F>(changeset: Changeset, options: AppOptions, mut reload: F) -> io::Result<()>
+where
+    F: FnMut() -> WatchUpdate<Changeset>,
+{
+    let theme = Theme::detect(options.theme);
+    let mut session = TerminalSession::enter()?;
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        run_watch_loop(&mut session.terminal, changeset, options, &theme, &mut reload)
+    }));
+    drop(session);
+    match result {
+        Ok(result) => result,
+        Err(payload) => resume_unwind(payload),
+    }
+}
+
+pub fn run_review_watch<F, E, R>(review: Review, options: AppOptions, mut save: F, mut reload: R) -> io::Result<()>
+where
+    F: FnMut(&Review) -> Result<(), E>,
+    E: std::fmt::Display,
+    R: FnMut() -> WatchUpdate<Review>,
+{
+    let theme = Theme::detect(options.theme);
+    let mut session = TerminalSession::enter()?;
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        run_review_watch_loop(&mut session.terminal, review, options, &theme, &mut save, &mut reload)
+    }));
+    drop(session);
+    match result {
+        Ok(result) => result,
+        Err(payload) => resume_unwind(payload),
+    }
+}
+
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>, changeset: &Changeset, options: AppOptions, theme: &Theme,
 ) -> io::Result<()> {
@@ -92,6 +126,48 @@ fn run_loop(
             Event::Mouse(mouse) => app.handle_mouse(mouse),
             Event::Resize(width, height) => app.resize(width, height),
             Event::FocusGained | Event::FocusLost | Event::Paste(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn run_watch_loop<F>(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>, mut changeset: Changeset, options: AppOptions, theme: &Theme,
+    reload: &mut F,
+) -> io::Result<()>
+where
+    F: FnMut() -> WatchUpdate<Changeset>,
+{
+    terminal.draw(|frame| render(frame, &App::loading(), theme))?;
+    let mut app = App::ready_with_options(&changeset, options.clone());
+    let size = terminal.size()?;
+    app.resize(size.width, size.height);
+    let mut position = app.position();
+    while !app.should_quit() {
+        terminal.draw(|frame| render(frame, &app, theme))?;
+        handle_terminal_event(&mut app)?;
+        match reload() {
+            WatchUpdate::Unchanged => {}
+            WatchUpdate::Loaded(updated) => {
+                if matches!(app.state(), crate::AppState::Ready(_)) {
+                    position = app.position();
+                }
+                drop(app);
+                changeset = updated;
+                app = App::ready_with_options(&changeset, options.clone());
+                let size = terminal.size()?;
+                app.resize(size.width, size.height);
+                app.restore_position(&position);
+            }
+            WatchUpdate::Failed(error) => {
+                if matches!(app.state(), crate::AppState::Ready(_)) {
+                    position = app.position();
+                }
+                drop(app);
+                app = App::error_with_options(error, options.clone());
+                let size = terminal.size()?;
+                app.resize(size.width, size.height);
+            }
         }
     }
     Ok(())
@@ -129,4 +205,84 @@ where
         }
     }
     Ok(())
+}
+
+fn run_review_watch_loop<F, E, R>(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>, mut review: Review, options: AppOptions, theme: &Theme,
+    save: &mut F, reload: &mut R,
+) -> io::Result<()>
+where
+    F: FnMut(&Review) -> Result<(), E>,
+    E: std::fmt::Display,
+    R: FnMut() -> WatchUpdate<Review>,
+{
+    terminal.draw(|frame| render(frame, &App::loading(), theme))?;
+    let mut app = App::review_with_options(&review, options.clone());
+    let size = terminal.size()?;
+    app.resize(size.width, size.height);
+    let mut position = app.position();
+    let mut pending = WatchUpdate::Unchanged;
+    while !app.should_quit() {
+        terminal.draw(|frame| render(frame, &app, theme))?;
+        handle_terminal_event(&mut app)?;
+        finish_requested_save(&mut app, save);
+        if matches!(pending, WatchUpdate::Unchanged) {
+            pending = reload();
+        }
+        if !app.can_reload() {
+            continue;
+        }
+        match std::mem::replace(&mut pending, WatchUpdate::Unchanged) {
+            WatchUpdate::Unchanged => {}
+            WatchUpdate::Loaded(updated) => {
+                if matches!(app.state(), crate::AppState::Ready(_)) {
+                    position = app.position();
+                }
+                drop(app);
+                review = updated;
+                app = App::review_with_options(&review, options.clone());
+                let size = terminal.size()?;
+                app.resize(size.width, size.height);
+                app.restore_position(&position);
+            }
+            WatchUpdate::Failed(error) => {
+                if matches!(app.state(), crate::AppState::Ready(_)) {
+                    position = app.position();
+                }
+                drop(app);
+                app = App::error_with_options(error, options.clone());
+                let size = terminal.size()?;
+                app.resize(size.width, size.height);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn handle_terminal_event(app: &mut App<'_>) -> io::Result<()> {
+    if !event::poll(EVENT_POLL_INTERVAL)? {
+        return Ok(());
+    }
+    match event::read()? {
+        Event::Key(key) => app.handle_key(key),
+        Event::Mouse(mouse) => app.handle_mouse(mouse),
+        Event::Resize(width, height) => app.resize(width, height),
+        Event::FocusGained | Event::FocusLost | Event::Paste(_) => {}
+    }
+    Ok(())
+}
+
+fn finish_requested_save<F, E>(app: &mut App<'_>, save: &mut F)
+where
+    F: FnMut(&Review) -> Result<(), E>,
+    E: std::fmt::Display,
+{
+    if !app.save_requested() {
+        return;
+    }
+    let result = app
+        .review()
+        .ok_or_else(|| "editable session lost its review state".to_owned())
+        .and_then(|review| save(review).map_err(|error| error.to_string()));
+    app.finish_save(result);
 }

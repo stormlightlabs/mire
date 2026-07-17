@@ -17,6 +17,7 @@ Mire is a difftool for humans and agents.
 - Highlight supported languages automatically, with a plain-text fallback for
   everything else.
 - Create and disposition durable, anchored review notes from the terminal.
+- Keep an open Git, patch, or review-file session current as files change.
 - Produce stable JSON for scripts and other tools.
 
 ## Install from source
@@ -51,6 +52,9 @@ mire show
 
 # A patch saved on disk
 mire patch changes.diff
+
+# Keep the current worktree review open and reload changes
+mire watch
 ```
 
 Limit a Git review to one or more repository-relative paths by placing them
@@ -61,8 +65,25 @@ mire diff main...HEAD -- src tests
 mire show HEAD~1 -- crates/core
 ```
 
-Use `mire help`, `mire help diff`, `mire help show`, or `mire help patch` for
-the complete command-line reference.
+Add `--watch` to `diff`, `show`, or a file-backed `patch` command when you want
+to keep the same command shape:
+
+```sh
+mire diff main...HEAD --watch
+mire patch changes.diff --watch
+```
+
+Watch mode preserves the selected file, nearby logical row, layout, and review
+filters when the refreshed content still contains them.
+
+If a watched file or repository disappears or becomes invalid, Mire shows an
+error and keeps watching so the session can recover after the source returns.
+
+Native filesystem notifications are debounced & mire falls back to polling when
+the platform watcher is unavailable, and periodically reloads to recover missed events.
+
+Use `mire help`, `mire help diff`, `mire help show`, `mire help patch`, or
+`mire help watch` for the complete command-line reference.
 
 ## Keybinds
 
@@ -116,6 +137,11 @@ Open an existing Mire review file with:
 ```sh
 mire review review.json
 ```
+
+Use `mire review review.json --watch` to reload changes made to the review file
+by another local process.
+
+Mire waits until the in-terminal editor is clean before applying an external update.
 
 Review-file sessions add these controls:
 

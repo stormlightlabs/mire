@@ -18,6 +18,21 @@ const DEFAULT_CONTEXT_LINES: usize = 3;
 const MAX_CONTEXT_LINES: usize = 100;
 const MAX_SEARCH_MATCHES: usize = 100_000;
 
+#[derive(Clone, Debug)]
+/// Presentation state retained while watched content is unavailable or replaced.
+pub struct AppPosition {
+    context_lines: usize,
+    focus: Focus,
+    help_visible: bool,
+    layout_mode: LayoutMode,
+    note_filter_file_path: Option<Vec<u8>>,
+    note_filter: NoteFilter,
+    row_offset: usize,
+    row_path: Option<Vec<u8>>,
+    selected_path: Option<Vec<u8>>,
+    wrap_lines: bool,
+}
+
 /// Presentation preferences supplied when an interactive review starts.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AppOptions {
@@ -86,6 +101,11 @@ impl<'a> App<'a> {
     /// Creates an error state with a user-facing message.
     pub fn error(message: impl Into<String>) -> Self {
         Self::with_state(AppState::Error(message.into()), AppOptions::default())
+    }
+
+    /// Creates an error state without discarding the session's presentation preferences.
+    pub fn error_with_options(message: impl Into<String>, options: AppOptions) -> Self {
+        Self::with_state(AppState::Error(message.into()), options)
     }
 
     /// Creates an empty or ready application from an immutable changeset.
@@ -273,6 +293,98 @@ impl<'a> App<'a> {
     /// Reports whether the in-memory review has changes not confirmed on disk.
     pub const fn is_dirty(&self) -> bool {
         self.dirty
+    }
+
+    /// Reports whether replacing an editable review would preserve all unsaved work.
+    pub const fn can_reload(&self) -> bool {
+        !self.dirty && !self.save_requested && self.editor.is_none()
+    }
+
+    /// Captures navigation, layout, and filter state for a watched reload.
+    pub fn position(&self) -> AppPosition {
+        let (row_path, row_offset) = match &self.state {
+            AppState::Ready(stream) => {
+                let row = self.current_row_index(stream);
+                let file = stream.file_at(row).unwrap_or(self.selected_file);
+                let start = stream.file_position(file).unwrap_or(row);
+                (file_path_bytes(stream.file(file)), row.saturating_sub(start))
+            }
+            AppState::Loading | AppState::Empty | AppState::Error(_) => (None, 0),
+        };
+        let selected_path = match &self.state {
+            AppState::Ready(stream) => stream
+                .changeset()
+                .files()
+                .get(self.selected_file)
+                .and_then(file_path_bytes),
+            AppState::Loading | AppState::Empty | AppState::Error(_) => None,
+        };
+        let note_filter_file_path = match (&self.state, self.note_filter.file()) {
+            (AppState::Ready(stream), Some(file)) => stream.changeset().files().get(file).and_then(file_path_bytes),
+            _ => None,
+        };
+        AppPosition {
+            context_lines: self.context_lines,
+            focus: self.focus,
+            help_visible: self.help_visible,
+            layout_mode: self.layout_mode,
+            note_filter_file_path,
+            note_filter: self.note_filter,
+            row_offset,
+            row_path,
+            selected_path,
+            wrap_lines: self.wrap_lines,
+        }
+    }
+
+    /// Restores captured state by file identity and logical row offset when possible.
+    pub fn restore_position(&mut self, position: &AppPosition) {
+        self.context_lines = position.context_lines;
+        self.focus = position.focus;
+        self.help_visible = position.help_visible;
+        self.layout_mode = position.layout_mode;
+        self.note_filter = position.note_filter;
+        self.wrap_lines = position.wrap_lines;
+
+        let AppState::Ready(stream) = &self.state else {
+            return;
+        };
+        let selected_file = position
+            .selected_path
+            .as_deref()
+            .and_then(|path| find_file(stream.changeset(), path))
+            .unwrap_or_else(|| {
+                self.selected_file
+                    .min(stream.changeset().files().len().saturating_sub(1))
+            });
+        let remapped_filter = position
+            .note_filter_file_path
+            .as_deref()
+            .and_then(|path| find_file(stream.changeset(), path));
+        self.note_filter.set_file(remapped_filter);
+        self.selected_file = selected_file;
+        self.rebuild_stream(None);
+
+        let AppState::Ready(stream) = &self.state else {
+            return;
+        };
+        let row_file = position
+            .row_path
+            .as_deref()
+            .and_then(|path| find_file(stream.changeset(), path))
+            .unwrap_or(selected_file);
+        let start = stream.file_position(row_file).unwrap_or(0);
+        let end = stream
+            .file_position(row_file.saturating_add(1))
+            .unwrap_or_else(|| stream.len());
+        let target = start.saturating_add(position.row_offset).min(end.saturating_sub(1));
+        if self.review.is_some() {
+            self.set_review_cursor(target);
+        } else {
+            self.jump_to_row(target);
+            self.selected_file = selected_file;
+            self.ensure_sidebar_selection_visible();
+        }
     }
 
     /// Returns one note by its stable stream index.
@@ -1041,6 +1153,19 @@ impl<'a> App<'a> {
     }
 }
 
+fn file_path_bytes(file: &mire_core::FileDiff) -> Option<Vec<u8>> {
+    file.new_side()
+        .or_else(|| file.old_side())
+        .map(|side| side.path.as_bytes().to_vec())
+}
+
+fn find_file(changeset: &Changeset, path: &[u8]) -> Option<usize> {
+    changeset.files().iter().position(|file| {
+        file.new_side().is_some_and(|side| side.path.as_bytes() == path)
+            || file.old_side().is_some_and(|side| side.path.as_bytes() == path)
+    })
+}
+
 const fn anchor_file(anchor: RowAnchor) -> usize {
     match anchor {
         RowAnchor::File { file }
@@ -1102,6 +1227,46 @@ mod tests {
     use super::*;
 
     const PATCH: &[u8] = b"--- a/first.txt\n+++ b/first.txt\n@@ -1,2 +1,2 @@\n-old\n+new\n context\n--- a/second.txt\n+++ b/second.txt\n@@ -1 +1 @@\n-before\n+after\n";
+    const REORDERED_PATCH: &[u8] = b"--- a/added.txt\n+++ b/added.txt\n@@ -1 +1 @@\n-old\n+added\n--- a/first.txt\n+++ b/first.txt\n@@ -1,2 +1,2 @@\n-old\n+newer\n context\n--- a/second.txt\n+++ b/second.txt\n@@ -1 +1 @@\n-before\n+after again\n";
+
+    #[test]
+    fn reload_position_follows_file_identity_and_preserves_presentation() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let review = Review::new(ReviewRevision::new(1).unwrap(), changeset, Vec::new(), Vec::new()).unwrap();
+        let mut app = App::review_with_options(&review, AppOptions::default());
+        app.resize(100, 12);
+        app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
+        let position = app.position();
+
+        let changeset = parse_patch(
+            REORDERED_PATCH,
+            ChangesetSource::Patch { label: None },
+            PatchLimits::default(),
+        )
+        .unwrap();
+        let review = Review::new(ReviewRevision::new(1).unwrap(), changeset, Vec::new(), Vec::new()).unwrap();
+        let mut reloaded = App::review_with_options(&review, AppOptions::default());
+        reloaded.resize(100, 12);
+        reloaded.restore_position(&position);
+
+        assert_eq!(reloaded.selected_file(), 2);
+        assert_eq!(reloaded.layout_mode(), LayoutMode::Unified);
+        assert!(reloaded.filter_summary().contains("author=human"));
+        assert!(reloaded.filter_summary().contains("file=2"));
+        let AppState::Ready(stream) = reloaded.state() else {
+            panic!("reloaded review is ready");
+        };
+        assert_eq!(stream.file_at(reloaded.review_cursor), Some(2));
+        assert_eq!(
+            reloaded.review_cursor.saturating_sub(stream.file_position(2).unwrap()),
+            position.row_offset
+        );
+    }
 
     #[test]
     fn navigation_scrolling_is_bounded_by_the_stream_and_viewport() {

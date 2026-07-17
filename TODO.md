@@ -4,8 +4,7 @@ Source: [ROADMAP.md](ROADMAP.md)
 
 ## Milestone 0: Workspace foundation
 
-Exit criterion: Cargo builds and tests all three starter crates without
-third-party dependencies.
+Cargo builds and tests all three starter crates without third-party dependencies.
 
 ### M0.1 Scaffold the Cargo workspace
 
@@ -57,100 +56,23 @@ already uses.
 
 ## Milestone 2: Durable human, agent, and tool notes
 
-Exit criterion: humans, batch agents, and tools can exchange one versioned review
-file without losing anchors, attribution, provenance, or decisions.
+humans, batch agents, and tools can exchange one versioned review file without losing
+anchors, attribution, provenance, or decisions.
 
 ### M2.1 Define notes, anchors, and review-file recovery
 
-**Blocked by:** M1.3
-
-**Status:** Complete
-
-Add review notes, statuses, authors, provenance, note events, and atomic JSON
+Added review notes, statuses, authors, provenance, note events, and atomic JSON
 review files around a captured changeset revision.
-
-Acceptance criteria:
-
-- [x] Anchors include path, side, line range, hunk fingerprint, and content
-      fingerprint.
-- [x] Status is one of open, resolved, dismissed, or accepted-risk.
-- [x] Review writes validate first and atomically replace the destination.
-- [x] Interrupted or invalid writes leave the last valid review recoverable.
-- [x] Unsupported schema majors fail without rewriting the file.
-
-Review files retain the captured changeset, a positive review revision, current
-notes, and an ordered status-event history. Writers validate and serialize the
-whole review before creating a sibling temporary file. They sync that file,
-rename it over the destination, and sync the parent directory. If a process
-stops before the rename, the previous destination remains authoritative; a
-leftover `.mire-write-*` sibling may be removed after the destination loads
-successfully.
-
-Verification:
-
-- `cargo test -p mire-core review`
-- `cargo test -p mire --test review_files`
 
 ### M2.2 Import and export reviews without a TUI
 
-**Blocked by:** M2.1
-
-**Status:** Complete
-
-Add CLI commands for context export, batch note import, note listing, and
+Added CLI commands for context export, batch note import, note listing, and
 JSON/Markdown export.
-
-Acceptance criteria:
-
-- [x] Context defaults to a compact file/hunk manifest; raw patches and
-      full files require explicit bounded requests.
-- [x] Batch imports are all-or-nothing and report every invalid anchor.
-- [x] Human, agent, analyzer, and interchange provenance remain distinct.
-- [x] JSON is deterministic and schema-versioned; Markdown is readable without
-      Mire.
-- [x] Every essential action has structured output and stable exit behavior.
-
-`mire context <review>` emits file, hunk, and note identities without source
-lines. `--patch` and `--file <path>` expose captured content only when paired
-with `--max-bytes`. `mire notes import` validates the complete batch before an
-atomic review-file replacement and returns every rejected note with a stable
-error code. `mire notes list` and `mire notes export` emit a versioned,
-deterministic JSON envelope; export also supports standalone Markdown.
-
-Verification:
-
-- `cargo test -p mire --test review_protocol`
-- Round-trip a mixed human/agent/tool fixture through both formats.
 
 ### M2.3 Review and disposition notes in the TUI
 
-**Blocked by:** M2.2, M1.6
-
-**Status:** Complete
-
-Add range selection, a note editor, note navigation, filters, and status changes
+Added range selection, a note editor, note navigation, filters, and status changes
 to the review stream.
-
-Acceptance criteria:
-
-- [x] A human can create, edit, resolve, dismiss, reopen, and accept risk on a
-      note without changing source files.
-- [x] Filters cover author kind, status, severity, annotation kind, and file.
-- [x] Notes remain adjacent to code in unified and split layouts.
-- [x] Keyboard and mouse parity applies to primary note actions.
-- [x] Save failure keeps unsaved text available for recovery.
-
-`mire review <review-file>` now opens an editable review stream. Range selection,
-note editing, note navigation, status decisions, and facet filters all operate on
-the captured changeset. Each accepted action advances the review revision and
-uses the existing atomic writer. Failed saves leave the editor and in-memory
-review intact so the reviewer can retry without retyping the note.
-
-Verification:
-
-- `cargo test -p mire-tui notes`
-- `cargo test -p mire --test pty_notes`
-- Complete and reload a mixed-author review manually.
 
 ## Milestone 3: Changing worktrees and live agents
 
@@ -161,15 +83,31 @@ and annotate it through an authenticated, documented interface.
 
 **Blocked by:** M1.6, M2.1
 
+**Status:** Complete
+
 Add debounced filesystem observation with polling fallback for Git-backed and
 direct-file reviews.
 
 Acceptance criteria:
 
-- [ ] Bursty changes coalesce into one reload and missed events are recovered.
-- [ ] The selected file, logical row, filters, and layout survive when possible.
-- [ ] Removed or invalid repositories show a recoverable error state.
-- [ ] Watch mode terminates cleanly and does not leave background tasks.
+- [x] Bursty changes coalesce into one reload and missed events are recovered.
+- [x] The selected file, logical row, filters, and layout survive when possible.
+- [x] Removed or invalid repositories show a recoverable error state.
+- [x] Watch mode terminates cleanly and does not leave background tasks.
+
+`mire watch` follows a Git worktree or revision comparison. The `diff`, `show`,
+file-backed `patch`, and durable `review` commands also accept `--watch` for
+callers that want to retain their existing command shape. Mire uses the
+platform watcher selected by `notify`, falls back to `PollWatcher` when native
+observation cannot start, debounces event bursts, and performs a periodic
+recovery reload for missed events. File-backed modes observe the parent
+directory so atomic replacements, renames, deletions, and recreation remain
+visible.
+
+Reloads restore presentation state by file path and logical row offset. Invalid
+or missing sources replace the stream with a recoverable error while the
+watcher continues running. The terminal session owns the watcher, so normal
+quit and unwind paths drop its background resources before returning.
 
 Verification:
 

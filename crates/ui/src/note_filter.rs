@@ -11,6 +11,14 @@ pub struct NoteFilter {
 }
 
 impl NoteFilter {
+    pub const fn file(self) -> Option<usize> {
+        self.file
+    }
+
+    pub fn set_file(&mut self, file: Option<usize>) {
+        self.file = file;
+    }
+
     /// Reports whether a note belongs in the current stream.
     pub fn includes(self, note: &ReviewNote, file: usize) -> bool {
         self.author_kind

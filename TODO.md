@@ -97,18 +97,20 @@ Verification:
 
 **Blocked by:** M1.2
 
+**Status:** Complete
+
 Implement Git-backed `diff` and `show` by invoking native Git commands without a
 shell. Include untracked files for the default worktree review.
 
 Acceptance criteria:
 
-- [ ] Default, staged, two-dot, three-dot, path-filtered, and commit reviews match
+- [x] Default, staged, two-dot, three-dot, path-filtered, and commit reviews match
   Git's patch semantics.
-- [ ] Untracked, deleted, binary, rename, submodule, and mode changes survive
+- [x] Untracked, deleted, binary, rename, submodule, and mode changes survive
   normalization.
-- [ ] Arguments remain separate OS strings and subprocess output is bounded.
-- [ ] A before/after repository fingerprint proves fixtures were not modified.
-- [ ] Missing Git, invalid revisions, bare repositories, and non-repositories
+- [x] Arguments remain separate OS strings and subprocess output is bounded.
+- [x] A before/after repository fingerprint proves fixtures were not modified.
+- [x] Missing Git, invalid revisions, bare repositories, and non-repositories
   have tested errors.
 
 Verification:

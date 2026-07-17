@@ -166,6 +166,8 @@ pub enum GitOperation {
     Worktree {
         /// Whether the comparison was made against the staged index.
         staged: bool,
+        /// Repository-relative path filters passed to Git.
+        paths: Vec<BytePath>,
     },
     /// A revision comparison. Revisions retain their original bytes and order.
     Diff {
@@ -174,7 +176,7 @@ pub enum GitOperation {
         /// Repository-relative path filters.
         paths: Vec<BytePath>,
     },
-    /// A single commit or object shown by Git.
+    /// A single commit shown by Git.
     Show {
         /// Revision argument passed to Git without shell interpretation.
         revision: ByteString,

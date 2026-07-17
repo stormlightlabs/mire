@@ -43,19 +43,27 @@ navigable reviews and never modify the reviewed repository.
 
 **Blocked by:** M0.1
 
+**Status:** Complete
+
 Define the minimum `Changeset`, `FileDiff`, `Hunk`, line, source, and fingerprint
 types. Add raw patch and fixture-repository cases before selecting a patch
 parser.
 
 Acceptance criteria:
 
-- [ ] The model represents byte paths, old/new sides, file status, modes,
+- [x] The model represents byte paths, old/new sides, file status, modes,
   renames, binary markers, and missing-final-newline markers.
-- [ ] JSON has a schema version and deterministic ordering.
-- [ ] Fixtures cover every VCS and text edge case listed in the roadmap.
-- [ ] Invalid and oversized input has explicit expected errors.
-- [ ] A short decision in the ticket records whether an audited parser crate or
+- [x] JSON has a schema version and deterministic ordering.
+- [x] Fixtures cover every VCS and text edge case listed in the roadmap.
+- [x] Invalid and oversized input has explicit expected errors.
+- [x] A short decision in the ticket records whether an audited parser crate or
   a narrow local parser best passes the corpus.
+
+Decision: use `unidiff` for Git and unified patch parsing in M1.2. Its parser
+works on text, so Mire rejects invalid UTF-8 with a stable encoding error before
+parsing instead of accepting replacement characters. Use `similar` for later
+direct-file and intraline comparisons. Add each dependency in the ticket that
+first calls it; M1.1 adds only Serde and `thiserror` for its schema and errors.
 
 Verification:
 
@@ -382,5 +390,5 @@ Verification:
 
 ## Current frontier
 
-M1.1 is the only ticket ready to start. It establishes the behavior and fixture
-boundary that every parser, adapter, renderer, and review feature depends on.
+M1.2 is ready to start. It consumes the changeset and fixture contracts locked
+by M1.1.

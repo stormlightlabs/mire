@@ -1,0 +1,40 @@
+diff --git a/added.txt b/added.txt
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/added.txt
+@@ -0,0 +1 @@
++added
+diff --git a/deleted.txt b/deleted.txt
+deleted file mode 100644
+index 2222222..0000000
+--- a/deleted.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-deleted
+diff --git a/old-name.txt b/new-name.txt
+similarity index 90%
+rename from old-name.txt
+rename to new-name.txt
+--- a/old-name.txt
++++ b/new-name.txt
+@@ -1 +1 @@
+-old name
++new name
+diff --git a/source.txt b/copy.txt
+similarity index 100%
+copy from source.txt
+copy to copy.txt
+diff --git a/script.sh b/script.sh
+old mode 100644
+new mode 100755
+diff --git a/vendor/library b/vendor/library
+index 3333333..4444444 160000
+--- a/vendor/library
++++ b/vendor/library
+@@ -1 +1 @@
+-Subproject commit 3333333333333333333333333333333333333333
++Subproject commit 4444444444444444444444444444444444444444
+diff --git a/image.bin b/image.bin
+index 5555555..6666666 100644
+Binary files a/image.bin and b/image.bin differ

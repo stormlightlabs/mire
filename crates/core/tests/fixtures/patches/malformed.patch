@@ -1,0 +1,6 @@
+diff --git a/file.txt b/file.txt
+--- a/file.txt
++++ b/file.txt
+@@ this is not a hunk header @@
+-old
++new

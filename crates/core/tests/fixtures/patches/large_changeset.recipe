@@ -1,0 +1,4 @@
+# Generate file diffs until the raw patch is one byte above the configured limit.
+relative_to=max_patch_bytes
+additional_bytes=1
+expected=input_too_large

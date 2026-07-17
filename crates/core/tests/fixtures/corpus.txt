@@ -1,0 +1,11 @@
+# case|input|expected|coverage
+empty|patches/empty.patch|changeset|empty_changeset
+git_metadata|patches/git_metadata.patch|changeset|add,delete,rename,copy,mode_change,submodule,binary
+text_edges|patches/text_edges.patch|changeset|missing_final_newline,crlf,unicode
+crlf_bytes|patches/crlf.patch.hex|changeset|crlf
+mixed_languages|patches/mixed_languages.patch|changeset|mixed_language,unknown_extension,shebang,malformed_source,highlighting_fallback
+invalid_utf8|patches/invalid_utf8.patch.hex|encoding_error|invalid_utf8
+malformed|patches/malformed.patch|malformed_error|malformed_patch
+long_line|patches/long_line.recipe|changeset|very_long_line
+large_changeset|patches/large_changeset.recipe|input_too_large|large_changeset,oversized_input
+repository_states|repositories/cases.txt|changeset|staged,unstaged,untracked,two_dot,three_dot,commit_diff

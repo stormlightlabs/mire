@@ -1,0 +1,3 @@
+# Generate one valid text hunk whose added line contains 1 MiB of `x` bytes.
+line_bytes=1048576
+expected=changeset

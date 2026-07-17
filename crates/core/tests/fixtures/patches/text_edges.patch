@@ -1,0 +1,9 @@
+diff --git "a/\303\274nicode.txt" "b/\303\274nicode.txt"
+index 1111111..2222222 100644
+--- "a/\303\274nicode.txt"
++++ "b/\303\274nicode.txt"
+@@ -1,2 +1,2 @@
+-naive
++naïve
+ last line
+\ No newline at end of file

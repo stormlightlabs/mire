@@ -1,14 +1,11 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Normalized, byte-preserving changeset types used by every Mire frontend.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+mod model;
+mod patch;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use model::{
+    BytePath, BytePathError, ByteString, CURRENT_SCHEMA_VERSION, Changeset, ChangesetSource,
+    DiffLine, FileContent, FileDiff, FileMode, FileSide, FileStatus, Fingerprint, GitOperation,
+    Hunk, LineKind, LineNumber, MissingNewline, ModelError, SchemaVersion,
+};
+pub use patch::{DEFAULT_MAX_PATCH_BYTES, PatchError, PatchInput, PatchLimits};

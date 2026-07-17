@@ -1,0 +1,25 @@
+diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1 +1 @@
+-pub fn old() {}
++pub fn new() {}
+diff --git a/web/app.ts b/web/app.ts
+--- a/web/app.ts
++++ b/web/app.ts
+@@ -1 +1 @@
+-const old = 1;
++const next = 2;
+diff --git a/tools/run b/tools/run
+--- a/tools/run
++++ b/tools/run
+@@ -1,2 +1,2 @@
+ #!/usr/bin/env python3
+-print("old")
++print("new")
+diff --git a/data/example.unknown b/data/example.unknown
+--- a/data/example.unknown
++++ b/data/example.unknown
+@@ -1 +1 @@
+-{ malformed source
++{ still malformed source

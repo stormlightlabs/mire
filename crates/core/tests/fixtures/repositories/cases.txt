@@ -1,0 +1,7 @@
+# case|expected source behavior
+staged|index differs from HEAD
+unstaged|worktree differs from index
+untracked|worktree contains a path absent from index
+two_dot|compare two revision tips
+three_dot|compare merge base with the right revision
+commit_diff|show one commit against its parent

@@ -1,3 +1,11 @@
 [workspace]
-resolver = "2"
-members = []
+resolver = "3"
+members = ["crates/cli", "crates/core", "crates/ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"

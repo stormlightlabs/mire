@@ -210,6 +210,57 @@ frame. The slowest recorded frame took 15.48 ms. macOS reported 14,008,320 bytes
 peak resident memory. The mixed-language fixture also passed a pseudo-terminal
 smoke run with `NO_COLOR`, including terminal restoration.
 
+### M1.7 Select a built-in review theme
+
+**Blocked by:** M1.6
+
+Add end-to-end selection for the Iceberg, Eldritch, and Catppuccin families.
+Resolve each family to a dark or light palette with the terminal detector Mire
+already uses.
+
+Acceptance criteria:
+
+- [ ] A global `--theme` option accepts `auto`, `iceberg`, `eldritch`, and
+  `catppuccin` before or after an interactive subcommand; Clap reports the
+  allowed values for invalid input.
+- [ ] `auto` is the default and resolves to Eldritch Minimal in dark mode or
+  Eldritch Dusk in light mode. Explicit `eldritch` resolves identically.
+- [ ] The other families resolve to their roadmap variants: Iceberg Dark or
+  Nord Light, and Catppuccin Mocha or Catppuccin Latte.
+- [ ] Interactive startup continues to use `terminal-colorsaurus` for light/dark
+  detection. A failed query selects the requested family's dark variant.
+- [ ] Palette values match their sources and flow through Mire-owned semantic
+  styles rather than scattered view-level colors.
+- [ ] The active palette covers application backgrounds, chrome, navigation,
+  every diff row kind, search and intraline emphasis, and syntax highlighting
+  in unified and split layouts.
+- [ ] Addition and deletion remain distinguishable by signs and styling; theme
+  tests check controlled RGB text/background pairs for readable contrast.
+- [ ] `NO_COLOR` always produces the color-free theme, and `TERM=dumb` always
+  uses the limited ANSI theme, even when the user requests a named palette.
+- [ ] JSON and other non-interactive output remain byte-for-byte independent of
+  theme selection and do not query terminal color mode.
+- [ ] Theme resolution accepts an explicit light/dark mode for deterministic
+  tests; unit tests cover all six family/variant combinations plus both `auto`
+  outcomes without querying the test runner's terminal.
+- [ ] Tests cover every stable theme identifier, exact palette mapping,
+  fallback precedence, CLI placement, invalid input, and styled rendering for
+  loading, empty, help, error, narrow unified, and wide split views.
+- [ ] No configuration file, theme picker, custom-theme format, or new runtime
+  dependency is introduced for this work.
+
+Verification:
+
+- `cargo test -p mire-tui theme`
+- `cargo test -p mire-tui`
+- `cargo test -p mire`
+- `cargo test -p mire --test pty`
+- `cargo test --workspace --all-features`
+- Open the same mixed-language patch under all three families in light and dark
+  true-color terminal profiles. Exercise unified and split layouts, sidebar
+  selection, search, intraline changes, help, resize, and quit; repeat one family
+  once with `NO_COLOR=1` and once with `TERM=dumb`.
+
 ## Milestone 2: Durable human, agent, and tool notes
 
 Exit criterion: humans, batch agents, and tools can exchange one versioned review
@@ -423,5 +474,5 @@ Verification:
 
 ## Current frontier
 
-M1.2 is ready to start. It consumes the changeset and fixture contracts locked
-by M1.1.
+M1.7 and M2.2 can start immediately. M1.7 extends the completed readability
+work, while M2.2 consumes the completed review-file contract.

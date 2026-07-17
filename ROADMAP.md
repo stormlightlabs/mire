@@ -2,7 +2,7 @@
 
 Status: ready for implementation
 
-Last reviewed: 2026-07-16
+Last reviewed: 2026-07-17
 
 ## Objective
 
@@ -64,7 +64,7 @@ It provides:
 - a complete multi-file review stream and file sidebar;
 - unified, split, and responsive layouts from one row model;
 - keyboard navigation, search, context controls, and line wrapping;
-- syntax and intraline highlighting;
+- syntax and intraline highlighting with selectable built-in themes;
 - explicit handling of renames, binary files, missing final newlines, invalid
   UTF-8, empty changesets, and large patches;
 - stable JSON output for the normalized changeset.
@@ -144,6 +144,68 @@ changeset schema or require a Rust project to use Mire.
   rows without changing anchors.
 - Keep syntax backend types out of `mire-core` so another highlighter can replace
   Inkjet without changing review files or agent integrations.
+
+### Theme system
+
+Mire currently resolves one semantic `Theme` at terminal startup with
+`terminal-colorsaurus`. It detects light and dark terminals, uses a limited ANSI
+palette for `TERM=dumb`, and removes color when `NO_COLOR` is set. Theme
+selection should extend this boundary instead of introducing colors in view
+code or replacing the existing detector.
+
+The command line selects `auto` or a theme family. `terminal-colorsaurus`
+selects the light or dark variant:
+
+| Identifier | Dark variant | Light variant |
+| ---------- | ------------ | ------------- |
+| `auto` | Eldritch Minimal | Eldritch Dusk |
+| `iceberg` | Iceberg Dark | Nord Light |
+| `eldritch` | Eldritch Minimal | Eldritch Dusk |
+| `catppuccin` | Catppuccin Mocha | Catppuccin Latte |
+
+`auto` is the default and resolves to the same variants as `eldritch`, matching
+Thunderus's Eldritch default while respecting the terminal's detected mode. The
+dark palettes come from
+[Thunderus](https://github.com/stormlightlabs/thunderus/blob/main/crates/thndrs/src/cli/renderer/style.rs).
+Eldritch Dusk comes from the official
+[Eldritch palette](https://github.com/eldritch-theme/eldritch#-palette), Nord
+Light comes from the
+[Tinted Theming scheme](https://github.com/tinted-theming/schemes/blob/main/base16/nord-light.yaml),
+and Latte comes from the official
+[Catppuccin palette](https://github.com/catppuccin/palette/blob/main/palette.json).
+Mire owns the copied values and maps them to review-specific semantic roles;
+the source projects are prior art, not runtime or build dependencies. Hunk's
+[theme catalog and contrast tests](https://github.com/modem-dev/hunk/blob/main/src/ui/themes.test.ts)
+are the model for checking complete UI coverage and readable foreground and
+background pairs.
+
+`--theme <name>` is a global option accepted by every interactive command.
+Structured JSON output accepts the option but does not initialize a terminal or
+query its colors.
+
+Terminal safety takes precedence over a requested palette:
+
+1. `NO_COLOR` uses the color-free theme.
+2. `TERM=dumb` uses the limited ANSI theme.
+3. `terminal-colorsaurus` reports light or dark mode for the selected family.
+4. A failed terminal query uses the selected family's dark variant; `auto`
+   falls back to Eldritch Minimal.
+
+Each palette maps once to Mire's semantic roles: application background,
+panels, title, selection, dividers, files, hunks, additions, deletions, context,
+markers, errors, footer text, search matches, intraline emphasis, and syntax
+categories. Rendering code consumes those roles and contains no palette RGB
+values. The selected theme covers loading, empty, help, error, unified, and
+split views as well as the sidebar and footer.
+
+Theme resolution should accept an explicit light/dark mode internally so unit
+and rendering tests never query the developer's terminal. Production startup is
+the only caller that asks `terminal-colorsaurus` for that mode.
+
+The first theme release includes bundled family pairs and command-line
+selection. Keep the identifiers independent of Clap so a later configuration
+layer or in-app selector can reuse them. Do not add a configuration file solely
+to persist one UI preference.
 
 ### Tool and agent context
 
@@ -254,7 +316,8 @@ unambiguous.
 ### 1. Read-only review viewer
 
 Deliver Git diff/show and patch input, the normalized model, the continuous TUI
-stream, navigation, layouts, highlighting, and black-box fixtures.
+stream, navigation, layouts, highlighting, selectable built-in themes, and
+black-box fixtures.
 
 Evidence: a reviewer can inspect the fixture matrix and a real repository
 without Mire modifying either.
@@ -316,6 +379,10 @@ Never:
   selecting cache sizes or virtualization thresholds.
 - Bundled syntax grammars increase binary size and compile time. Start with a
   measured language set and keep plain-text fallback universal.
+- Named themes can make diff meaning depend on hue or produce unreadable text
+  on their own backgrounds. Keep addition and deletion markers explicit, test
+  controlled RGB foreground/background pairs for contrast, and smoke-test every
+  palette in a real true-color terminal.
 - Re-anchoring can misplace comments. Ambiguous matches remain stale and visible
   rather than moving automatically.
 - A live local API expands the attack surface. Its protocol and authentication

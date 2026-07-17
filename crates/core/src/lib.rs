@@ -2,6 +2,7 @@
 
 mod model;
 mod patch;
+mod review;
 
 pub use model::{
     BytePath, BytePathError, ByteString, CURRENT_SCHEMA_VERSION, Changeset, ChangesetSource, DiffLine, FileContent,
@@ -9,3 +10,8 @@ pub use model::{
     ModelError, SchemaVersion,
 };
 pub use patch::{DEFAULT_MAX_PATCH_BYTES, PatchError, PatchInput, PatchLimits, parse_patch};
+pub use review::{
+    Anchor, AnchorSide, Author, CURRENT_REVIEW_SCHEMA_VERSION, LineRange, MAX_NOTE_BODY_BYTES, MAX_REVIEW_NOTES,
+    NoteEvent, NoteEventKind, NoteId, NoteSeverity, NoteStatus, Provenance, Review, ReviewError, ReviewNote,
+    ReviewRevision,
+};

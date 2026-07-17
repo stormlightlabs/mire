@@ -5,10 +5,11 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use mire_core::{Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, PatchError, PatchLimits, parse_patch};
+use mire_core::{Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, PatchError, PatchLimits, Review, parse_patch};
 use thiserror::Error;
 
 use crate::git::{self, DiffRequest, GitError, ShowRequest};
+use crate::review_file::{ReviewFileError, read_review};
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum OutputFormat {
@@ -21,6 +22,8 @@ enum Command {
     Diff(DiffArgs),
     /// Normalize patch input for inspection.
     Patch(PatchArgs),
+    /// Open a durable review file.
+    Review(ReviewArgs),
     /// Review one Git commit.
     Show(ShowArgs),
 }
@@ -33,9 +36,11 @@ enum AppError {
     Patch(PatchError),
     #[error("cannot load Git changeset: {0}")]
     Git(GitError),
-    #[error("cannot write changeset JSON: {0}")]
+    #[error("cannot load review: {0}")]
+    ReviewFile(ReviewFileError),
+    #[error("cannot write JSON output: {0}")]
     Output(serde_json::Error),
-    #[error("cannot finish changeset JSON output: {0}")]
+    #[error("cannot finish JSON output: {0}")]
     OutputNewline(io::Error),
     #[error("terminal interface failed: {0}")]
     Terminal(io::Error),
@@ -54,6 +59,7 @@ impl AppError {
             Self::Patch(_) => 4,
             Self::Output(_) | Self::OutputNewline(_) | Self::Terminal(_) => 5,
             Self::Git(_) => 6,
+            Self::ReviewFile(_) => 7,
         }
     }
 }
@@ -97,6 +103,15 @@ struct PatchArgs {
 }
 
 #[derive(Args, Debug)]
+struct ReviewArgs {
+    /// JSON review file to open.
+    input: OsString,
+    /// Structured output format.
+    #[arg(long, value_enum)]
+    format: Option<OutputFormat>,
+}
+
+#[derive(Args, Debug)]
 struct ShowArgs {
     /// Commit to show; defaults to HEAD.
     revision: Option<OsString>,
@@ -137,6 +152,14 @@ fn execute(cli: Cli) -> Result<(), AppError> {
             language,
         ),
         Command::Patch(PatchArgs { input, format, language }) => (load_patch(&input)?, format, language),
+        Command::Review(ReviewArgs { input, format }) => {
+            let review = read_review(Path::new(&input)).map_err(AppError::ReviewFile)?;
+            return if format.is_some() || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+                write_review(&review)
+            } else {
+                mire_tui::run(review.changeset()).map_err(AppError::Terminal)
+            };
+        }
         Command::Show(ShowArgs { revision, paths, format, language }) => (
             git::load_show(ShowRequest { revision, paths }).map_err(AppError::Git)?,
             format,
@@ -149,6 +172,13 @@ fn execute(cli: Cli) -> Result<(), AppError> {
         mire_tui::run_with_options(&changeset, mire_tui::AppOptions { language_override: language })
             .map_err(AppError::Terminal)
     }
+}
+
+fn write_review(review: &Review) -> Result<(), AppError> {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    serde_json::to_writer(&mut output, review).map_err(AppError::Output)?;
+    writeln!(output).map_err(AppError::OutputNewline)
 }
 
 fn parse_language(value: &str) -> Result<String, String> {

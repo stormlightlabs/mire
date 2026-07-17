@@ -219,17 +219,27 @@ file without losing anchors, attribution, provenance, or decisions.
 
 **Blocked by:** M1.3
 
+**Status:** Complete
+
 Add review notes, statuses, authors, provenance, note events, and atomic JSON
 review files around a captured changeset revision.
 
 Acceptance criteria:
 
-- [ ] Anchors include path, side, line range, hunk fingerprint, and content
+- [x] Anchors include path, side, line range, hunk fingerprint, and content
   fingerprint.
-- [ ] Status is one of open, resolved, dismissed, or accepted-risk.
-- [ ] Review writes validate first and atomically replace the destination.
-- [ ] Interrupted or invalid writes leave the last valid review recoverable.
-- [ ] Unsupported schema majors fail without rewriting the file.
+- [x] Status is one of open, resolved, dismissed, or accepted-risk.
+- [x] Review writes validate first and atomically replace the destination.
+- [x] Interrupted or invalid writes leave the last valid review recoverable.
+- [x] Unsupported schema majors fail without rewriting the file.
+
+Review files retain the captured changeset, a positive review revision, current
+notes, and an ordered status-event history. Writers validate and serialize the
+whole review before creating a sibling temporary file. They sync that file,
+rename it over the destination, and sync the parent directory. If a process
+stops before the rename, the previous destination remains authoritative; a
+leftover `.mire-write-*` sibling may be removed after the destination loads
+successfully.
 
 Verification:
 

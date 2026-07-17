@@ -108,8 +108,8 @@ Important rules:
   must be lossy only at the UI boundary.
 - Line numbers alone are not stable identity. Anchors include path, side, line
   range, and content fingerprints.
-- Imported claims remain attributed to their producer. Importing a diagnostic
-  or agent note does not mark it verified.
+- Imported claims remain attributed to their producer. Importing a tool or agent
+  annotation does not mark it verified.
 - Schemas include an explicit version and reject unsupported major versions.
 - Unknown fields survive a read/write round trip where practical so newer
   producers do not lose data through an older client.
@@ -291,7 +291,7 @@ Always:
 
 - preserve read-only behavior toward reviewed repositories;
 - keep the core model independent of UI and provider concerns;
-- validate untrusted patches, paths, schemas, diagnostics, and notes;
+- validate untrusted patches, paths, schemas, and annotations;
 - add fixture-backed behavior tests before widening an input contract.
 
 Ask first:

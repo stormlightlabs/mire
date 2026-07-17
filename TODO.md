@@ -181,8 +181,8 @@ Verification:
 
 ## Milestone 2: Durable human, agent, and tool notes
 
-Exit criterion: humans and batch agents can exchange one versioned review file
-without losing anchors, attribution, provenance, or decisions.
+Exit criterion: humans, batch agents, and tools can exchange one versioned review
+file without losing anchors, attribution, provenance, or decisions.
 
 ### M2.1 Define notes, anchors, and review-file recovery
 

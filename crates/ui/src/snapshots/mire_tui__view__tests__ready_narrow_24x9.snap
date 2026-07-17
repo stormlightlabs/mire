@@ -1,0 +1,13 @@
+---
+source: crates/ui/src/view.rs
+expression: "snapshot(&app, 24, 9)"
+---
+ Mire review            
+--- modified: file.txt  
+@@ -1,2 +1,2 @@ heading 
+    1       -old        
+          1 +new        
+    2     2  context    
+            \ No newline
+--- modified: image.bin 
+ j/k or arrows: scroll |

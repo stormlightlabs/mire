@@ -125,11 +125,15 @@ fn long_lines_and_argument_like_content_remain_patch_data() {
 }
 
 #[test]
-fn usage_failures_have_a_stable_exit_and_actionable_help() {
-    let output = Command::new(binary()).args(["patch", "-"]).output().expect("mire runs");
+fn invalid_formats_have_a_stable_exit_and_actionable_help() {
+    let output = Command::new(binary())
+        .args(["patch", "-", "--format", "yaml"])
+        .output()
+        .expect("mire runs");
     assert_eq!(output.status.code(), Some(2));
-    assert!(stderr(&output).contains("--format <FORMAT>"));
-    assert!(stderr(&output).contains("Usage: mire patch --format <FORMAT> <INPUT>"));
+    assert!(stderr(&output).contains("invalid value 'yaml'"));
+    assert!(stderr(&output).contains("possible values: json"));
+    assert!(stderr(&output).contains("try '--help'"));
 }
 
 fn run_file(path: &Path) -> Output {

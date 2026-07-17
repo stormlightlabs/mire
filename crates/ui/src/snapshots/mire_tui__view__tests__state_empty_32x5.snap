@@ -1,0 +1,9 @@
+---
+source: crates/ui/src/view.rs
+expression: "snapshot(&App::ready(&empty), 32, 5)"
+---
+ Mire review                    
+No changes to review.           
+                                
+                                
+ j/k or arrows: scroll | PgUp/Pg

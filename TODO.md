@@ -122,18 +122,20 @@ Verification:
 
 **Blocked by:** M1.2
 
+**Status:** Complete
+
 Create the TUI shell and render every file and hunk in a continuous unified
 stream. Keep rendering state separate from the core model.
 
 Acceptance criteria:
 
-- [ ] Empty, loading, ready, and error states are visible and deterministic.
-- [ ] Files, hunk headers, line numbers, additions, deletions, context, binary
+- [x] Empty, loading, ready, and error states are visible and deterministic.
+- [x] Files, hunk headers, line numbers, additions, deletions, context, binary
   files, and missing-newline markers render correctly.
-- [ ] Scrolling does not build widgets for the full off-screen changeset on each
+- [x] Scrolling does not build widgets for the full off-screen changeset on each
   frame.
-- [ ] Terminal restoration runs after success, error, and panic paths.
-- [ ] Snapshot tests cover narrow, ordinary, and wide terminals.
+- [x] Terminal restoration runs after success, error, and panic paths.
+- [x] Snapshot tests cover narrow, ordinary, and wide terminals.
 
 Verification:
 

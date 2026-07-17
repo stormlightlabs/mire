@@ -1,0 +1,16 @@
+---
+source: crates/ui/src/view.rs
+expression: "snapshot(&app, 120, 12)"
+---
+ Mire review                                                                                                            
+--- modified: file.txt                                                                                                  
+@@ -1,2 +1,2 @@ heading                                                                                                 
+    1       -old                                                                                                        
+          1 +new                                                                                                        
+    2     2  context                                                                                                    
+            \ No newline at end of both files                                                                           
+--- modified: image.bin                                                                                                 
+     Binary files differ                                                                                                
+                                                                                                                        
+                                                                                                                        
+ j/k or arrows: scroll | PgUp/PgDn | Home/End | q: quit

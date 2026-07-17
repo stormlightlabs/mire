@@ -1,6 +1,6 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -37,6 +37,8 @@ enum AppError {
     Output(serde_json::Error),
     #[error("cannot finish changeset JSON output: {0}")]
     OutputNewline(io::Error),
+    #[error("terminal interface failed: {0}")]
+    Terminal(io::Error),
 }
 
 impl From<&AppError> for u8 {
@@ -50,7 +52,7 @@ impl AppError {
         match self {
             Self::InputIo { .. } => 3,
             Self::Patch(_) => 4,
-            Self::Output(_) | Self::OutputNewline(_) => 5,
+            Self::Output(_) | Self::OutputNewline(_) | Self::Terminal(_) => 5,
             Self::Git(_) => 6,
         }
     }
@@ -75,8 +77,8 @@ struct DiffArgs {
     #[arg(last = true, value_name = "PATH")]
     paths: Vec<OsString>,
     /// Structured output format.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
-    format: OutputFormat,
+    #[arg(long, value_enum)]
+    format: Option<OutputFormat>,
 }
 
 #[derive(Args, Debug)]
@@ -84,8 +86,8 @@ struct PatchArgs {
     /// Patch file to read, or - for standard input.
     input: OsString,
     /// Structured output format.
-    #[arg(long, value_enum, required = true)]
-    format: OutputFormat,
+    #[arg(long, value_enum)]
+    format: Option<OutputFormat>,
 }
 
 #[derive(Args, Debug)]
@@ -96,8 +98,8 @@ struct ShowArgs {
     #[arg(last = true, value_name = "PATH")]
     paths: Vec<OsString>,
     /// Structured output format.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
-    format: OutputFormat,
+    #[arg(long, value_enum)]
+    format: Option<OutputFormat>,
 }
 
 pub fn run(args: impl Iterator<Item = OsString>) -> ExitCode {
@@ -119,16 +121,22 @@ pub fn run(args: impl Iterator<Item = OsString>) -> ExitCode {
 }
 
 fn execute(cli: Cli) -> Result<(), AppError> {
-    let changeset = match cli.command {
-        Command::Diff(DiffArgs { staged, revisions, paths, format: OutputFormat::Json }) => {
-            git::load_diff(DiffRequest { staged, revisions, paths }).map_err(AppError::Git)?
-        }
-        Command::Patch(PatchArgs { input, format: OutputFormat::Json }) => load_patch(&input)?,
-        Command::Show(ShowArgs { revision, paths, format: OutputFormat::Json }) => {
-            git::load_show(ShowRequest { revision, paths }).map_err(AppError::Git)?
-        }
+    let (changeset, format) = match cli.command {
+        Command::Diff(DiffArgs { staged, revisions, paths, format }) => (
+            git::load_diff(DiffRequest { staged, revisions, paths }).map_err(AppError::Git)?,
+            format,
+        ),
+        Command::Patch(PatchArgs { input, format }) => (load_patch(&input)?, format),
+        Command::Show(ShowArgs { revision, paths, format }) => (
+            git::load_show(ShowRequest { revision, paths }).map_err(AppError::Git)?,
+            format,
+        ),
     };
-    write_changeset(&changeset)
+    if format.is_some() || !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        write_changeset(&changeset)
+    } else {
+        mire_tui::run(&changeset).map_err(AppError::Terminal)
+    }
 }
 
 fn load_patch(input: &OsStr) -> Result<Changeset, AppError> {
@@ -184,7 +192,7 @@ mod tests {
             panic!("patch command is parsed");
         };
         assert_eq!(arguments.input, "-");
-        assert!(matches!(arguments.format, OutputFormat::Json));
+        assert!(matches!(arguments.format, Some(OutputFormat::Json)));
     }
 
     #[test]

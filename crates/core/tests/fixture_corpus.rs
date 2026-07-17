@@ -49,49 +49,30 @@ fn corpus_covers_every_required_vcs_and_text_case() {
 fn byte_sensitive_fixture_contains_invalid_utf8() {
     let bytes = decode_hex_fixture(INVALID_UTF8_HEX);
     assert!(std::str::from_utf8(&bytes).is_err());
-    assert!(
-        bytes
-            .windows(b"+\xffnew\n".len())
-            .any(|window| window == b"+\xffnew\n")
-    );
+    assert!(bytes.windows(b"+\xffnew\n".len()).any(|window| window == b"+\xffnew\n"));
     let invalid_offset = bytes
         .iter()
         .position(|byte| *byte == 0xff)
         .expect("fixture contains its invalid byte");
-    let input = PatchInput::new(&bytes, PatchLimits::default())
-        .expect("fixture is below the default size limit");
+    let input = PatchInput::new(&bytes, PatchLimits::default()).expect("fixture is below the default size limit");
     assert_eq!(
         input.as_utf8(),
-        Err(PatchError::Encoding {
-            encoding: "UTF-8",
-            offset: invalid_offset,
-        })
+        Err(PatchError::Encoding { encoding: "UTF-8", offset: invalid_offset })
     );
 }
 
 #[test]
 fn byte_sensitive_fixture_contains_crlf_content() {
     let bytes = decode_hex_fixture(CRLF_HEX);
-    assert!(
-        bytes
-            .windows(b"-old\r\n".len())
-            .any(|window| window == b"-old\r\n")
-    );
-    assert!(
-        bytes
-            .windows(b"+new\r\n".len())
-            .any(|window| window == b"+new\r\n")
-    );
+    assert!(bytes.windows(b"-old\r\n".len()).any(|window| window == b"-old\r\n"));
+    assert!(bytes.windows(b"+new\r\n".len()).any(|window| window == b"+new\r\n"));
 }
 
 #[test]
 fn every_corpus_input_is_checked_in() {
     let fixture_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     for line in data_lines(CORPUS) {
-        let relative_path = line
-            .split('|')
-            .nth(1)
-            .expect("corpus row has an input path");
+        let relative_path = line.split('|').nth(1).expect("corpus row has an input path");
         let path = fixture_root.join(relative_path);
         assert!(path.is_file(), "missing corpus input: {}", path.display());
     }
@@ -100,22 +81,11 @@ fn every_corpus_input_is_checked_in() {
 #[test]
 fn repository_fixture_declares_each_git_source_case() {
     let cases = data_lines(REPOSITORY_CASES)
-        .map(|line| {
-            line.split_once('|')
-                .expect("repository case has a delimiter")
-                .0
-        })
+        .map(|line| line.split_once('|').expect("repository case has a delimiter").0)
         .collect::<BTreeSet<_>>();
     assert_eq!(
         cases,
-        BTreeSet::from([
-            "commit_diff",
-            "staged",
-            "three_dot",
-            "two_dot",
-            "unstaged",
-            "untracked"
-        ])
+        BTreeSet::from(["commit_diff", "staged", "three_dot", "two_dot", "unstaged", "untracked"])
     );
 }
 
@@ -133,39 +103,20 @@ fn invalid_and_oversized_cases_have_stable_expected_errors() {
 
     let error = PatchInput::new(b"too large", PatchLimits { max_bytes: 1 })
         .expect_err("oversized fixture is rejected before parsing");
-    assert_eq!(
-        error,
-        PatchError::InputTooLarge {
-            actual: 9,
-            limit: 1
-        }
-    );
+    assert_eq!(error, PatchError::InputTooLarge { actual: 9, limit: 1 });
 
-    let encoding_error = PatchError::Encoding {
-        encoding: "UTF-8",
-        offset: 77,
-    };
-    assert_eq!(
-        encoding_error.to_string(),
-        "patch is not valid UTF-8 near byte 77"
-    );
+    let encoding_error = PatchError::Encoding { encoding: "UTF-8", offset: 77 };
+    assert_eq!(encoding_error.to_string(), "patch is not valid UTF-8 near byte 77");
 }
 
 fn corpus_coverage() -> BTreeSet<&'static str> {
     data_lines(CORPUS)
-        .flat_map(|line| {
-            line.split('|')
-                .nth(3)
-                .expect("corpus row has coverage")
-                .split(',')
-        })
+        .flat_map(|line| line.split('|').nth(3).expect("corpus row has coverage").split(','))
         .collect()
 }
 
 fn data_lines(input: &str) -> impl Iterator<Item = &str> {
-    input
-        .lines()
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+    input.lines().filter(|line| !line.is_empty() && !line.starts_with('#'))
 }
 
 fn decode_hex_fixture(input: &str) -> Vec<u8> {

@@ -74,17 +74,19 @@ Verification:
 
 **Blocked by:** M1.1
 
+**Status:** Complete
+
 Implement `mire patch <path|-> --format json` so a patch becomes the normalized
 changeset without entering a terminal UI.
 
 Acceptance criteria:
 
-- [ ] File and stdin inputs produce the same canonical JSON.
-- [ ] Parse, encoding, limit, and I/O failures use stable non-zero exits and
+- [x] File and stdin inputs produce the same canonical JSON.
+- [x] Parse, encoding, limit, and I/O failures use stable non-zero exits and
   actionable stderr.
-- [ ] Mire never interprets patch content as arguments, paths to read, or shell
+- [x] Mire never interprets patch content as arguments, paths to read, or shell
   instructions.
-- [ ] Golden tests cover the complete patch fixture matrix.
+- [x] Golden tests cover the complete patch fixture matrix.
 
 Verification:
 

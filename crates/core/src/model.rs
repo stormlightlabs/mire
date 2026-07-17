@@ -194,21 +194,12 @@ pub struct Changeset {
 
 impl Changeset {
     /// Builds a changeset and canonicalizes file and hunk order.
-    pub fn new(
-        source: ChangesetSource,
-        mut files: Vec<FileDiff>,
-        fingerprint: Fingerprint,
-    ) -> Self {
+    pub fn new(source: ChangesetSource, mut files: Vec<FileDiff>, fingerprint: Fingerprint) -> Self {
         for file in &mut files {
             file.sort_hunks();
         }
         files.sort_by(compare_files);
-        Self {
-            schema_version: CURRENT_SCHEMA_VERSION,
-            source,
-            files,
-            fingerprint,
-        }
+        Self { schema_version: CURRENT_SCHEMA_VERSION, source, files, fingerprint }
     }
 
     /// Returns the schema version serialized with this changeset.
@@ -301,11 +292,7 @@ impl FileMode {
 
     /// Creates a mode when it fits Git's six octal digits.
     pub fn new(mode: u32) -> Result<Self, ModelError> {
-        if mode <= 0o777777 {
-            Ok(Self(mode))
-        } else {
-            Err(ModelError::InvalidFileMode(mode))
-        }
+        if mode <= 0o777777 { Ok(Self(mode)) } else { Err(ModelError::InvalidFileMode(mode)) }
     }
 
     /// Returns the numeric mode.
@@ -364,11 +351,7 @@ pub struct FileDiff {
 impl FileDiff {
     /// Builds a file diff after validating side and similarity invariants.
     pub fn new(
-        status: FileStatus,
-        old: Option<FileSide>,
-        new: Option<FileSide>,
-        similarity: Option<u8>,
-        content: FileContent,
+        status: FileStatus, old: Option<FileSide>, new: Option<FileSide>, similarity: Option<u8>, content: FileContent,
         fingerprint: Fingerprint,
     ) -> Result<Self, ModelError> {
         validate_file_sides(status, old.as_ref(), new.as_ref())?;
@@ -377,14 +360,7 @@ impl FileDiff {
                 return Err(ModelError::InvalidSimilarity { status, value });
             }
         }
-        Ok(Self {
-            status,
-            old,
-            new,
-            similarity,
-            content,
-            fingerprint,
-        })
+        Ok(Self { status, old, new, similarity, content, fingerprint })
     }
 
     /// Returns the file status.
@@ -520,10 +496,7 @@ pub struct DiffLine {
 impl DiffLine {
     /// Builds a line and validates which side numbers are present.
     pub fn new(
-        kind: LineKind,
-        old_line: Option<LineNumber>,
-        new_line: Option<LineNumber>,
-        content: ByteString,
+        kind: LineKind, old_line: Option<LineNumber>, new_line: Option<LineNumber>, content: ByteString,
         missing_newline: MissingNewline,
     ) -> Result<Self, ModelError> {
         let valid_numbers = match kind {
@@ -545,13 +518,7 @@ impl DiffLine {
         if !valid_numbers || !valid_marker {
             return Err(ModelError::InvalidLineSides(kind));
         }
-        Ok(Self {
-            kind,
-            old_line,
-            new_line,
-            content,
-            missing_newline,
-        })
+        Ok(Self { kind, old_line, new_line, content, missing_newline })
     }
 
     /// Returns the line role.
@@ -624,13 +591,8 @@ impl Hunk {
     /// Builds a hunk and verifies the header counts against its lines.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        old_start: u64,
-        old_line_count: u64,
-        new_start: u64,
-        new_line_count: u64,
-        section: ByteString,
-        lines: Vec<DiffLine>,
-        fingerprint: Fingerprint,
+        old_start: u64, old_line_count: u64, new_start: u64, new_line_count: u64, section: ByteString,
+        lines: Vec<DiffLine>, fingerprint: Fingerprint,
     ) -> Result<Self, ModelError> {
         let actual_old = lines
             .iter()
@@ -649,15 +611,7 @@ impl Hunk {
             });
         }
         validate_line_sequence(old_start, new_start, &lines)?;
-        Ok(Self {
-            old_start,
-            old_line_count,
-            new_start,
-            new_line_count,
-            section,
-            lines,
-            fingerprint,
-        })
+        Ok(Self { old_start, old_line_count, new_start, new_line_count, section, lines, fingerprint })
     }
 
     /// Returns the old-side start, which may be zero for an addition.
@@ -745,9 +699,7 @@ pub enum ModelError {
     #[error("old and new line identities do not match {0:?}")]
     InvalidLineSides(LineKind),
     /// Hunk line totals do not agree with its header.
-    #[error(
-        "hunk counts old={expected_old},new={expected_new} do not match lines old={actual_old},new={actual_new}"
-    )]
+    #[error("hunk counts old={expected_old},new={expected_new} do not match lines old={actual_old},new={actual_new}")]
     HunkLineCount {
         expected_old: u64,
         actual_old: u64,
@@ -783,11 +735,7 @@ fn validate_path(bytes: &[u8]) -> Result<(), BytePathError> {
     Ok(())
 }
 
-fn validate_file_sides(
-    status: FileStatus,
-    old: Option<&FileSide>,
-    new: Option<&FileSide>,
-) -> Result<(), ModelError> {
+fn validate_file_sides(status: FileStatus, old: Option<&FileSide>, new: Option<&FileSide>) -> Result<(), ModelError> {
     let valid = match status {
         FileStatus::Added => old.is_none() && new.is_some(),
         FileStatus::Deleted => old.is_some() && new.is_none(),
@@ -798,25 +746,15 @@ fn validate_file_sides(
             matches!((old, new), (Some(old), Some(new)) if old.path != new.path)
         }
     };
-    if valid {
-        Ok(())
-    } else {
-        Err(ModelError::InvalidFileSides(status))
-    }
+    if valid { Ok(()) } else { Err(ModelError::InvalidFileSides(status)) }
 }
 
-fn validate_line_sequence(
-    old_start: u64,
-    new_start: u64,
-    lines: &[DiffLine],
-) -> Result<(), ModelError> {
+fn validate_line_sequence(old_start: u64, new_start: u64, lines: &[DiffLine]) -> Result<(), ModelError> {
     let mut expected_old = old_start;
     let mut expected_new = new_start;
     for (line_index, line) in lines.iter().enumerate() {
-        let old_matches =
-            line.old_line.map(LineNumber::get) == expected_side(line.kind, expected_old, true);
-        let new_matches =
-            line.new_line.map(LineNumber::get) == expected_side(line.kind, expected_new, false);
+        let old_matches = line.old_line.map(LineNumber::get) == expected_side(line.kind, expected_old, true);
+        let new_matches = line.new_line.map(LineNumber::get) == expected_side(line.kind, expected_new, false);
         if !old_matches || !new_matches {
             return Err(ModelError::HunkLineSequence { line_index });
         }
@@ -838,14 +776,12 @@ const fn expected_side(kind: LineKind, number: u64, old: bool) -> Option<u64> {
 }
 
 fn compare_files(left: &FileDiff, right: &FileDiff) -> Ordering {
-    left.canonical_path()
-        .cmp(right.canonical_path())
-        .then_with(|| {
-            left.old
-                .as_ref()
-                .map(|side| &side.path)
-                .cmp(&right.old.as_ref().map(|side| &side.path))
-        })
+    left.canonical_path().cmp(right.canonical_path()).then_with(|| {
+        left.old
+            .as_ref()
+            .map(|side| &side.path)
+            .cmp(&right.old.as_ref().map(|side| &side.path))
+    })
 }
 
 const fn hex_digit(value: u8) -> u8 {
@@ -885,22 +821,13 @@ mod tests {
     #[test]
     fn byte_paths_reject_unsafe_components() {
         assert_eq!(BytePath::new(b"".to_vec()), Err(BytePathError::Empty));
-        assert_eq!(
-            BytePath::new(b"/etc/passwd".to_vec()),
-            Err(BytePathError::Absolute)
-        );
+        assert_eq!(BytePath::new(b"/etc/passwd".to_vec()), Err(BytePathError::Absolute));
         assert_eq!(
             BytePath::new(b"../secret".to_vec()),
             Err(BytePathError::TraversalComponent)
         );
-        assert_eq!(
-            BytePath::new(b"a//b".to_vec()),
-            Err(BytePathError::EmptyComponent)
-        );
-        assert_eq!(
-            BytePath::new(b"bad\0name".to_vec()),
-            Err(BytePathError::Nul)
-        );
+        assert_eq!(BytePath::new(b"a//b".to_vec()), Err(BytePathError::EmptyComponent));
+        assert_eq!(BytePath::new(b"bad\0name".to_vec()), Err(BytePathError::Nul));
         assert!(BytePath::new(b"src/non-utf8-\xff.rs".to_vec()).is_ok());
     }
 
@@ -925,9 +852,7 @@ mod tests {
         let z_file = modified_file("z.txt", vec![later_hunk, earlier_hunk]);
         let a_file = modified_file("a.txt", Vec::new());
         let changeset = Changeset::new(
-            ChangesetSource::Patch {
-                label: Some(ByteString::from("stdin")),
-            },
+            ChangesetSource::Patch { label: Some(ByteString::from("stdin")) },
             vec![z_file, a_file],
             FINGERPRINT,
         );
@@ -951,11 +876,7 @@ mod tests {
             .replacen("\"major\":1", "\"major\":2", 1);
 
         let error = serde_json::from_str::<Changeset>(&json).expect_err("major two is unsupported");
-        assert!(
-            error
-                .to_string()
-                .contains("unsupported changeset schema major 2")
-        );
+        assert!(error.to_string().contains("unsupported changeset schema major 2"));
     }
 
     #[test]
@@ -971,12 +892,7 @@ mod tests {
         let result = Hunk::new(0, 1, 1, 1, ByteString::default(), vec![line], FINGERPRINT);
         assert_eq!(
             result,
-            Err(ModelError::HunkLineCount {
-                expected_old: 1,
-                actual_old: 0,
-                expected_new: 1,
-                actual_new: 1,
-            })
+            Err(ModelError::HunkLineCount { expected_old: 1, actual_old: 0, expected_new: 1, actual_new: 1 })
         );
     }
 

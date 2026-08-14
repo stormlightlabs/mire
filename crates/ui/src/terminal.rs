@@ -1,5 +1,6 @@
 use std::io::{self, Stdout, stdout};
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
@@ -9,7 +10,7 @@ use mire_core::{Changeset, Review};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use crate::{App, AppOptions, Theme, WatchUpdate, render};
+use crate::{App, AppOptions, LiveAction, LiveControl, LiveResponse, Theme, WalkthroughAction, WatchUpdate, render};
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -45,11 +46,11 @@ impl Drop for TerminalSession {
     }
 }
 
-pub fn run(changeset: &Changeset, options: AppOptions) -> io::Result<()> {
+pub fn run(changeset: &Changeset, options: AppOptions, control: Option<LiveControl>) -> io::Result<()> {
     let theme = Theme::detect(options.theme);
     let mut session = TerminalSession::enter()?;
     let result = catch_unwind(AssertUnwindSafe(|| {
-        run_loop(&mut session.terminal, changeset, options, &theme)
+        run_loop(&mut session.terminal, changeset, options, &theme, control.as_ref())
     }));
     drop(session);
     match result {
@@ -58,7 +59,9 @@ pub fn run(changeset: &Changeset, options: AppOptions) -> io::Result<()> {
     }
 }
 
-pub fn run_review<F, E>(review: &Review, options: AppOptions, mut save: F) -> io::Result<()>
+pub fn run_review<F, E>(
+    review: &Review, options: AppOptions, mut save: F, control: Option<LiveControl>,
+) -> io::Result<()>
 where
     F: FnMut(&Review) -> Result<(), E>,
     E: std::fmt::Display,
@@ -66,7 +69,14 @@ where
     let theme = Theme::detect(options.theme);
     let mut session = TerminalSession::enter()?;
     let result = catch_unwind(AssertUnwindSafe(|| {
-        run_review_loop(&mut session.terminal, review, options, &theme, &mut save)
+        run_review_loop(
+            &mut session.terminal,
+            review,
+            options,
+            &theme,
+            &mut save,
+            control.as_ref(),
+        )
     }));
     drop(session);
     match result {
@@ -75,14 +85,23 @@ where
     }
 }
 
-pub fn run_watch<F>(changeset: Changeset, options: AppOptions, mut reload: F) -> io::Result<()>
+pub fn run_watch<F>(
+    changeset: Changeset, options: AppOptions, mut reload: F, control: Option<LiveControl>,
+) -> io::Result<()>
 where
-    F: FnMut() -> WatchUpdate<Changeset>,
+    F: FnMut(bool) -> WatchUpdate<Changeset>,
 {
     let theme = Theme::detect(options.theme);
     let mut session = TerminalSession::enter()?;
     let result = catch_unwind(AssertUnwindSafe(|| {
-        run_watch_loop(&mut session.terminal, changeset, options, &theme, &mut reload)
+        run_watch_loop(
+            &mut session.terminal,
+            changeset,
+            options,
+            &theme,
+            &mut reload,
+            control.as_ref(),
+        )
     }));
     drop(session);
     match result {
@@ -91,16 +110,26 @@ where
     }
 }
 
-pub fn run_review_watch<F, E, R>(review: Review, options: AppOptions, mut save: F, mut reload: R) -> io::Result<()>
+pub fn run_review_watch<F, E, R>(
+    review: Review, options: AppOptions, mut save: F, mut reload: R, control: Option<LiveControl>,
+) -> io::Result<()>
 where
     F: FnMut(&Review) -> Result<(), E>,
     E: std::fmt::Display,
-    R: FnMut() -> WatchUpdate<Review>,
+    R: FnMut(bool) -> WatchUpdate<Review>,
 {
     let theme = Theme::detect(options.theme);
     let mut session = TerminalSession::enter()?;
     let result = catch_unwind(AssertUnwindSafe(|| {
-        run_review_watch_loop(&mut session.terminal, review, options, &theme, &mut save, &mut reload)
+        run_review_watch_loop(
+            &mut session.terminal,
+            review,
+            options,
+            &theme,
+            &mut save,
+            &mut reload,
+            control.as_ref(),
+        )
     }));
     drop(session);
     match result {
@@ -111,42 +140,37 @@ where
 
 fn run_loop(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>, changeset: &Changeset, options: AppOptions, theme: &Theme,
+    control: Option<&LiveControl>,
 ) -> io::Result<()> {
     terminal.draw(|frame| render(frame, &App::loading(), theme))?;
     let mut app = App::ready_with_options(changeset, options);
     let size = terminal.size()?;
     app.resize(size.width, size.height);
+    let mut walkthrough_active = false;
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        if !event::poll(EVENT_POLL_INTERVAL)? {
-            continue;
-        }
-        match event::read()? {
-            Event::Key(key) => app.handle_key(key),
-            Event::Mouse(mouse) => app.handle_mouse(mouse),
-            Event::Resize(width, height) => app.resize(width, height),
-            Event::FocusGained | Event::FocusLost | Event::Paste(_) => {}
-        }
+        let _ = handle_terminal_event(&mut app, control, &mut walkthrough_active, false)?;
     }
     Ok(())
 }
 
 fn run_watch_loop<F>(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>, mut changeset: Changeset, options: AppOptions, theme: &Theme,
-    reload: &mut F,
+    reload: &mut F, control: Option<&LiveControl>,
 ) -> io::Result<()>
 where
-    F: FnMut() -> WatchUpdate<Changeset>,
+    F: FnMut(bool) -> WatchUpdate<Changeset>,
 {
     terminal.draw(|frame| render(frame, &App::loading(), theme))?;
     let mut app = App::ready_with_options(&changeset, options.clone());
     let size = terminal.size()?;
     app.resize(size.width, size.height);
     let mut position = app.position();
+    let mut walkthrough_active = false;
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        handle_terminal_event(&mut app)?;
-        match reload() {
+        let requested_reload = handle_terminal_event(&mut app, control, &mut walkthrough_active, true)?;
+        match reload(requested_reload) {
             WatchUpdate::Unchanged => {}
             WatchUpdate::Loaded(updated) => {
                 if matches!(app.state(), crate::AppState::Ready(_)) {
@@ -176,7 +200,7 @@ where
 
 fn run_review_loop<F, E>(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>, review: &Review, options: AppOptions, theme: &Theme,
-    save: &mut F,
+    save: &mut F, control: Option<&LiveControl>,
 ) -> io::Result<()>
 where
     F: FnMut(&Review) -> Result<(), E>,
@@ -186,36 +210,23 @@ where
     let mut app = App::review_with_options(review, options);
     let size = terminal.size()?;
     app.resize(size.width, size.height);
+    let mut walkthrough_active = false;
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        if !event::poll(EVENT_POLL_INTERVAL)? {
-            continue;
-        }
-        match event::read()? {
-            Event::Key(key) => app.handle_key(key),
-            Event::Mouse(mouse) => app.handle_mouse(mouse),
-            Event::Resize(width, height) => app.resize(width, height),
-            Event::FocusGained | Event::FocusLost | Event::Paste(_) => {}
-        }
-        if app.save_requested() {
-            let result = app
-                .review()
-                .ok_or_else(|| "editable session lost its review state".to_owned())
-                .and_then(|review| save(review).map_err(|error| error.to_string()));
-            app.finish_save(result);
-        }
+        let _ = handle_terminal_event(&mut app, control, &mut walkthrough_active, false)?;
+        finish_requested_save(&mut app, save);
     }
     Ok(())
 }
 
 fn run_review_watch_loop<F, E, R>(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>, mut review: Review, options: AppOptions, theme: &Theme,
-    save: &mut F, reload: &mut R,
+    save: &mut F, reload: &mut R, control: Option<&LiveControl>,
 ) -> io::Result<()>
 where
     F: FnMut(&Review) -> Result<(), E>,
     E: std::fmt::Display,
-    R: FnMut() -> WatchUpdate<Review>,
+    R: FnMut(bool) -> WatchUpdate<Review>,
 {
     terminal.draw(|frame| render(frame, &App::loading(), theme))?;
     let mut app = App::review_with_options(&review, options.clone());
@@ -223,12 +234,13 @@ where
     app.resize(size.width, size.height);
     let mut position = app.position();
     let mut pending = WatchUpdate::Unchanged;
+    let mut walkthrough_active = false;
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        handle_terminal_event(&mut app)?;
+        let requested_reload = handle_terminal_event(&mut app, control, &mut walkthrough_active, true)?;
         finish_requested_save(&mut app, save);
-        if matches!(pending, WatchUpdate::Unchanged) {
-            pending = reload();
+        if requested_reload || matches!(pending, WatchUpdate::Unchanged) {
+            pending = reload(requested_reload);
         }
         if !app.can_reload() {
             continue;
@@ -261,17 +273,67 @@ where
     Ok(())
 }
 
-fn handle_terminal_event(app: &mut App<'_>) -> io::Result<()> {
-    if !event::poll(EVENT_POLL_INTERVAL)? {
-        return Ok(());
+fn handle_terminal_event(
+    app: &mut App<'_>, control: Option<&LiveControl>, walkthrough_active: &mut bool, reload_available: bool,
+) -> io::Result<bool> {
+    if event::poll(EVENT_POLL_INTERVAL)? {
+        match event::read()? {
+            Event::Key(key) => app.handle_key(key),
+            Event::Mouse(mouse) => app.handle_mouse(mouse),
+            Event::Resize(width, height) => app.resize(width, height),
+            Event::FocusGained | Event::FocusLost | Event::Paste(_) => {}
+        }
     }
-    match event::read()? {
-        Event::Key(key) => app.handle_key(key),
-        Event::Mouse(mouse) => app.handle_mouse(mouse),
-        Event::Resize(width, height) => app.resize(width, height),
-        Event::FocusGained | Event::FocusLost | Event::Paste(_) => {}
+    Ok(handle_live_requests(app, control, walkthrough_active, reload_available))
+}
+
+fn handle_live_requests(
+    app: &mut App<'_>, control: Option<&LiveControl>, walkthrough_active: &mut bool, reload_available: bool,
+) -> bool {
+    let Some(control) = control else {
+        return false;
+    };
+    let mut reload_requested = false;
+    loop {
+        let request = match control.try_recv() {
+            Ok(request) => request,
+            Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+        };
+        let response = match request.action {
+            LiveAction::Inspect => LiveResponse::State(app.live_state(*walkthrough_active)),
+            LiveAction::Reload if reload_available && !app.live_control_busy() => {
+                reload_requested = true;
+                LiveResponse::ReloadRequested
+            }
+            LiveAction::Reload if app.live_control_busy() => LiveResponse::Error { code: "interaction_busy" },
+            LiveAction::Reload => LiveResponse::Error { code: "reload_unavailable" },
+            LiveAction::Walkthrough { action } => match action {
+                WalkthroughAction::Start if app.live_control_busy() => LiveResponse::Error { code: "interaction_busy" },
+                WalkthroughAction::Start => {
+                    *walkthrough_active = true;
+                    LiveResponse::State(app.live_state(*walkthrough_active))
+                }
+                WalkthroughAction::Stop => {
+                    *walkthrough_active = false;
+                    LiveResponse::State(app.live_state(*walkthrough_active))
+                }
+                WalkthroughAction::Next => match app.apply_live_action(&LiveAction::Next) {
+                    Ok(()) => LiveResponse::State(app.live_state(*walkthrough_active)),
+                    Err(code) => LiveResponse::Error { code },
+                },
+                WalkthroughAction::Previous => match app.apply_live_action(&LiveAction::Previous) {
+                    Ok(()) => LiveResponse::State(app.live_state(*walkthrough_active)),
+                    Err(code) => LiveResponse::Error { code },
+                },
+            },
+            action => match app.apply_live_action(&action) {
+                Ok(()) => LiveResponse::State(app.live_state(*walkthrough_active)),
+                Err(code) => LiveResponse::Error { code },
+            },
+        };
+        let _ = request.response.send(response);
     }
-    Ok(())
+    reload_requested
 }
 
 fn finish_requested_save<F, E>(app: &mut App<'_>, save: &mut F)

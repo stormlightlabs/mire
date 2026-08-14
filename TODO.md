@@ -207,23 +207,23 @@ disposition.
 
 ### M5.1 Define and threat-model the live-session protocol
 
-- [ ] Specify versioned operations for session listing, state inspection,
+- [x] Specify versioned operations for session listing, state inspection,
       finding focus, navigation, reload, and coordinated walkthroughs.
-- [ ] Define transport, discovery, local-user authentication, authorization,
+- [x] Define transport, discovery, local-user authentication, authorization,
       payload limits, lifecycle cleanup, and machine-readable errors.
-- [ ] Keep comment creation and disposition on the durable review transaction
+- [x] Keep comment creation and disposition on the durable review transaction
       path; the live protocol cannot impersonate a human author.
-- [ ] Redact secrets and session credentials from logs and diagnostics.
-- [ ] Complete a separate security review before implementation begins.
+- [x] Redact secrets and session credentials from logs and diagnostics.
+- [x] Complete a separate security review before implementation begins.
 
 ### M5.2 Implement live TUI control
 
-- [ ] List discoverable sessions and inspect bounded presentation state.
-- [ ] Focus a finding or path and range, move to the previous or next finding,
+- [x] List discoverable sessions and inspect bounded presentation state.
+- [x] Focus a finding or path and range, move to the previous or next finding,
       and request a source reload.
-- [ ] Authenticate every request, enforce payload bounds, and return stable
+- [x] Authenticate every request, enforce payload bounds, and return stable
       machine-readable errors.
-- [ ] Remove discovery state and terminate owned tasks on every shutdown path.
+- [x] Remove discovery state and terminate owned tasks on every shutdown path.
 
 Verification:
 

@@ -1,10 +1,11 @@
 use std::cell::RefCell;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use mire_core::{Author, Changeset, NoteId, NoteStatus, Provenance, Review, ReviewNote};
+use mire_core::{AnchorSide, Author, Changeset, FileContent, NoteId, NoteStatus, Provenance, Review, ReviewNote};
 use ratatui::layout::{Position, Rect};
 
 use crate::layout::UiAreas;
+use crate::live::{LiveAction, PresentationKind, PresentationState};
 use crate::navigation::{Action, Focus, action_for};
 use crate::note_filter::NoteFilter;
 use crate::notes::{EditorTarget, LineSelection, NoteEditor};
@@ -299,6 +300,62 @@ impl<'a> App<'a> {
     /// Reports whether replacing an editable review would preserve all unsaved work.
     pub const fn can_reload(&self) -> bool {
         !self.dirty && !self.save_requested && self.editor.is_none()
+    }
+
+    /// Reports whether local presentation control would interrupt text entry or unsaved review work.
+    pub const fn live_control_busy(&self) -> bool {
+        self.dirty || self.save_requested || self.editor.is_some() || self.filter_visible || self.search_input
+    }
+
+    /// Returns a bounded state snapshot for the live-session protocol.
+    pub fn live_state(&self, walkthrough_active: bool) -> PresentationState {
+        let selected_path = match &self.state {
+            AppState::Ready(stream) => stream
+                .changeset()
+                .files()
+                .get(self.selected_file)
+                .and_then(file_path_bytes),
+            AppState::Loading | AppState::Empty | AppState::Error(_) => None,
+        };
+        let selected_note_id = self.selected_note().map(|note| note.id().as_str().to_owned());
+        let state = match self.state {
+            AppState::Loading => PresentationKind::Loading,
+            AppState::Empty => PresentationKind::Empty,
+            AppState::Ready(_) => PresentationKind::Ready,
+            AppState::Error(_) => PresentationKind::Error,
+        };
+        let layout = match self.layout_mode {
+            LayoutMode::Unified => "unified",
+            LayoutMode::Split => "split",
+            LayoutMode::Automatic => "automatic",
+        };
+        PresentationState {
+            state,
+            selected_path,
+            selected_note_id,
+            scroll_row: self.scroll,
+            layout: layout.to_owned(),
+            filter: self.filter_summary(),
+            review_revision: self.review.as_ref().map(|review| review.revision().get()),
+            walkthrough_active,
+        }
+    }
+
+    /// Applies a live presentation action without changing review data.
+    pub fn apply_live_action(&mut self, action: &LiveAction) -> Result<(), &'static str> {
+        if self.live_control_busy() {
+            return Err("interaction_busy");
+        }
+        match action {
+            LiveAction::FocusNote { note_id } => self.focus_live_note(note_id)?,
+            LiveAction::FocusLocation { path, side, start_line, end_line } => {
+                self.focus_live_location(path, *side, *start_line, *end_line)?
+            }
+            LiveAction::Next => self.focus_live_note_direction(true)?,
+            LiveAction::Previous => self.focus_live_note_direction(false)?,
+            LiveAction::Inspect | LiveAction::Reload | LiveAction::Walkthrough { .. } => return Err("invalid_request"),
+        }
+        Ok(())
     }
 
     /// Captures navigation, layout, and filter state for a watched reload.
@@ -795,6 +852,84 @@ impl<'a> App<'a> {
         }
     }
 
+    fn focus_live_note(&mut self, note_id: &str) -> Result<(), &'static str> {
+        let Some(review) = &self.review else {
+            return Err("not_found");
+        };
+        let Some(note) = review.notes().iter().position(|note| note.id().as_str() == note_id) else {
+            return Err("not_found");
+        };
+        let target = match &self.state {
+            AppState::Ready(stream) => (0..stream.len())
+                .find(|row| matches!(stream.row(*row), Some(RowKey::Note { note: found, .. }) if found == note)),
+            AppState::Loading | AppState::Empty | AppState::Error(_) => None,
+        };
+        let Some(target) = target else {
+            return Err("not_found");
+        };
+        self.jump_to_row(target);
+        Ok(())
+    }
+
+    fn focus_live_location(
+        &mut self, path: &[u8], side: AnchorSide, start_line: u64, end_line: u64,
+    ) -> Result<(), &'static str> {
+        if start_line == 0 || end_line < start_line {
+            return Err("invalid_request");
+        }
+        let target = match &self.state {
+            AppState::Ready(stream) => stream.changeset().files().iter().enumerate().find_map(|(file, diff)| {
+                let matches_side = match side {
+                    AnchorSide::Old => diff.old_side().is_some_and(|value| value.path.as_bytes() == path),
+                    AnchorSide::New => diff.new_side().is_some_and(|value| value.path.as_bytes() == path),
+                };
+                if !matches_side {
+                    return None;
+                }
+                let FileContent::Text { hunks } = diff.content() else {
+                    return None;
+                };
+                hunks.iter().enumerate().find_map(|(hunk, hunk_data)| {
+                    let contains_start = hunk_data
+                        .lines()
+                        .iter()
+                        .any(|line| line_number_on_side(line, side).is_some_and(|number| number.get() == start_line));
+                    let contains_end = hunk_data
+                        .lines()
+                        .iter()
+                        .any(|line| line_number_on_side(line, side).is_some_and(|number| number.get() == end_line));
+                    (contains_start && contains_end).then_some((file, hunk))
+                })
+            }),
+            AppState::Loading | AppState::Empty | AppState::Error(_) => None,
+        };
+        let Some((file, hunk)) = target else {
+            return Err("not_found");
+        };
+        let row = match &self.state {
+            AppState::Ready(stream) => stream
+                .hunk_positions()
+                .find_map(|(row, found_file, found_hunk)| (found_file == file && found_hunk == hunk).then_some(row)),
+            AppState::Loading | AppState::Empty | AppState::Error(_) => None,
+        };
+        self.selected_file = file;
+        let Some(row) = row else {
+            return Err("not_found");
+        };
+        self.jump_to_row(row);
+        self.ensure_sidebar_selection_visible();
+        Ok(())
+    }
+
+    fn focus_live_note_direction(&mut self, forward: bool) -> Result<(), &'static str> {
+        let has_notes = matches!(&self.state, AppState::Ready(stream) if stream.visible_keys(0, stream.len()).any(|key| matches!(key, RowKey::Note { .. })));
+        if !has_notes {
+            return Err("not_found");
+        }
+        self.jump_note(forward);
+        Ok(())
+    }
+
     fn jump_note(&mut self, forward: bool) {
         let AppState::Ready(stream) = &self.state else {
             return;
@@ -1174,6 +1309,13 @@ impl<'a> App<'a> {
         } else if self.selected_file >= self.sidebar_offset.saturating_add(height) {
             self.sidebar_offset = self.selected_file.saturating_add(1).saturating_sub(height);
         }
+    }
+}
+
+fn line_number_on_side(line: &mire_core::DiffLine, side: AnchorSide) -> Option<mire_core::LineNumber> {
+    match side {
+        AnchorSide::Old => line.old_line(),
+        AnchorSide::New => line.new_line(),
     }
 }
 

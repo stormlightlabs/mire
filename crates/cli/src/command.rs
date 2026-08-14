@@ -14,6 +14,7 @@ use mire_tui::ThemeFamily;
 use thiserror::Error;
 
 use crate::git::{self, DiffRequest, GitError, ShowRequest};
+use crate::live_session::{self, LiveSession, LiveSessionError};
 use crate::protocol::{
     ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, context_json, import_error_json,
     import_result_json, notes_json, notes_markdown, protocol_error_json,
@@ -57,6 +58,8 @@ enum Command {
     Show(ShowArgs),
     /// Locate Mire's bundled agent skill.
     Skill(SkillArgs),
+    /// Inspect or drive a local interactive Mire session.
+    Session(SessionArgs),
     /// Watch a Git worktree or revision comparison for changes.
     Watch(WatchArgs),
 }
@@ -137,6 +140,8 @@ enum AppError {
     OutputIo(io::Error),
     #[error("cannot locate bundled skill: {0}")]
     Skill(SkillError),
+    #[error("live-session operation failed: {0}")]
+    LiveSession(LiveSessionError),
     #[error("terminal interface failed: {0}")]
     Terminal(io::Error),
     #[error("watch mode requires an interactive terminal and cannot be combined with structured output")]
@@ -161,6 +166,7 @@ impl AppError {
             Self::Output(_)
             | Self::OutputIo(_)
             | Self::Skill(_)
+            | Self::LiveSession(_)
             | Self::Terminal(_)
             | Self::WatchRequiresTerminal
             | Self::WatchStdin
@@ -398,6 +404,81 @@ struct SkillArgs {
     command: SkillCommand,
 }
 
+#[derive(Debug, Subcommand)]
+enum SessionCommand {
+    /// List local interactive sessions.
+    List,
+    /// Inspect one local session's presentation state.
+    Inspect(SessionTarget),
+    /// Focus a finding or changed source location.
+    Focus(SessionFocusArgs),
+    /// Move to the next visible finding.
+    Next(SessionTarget),
+    /// Move to the previous visible finding.
+    Previous(SessionTarget),
+    /// Request the normal reload path for a watched session.
+    Reload(SessionTarget),
+    /// Start, stop, or advance a coordinated walkthrough.
+    Walkthrough(SessionWalkthroughArgs),
+}
+
+#[derive(Args, Debug)]
+struct SessionArgs {
+    #[command(subcommand)]
+    command: SessionCommand,
+}
+
+#[derive(Args, Debug)]
+struct SessionTarget {
+    /// Identifier from `mire session list`.
+    session: String,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum LiveSideArgument {
+    Old,
+    New,
+}
+
+#[derive(Args, Debug)]
+struct SessionFocusArgs {
+    /// Identifier from `mire session list`.
+    session: String,
+    /// Stable finding identifier.
+    #[arg(long, conflicts_with = "file", required_unless_present = "file")]
+    note: Option<String>,
+    /// Repository-relative source path.
+    #[arg(long, requires_all = ["side", "start_line"])]
+    file: Option<OsString>,
+    /// Changed-file side for a location request.
+    #[arg(long, value_enum, requires = "file")]
+    side: Option<LiveSideArgument>,
+    /// Inclusive first line in the selected side.
+    #[arg(long, requires = "file")]
+    start_line: Option<u64>,
+    /// Inclusive final line in the selected side.
+    #[arg(long, requires = "file")]
+    end_line: Option<u64>,
+}
+
+#[derive(Debug, Subcommand)]
+enum WalkthroughCommand {
+    /// Start a walkthrough.
+    Start(SessionTarget),
+    /// Advance the walkthrough to the next visible finding.
+    Next(SessionTarget),
+    /// Move the walkthrough to the previous visible finding.
+    Previous(SessionTarget),
+    /// End the walkthrough.
+    Stop(SessionTarget),
+}
+
+#[derive(Args, Debug)]
+struct SessionWalkthroughArgs {
+    #[command(subcommand)]
+    command: WalkthroughCommand,
+}
+
 #[derive(Args, Debug)]
 struct ShowArgs {
     /// Commit to show; defaults to HEAD.
@@ -525,6 +606,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
             let path = skill::installed_path().map_err(AppError::Skill)?;
             writeln!(io::stdout().lock(), "{}", path.display()).map_err(AppError::OutputIo)
         }
+        Command::Session(arguments) => execute_session(arguments),
         Command::Watch(WatchArgs { staged, revisions, paths, language }) => {
             let request = DiffRequest { staged, revisions, paths };
             let changeset = git::load_diff(request.clone()).map_err(AppError::Git)?;
@@ -632,7 +714,8 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
             })
             .transpose()?
             .flatten();
-        mire_tui::run_review_watch_with_options(
+        let mut session = LiveSession::start(true).map_err(AppError::LiveSession)?;
+        mire_tui::run_review_watch_with_live_control(
             review,
             mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
             |updated| {
@@ -641,10 +724,10 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
                 write_review_atomic_if_revision(&review_path, expected, updated)
                     .map_err(|error| io::Error::other(error.to_string()))
             },
-            || {
+            |force| {
                 let review_due = review_watcher.reload_due();
                 let source_due = source_watcher.as_mut().is_some_and(WatchSet::reload_due);
-                if !review_due && !source_due {
+                if !force && !review_due && !source_due {
                     return mire_tui::WatchUpdate::Unchanged;
                 }
                 let latest = match read_review(&review_path) {
@@ -680,10 +763,12 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
                     Err(error) => mire_tui::WatchUpdate::Failed(error.to_string()),
                 }
             },
+            session.take_control(),
         )
         .map_err(AppError::Terminal)
     } else {
-        mire_tui::run_review_with_options(
+        let mut session = LiveSession::start(false).map_err(AppError::LiveSession)?;
+        mire_tui::run_review_with_live_control(
             &review,
             mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
             |updated| {
@@ -692,6 +777,7 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
                 write_review_atomic_if_revision(&review_path, expected, updated)
                     .map_err(|error| io::Error::other(error.to_string()))
             },
+            session.take_control(),
         )
         .map_err(AppError::Terminal)
     }
@@ -734,11 +820,12 @@ fn run_changeset(
     } else if let Some(source) = source {
         let (path, recursive) = source.watch_path();
         let mut watcher = WatchSet::new(path, recursive).map_err(AppError::Watch)?;
-        mire_tui::run_watch_with_options(
+        let mut session = LiveSession::start(true).map_err(AppError::LiveSession)?;
+        mire_tui::run_watch_with_live_control(
             changeset,
             mire_tui::AppOptions { language_override: language, theme, human_author: None },
-            || {
-                if !watcher.reload_due() {
+            |force| {
+                if !force && !watcher.reload_due() {
                     return mire_tui::WatchUpdate::Unchanged;
                 }
                 match source.load() {
@@ -746,12 +833,15 @@ fn run_changeset(
                     Err(error) => mire_tui::WatchUpdate::Failed(error.to_string()),
                 }
             },
+            session.take_control(),
         )
         .map_err(AppError::Terminal)
     } else {
-        mire_tui::run_with_options(
+        let mut session = LiveSession::start(false).map_err(AppError::LiveSession)?;
+        mire_tui::run_with_live_control(
             &changeset,
             mire_tui::AppOptions { language_override: language, theme, human_author: None },
+            session.take_control(),
         )
         .map_err(AppError::Terminal)
     }
@@ -936,6 +1026,62 @@ fn import_notes(review_path: &OsStr, input: &OsStr, expected_revision: u64) -> R
     };
     write_mutation(Path::new(review_path), expected_revision, &updated)?;
     write_bytes(&import_result_json(&updated, imported).map_err(AppError::Protocol)?)
+}
+
+fn execute_session(arguments: SessionArgs) -> Result<(), AppError> {
+    let response = match arguments.command {
+        SessionCommand::List => serde_json::json!({
+            "schema_version": { "major": 1, "minor": 0 },
+            "status": "ok",
+            "sessions": live_session::list_sessions().map_err(AppError::LiveSession)?,
+        }),
+        SessionCommand::Inspect(SessionTarget { session }) => {
+            live_session::request_session(&session, mire_tui::LiveAction::Inspect).map_err(AppError::LiveSession)?
+        }
+        SessionCommand::Focus(SessionFocusArgs { session, note, file, side, start_line, end_line }) => {
+            let action = if let Some(note_id) = note {
+                mire_tui::LiveAction::FocusNote { note_id }
+            } else {
+                let path = file.expect("clap requires a location path when no note is supplied");
+                let side = match side.expect("clap requires a location side") {
+                    LiveSideArgument::Old => AnchorSide::Old,
+                    LiveSideArgument::New => AnchorSide::New,
+                };
+                let start_line = start_line.expect("clap requires a location start line");
+                mire_tui::LiveAction::FocusLocation {
+                    path: path.as_encoded_bytes().to_vec(),
+                    side,
+                    start_line,
+                    end_line: end_line.unwrap_or(start_line),
+                }
+            };
+            live_session::request_session(&session, action).map_err(AppError::LiveSession)?
+        }
+        SessionCommand::Next(SessionTarget { session }) => {
+            live_session::request_session(&session, mire_tui::LiveAction::Next).map_err(AppError::LiveSession)?
+        }
+        SessionCommand::Previous(SessionTarget { session }) => {
+            live_session::request_session(&session, mire_tui::LiveAction::Previous).map_err(AppError::LiveSession)?
+        }
+        SessionCommand::Reload(SessionTarget { session }) => {
+            live_session::request_session(&session, mire_tui::LiveAction::Reload).map_err(AppError::LiveSession)?
+        }
+        SessionCommand::Walkthrough(SessionWalkthroughArgs { command }) => {
+            let (session, action) = match command {
+                WalkthroughCommand::Start(SessionTarget { session }) => (session, mire_tui::WalkthroughAction::Start),
+                WalkthroughCommand::Next(SessionTarget { session }) => (session, mire_tui::WalkthroughAction::Next),
+                WalkthroughCommand::Previous(SessionTarget { session }) => {
+                    (session, mire_tui::WalkthroughAction::Previous)
+                }
+                WalkthroughCommand::Stop(SessionTarget { session }) => (session, mire_tui::WalkthroughAction::Stop),
+            };
+            live_session::request_session(&session, mire_tui::LiveAction::Walkthrough { action })
+                .map_err(AppError::LiveSession)?
+        }
+    };
+    let mut output = serde_json::to_vec(&response).map_err(AppError::Output)?;
+    output.push(b'\n');
+    write_bytes(&output)
 }
 
 fn parse_fingerprint(value: &str) -> Result<Fingerprint, String> {

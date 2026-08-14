@@ -8,6 +8,7 @@ rust-version.workspace = true
 crossterm = { version = "0.29.0", default-features = false, features = ["events"] }
 inkjet = { version = "0.11.1", default-features = false, features = ["language-bash", "language-css", "language-html", "language-javascript", "language-json", "language-python", "language-rust", "language-toml", "language-tsx", "language-typescript", "language-yaml"] }
 mire-core = { path = "../core" }
+serde.workspace = true
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29"] }
 similar = { version = "2.7.0", default-features = false, features = ["inline"] }
 terminal-colorsaurus = { version = "1.0.3", default-features = false }

@@ -689,6 +689,7 @@ dependencies = [
  "insta",
  "mire-core",
  "ratatui",
+ "serde",
  "similar",
  "terminal-colorsaurus",
 ]

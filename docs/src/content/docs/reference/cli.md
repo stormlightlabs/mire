@@ -108,6 +108,22 @@ Installs the bundled provider-neutral review skill in the standard
 `$HOME/.agents/skills/mire` directory when needed, then prints its `SKILL.md`
 path.
 
+## Live sessions
+
+```text
+mire session list
+mire session inspect SESSION
+mire session focus SESSION --note NOTE_ID
+mire session focus SESSION --file PATH --side old|new --start-line LINE [--end-line LINE]
+mire session next|previous|reload SESSION
+mire session walkthrough start|next|previous|stop SESSION
+```
+
+These commands control presentation state in a local open TUI. They do not
+create, edit, or disposition findings. See the
+[live-session protocol](/docs/reference/live-session-protocol/) for response
+format, authentication, limits, and transport behavior.
+
 ## Interactive controls
 
 See the [keyboard reference](/docs/reference/keybindings/) for navigation,

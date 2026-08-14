@@ -101,6 +101,7 @@ context within a byte limit, and apply location-based findings.
 - [CLI manual](docs/src/content/docs/reference/cli.md)
 - [Keybindings](docs/src/content/docs/reference/keybindings.md)
 - [Review model](docs/src/content/docs/concepts/review-model.md)
+- [Live-session protocol](docs/src/content/docs/reference/live-session-protocol.md)
 
 ## License
 

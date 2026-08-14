@@ -138,6 +138,25 @@ After interoperability, add independently releasable review capabilities:
 These capabilities must reuse the changeset, anchor, provenance, and review
 event rules.
 
+### Interaction and CLI polish
+
+Make the review workspace easier to read and operate without widening Mire's
+product boundary:
+
+- show contextual actions and let `Esc` unwind the active UI state;
+- distinguish the cursor, selected ranges, and finding anchors in the gutter;
+- present findings body-first and support multiline editing and paste;
+- show scroll, finding, watch, refresh, and live-walkthrough state;
+- collapse files and hunks, jump to files by name, and show finding progress in
+  file navigation;
+- make `mire` open the worktree diff, add path-aware completion hints, and
+  report review status without opening the TUI.
+
+Exit condition: a user can understand the current review state and available
+actions at a glance, navigate a large review directly, compose realistic
+findings, and inspect review progress from the CLI. Existing generated man pages
+and shell completions remain derived from the Clap command definition.
+
 ## Architecture
 
 The workspace keeps side effects at the outer boundary:
@@ -179,6 +198,7 @@ does not execute instructions from source files, patches, or imported notes.
 - more theme families or a large configuration system
 - embedded providers, MCP, or provider-specific agent adapters
 - structural diffing
+- external-editor note composition or a general command palette
 
 ## Main risks
 

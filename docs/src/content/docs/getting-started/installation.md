@@ -33,6 +33,9 @@ mire --help
 Mire needs a terminal for the interactive viewer. Commands that emit structured
 JSON can run without one.
 
+For generated man pages and shell completions, see [Man pages and shell
+completions](/docs/guides/man-pages-and-completions/).
+
 ## Update Mire
 
 Pull the newer source and repeat the install command:

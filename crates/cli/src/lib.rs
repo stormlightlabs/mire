@@ -1,5 +1,6 @@
 //! Command-line orchestration and review-file persistence for Mire.
 
+mod cli;
 mod command;
 mod git;
 mod live_session;

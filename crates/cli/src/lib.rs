@@ -4,6 +4,7 @@ mod command;
 mod git;
 mod protocol;
 mod review_file;
+mod skill;
 mod watch;
 
 pub use command::run;

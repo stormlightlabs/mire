@@ -52,6 +52,23 @@ A note can remain open or receive a human disposition:
 Imported machine findings retain their producer identity. Import does not turn
 a machine finding into a human decision.
 
+## Hand a review to an agent
+
+Print the path to Mire's bundled, provider-neutral review skill:
+
+```sh
+mire skill path
+```
+
+Give that skill path and the review file path to the agent. Keep the review open
+with `mire review review.json --watch` to see findings as the agent applies
+them. Mire installs the skill in the standard
+`$HOME/.agents/skills/mire` directory.
+
+The skill starts with the context manifest, expands only named context with an
+explicit byte limit, and submits location-based findings in one atomic batch.
+It does not depend on a model provider or agent runtime.
+
 ## Exchange notes with tools
 
 List or export notes without opening the TUI:

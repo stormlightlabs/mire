@@ -67,19 +67,22 @@ mire review init review.json main...HEAD -- src tests
 mire review review.json --watch
 ```
 
-A local agent or analyzer can inspect the compact manifest, expand a named hunk
-within a byte limit, and apply location-based findings:
+Mire assigns note identifiers and anchor fingerprints. Mutations include
+the review revision the caller read, so stale writes do not replace newer changes.
+
+See [Review Notes](docs/src/content/docs/guides/review-files.md) for the TUI and
+agent workflow.
+
+## Agent Skill
+
+Give the review path and Mire's bundled skill to a local agent:
 
 ```sh
-mire context review.json
-mire context review.json --hunk HUNK_FINGERPRINT --max-bytes 20000
-mire notes apply review.json --stdin < findings.json
+mire skill path/to/skills
 ```
 
-Mire assigns note identifiers and anchor fingerprints. Mutations include the
-review revision the caller read, so stale writes do not replace newer changes.
-See [Review Notes](docs/src/content/docs/guides/review-files.md) for the TUI and
-agentic/cli workflows.
+The skill tells the agent to inspect the compact manifest, expand only named
+context within a byte limit, and apply location-based findings.
 
 ## Documentation
 

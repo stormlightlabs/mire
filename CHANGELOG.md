@@ -4,6 +4,12 @@
 
 ### Added
 
+#### 2026-08-14
+
+- A bundled provider-neutral review skill, installed and located with `mire skill path/to/skills`.
+
+#### 2026-07
+
 - A normalized, versioned changeset model with stable fingerprints and JSON output.
 - Patch input from files or standard input, plus read-only Git worktree,
   revision, and path-filtered comparisons through native Git commands.

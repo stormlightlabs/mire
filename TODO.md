@@ -93,16 +93,16 @@ Bundle a provider-neutral `SKILL.md` and expose its installed location through
 
 Acceptance criteria:
 
-- [ ] The skill starts with `mire context <review-file>` and expands only named
+- [x] The skill starts with `mire context <review-file>` and expands only named
       hunks, files, or patches with an explicit byte limit.
-- [ ] The skill uses `notes apply` for findings and the note disposition
+- [x] The skill uses `notes apply` for findings and the note disposition
       commands for follow-up decisions.
-- [ ] Findings include a concrete location, severity, annotation kind, and
+- [x] Findings include a concrete location, severity, annotation kind, and
       concise evidence in the body.
-- [ ] The skill tells the agent to re-read the review revision before mutation
+- [x] The skill tells the agent to re-read the review revision before mutation
       and handle revision conflicts by inspecting the new state.
-- [ ] Packaging tests prove that `mire skill path` points to the shipped file.
-- [ ] README usage covers the human-agent handoff without provider-specific
+- [x] Packaging tests prove that `mire skill path` points to the shipped file.
+- [x] README usage covers the human-agent handoff without provider-specific
       setup instructions.
 
 Verification:

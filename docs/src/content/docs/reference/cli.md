@@ -87,6 +87,16 @@ writes fail with `revision_conflict`. Full-note import remains available for
 compatible clients. List returns deterministic JSON. Export can produce JSON
 or standalone Markdown.
 
+## Agent skill
+
+```text
+mire skill path
+```
+
+Installs the bundled provider-neutral review skill in the standard
+`$HOME/.agents/skills/mire` directory when needed, then prints its `SKILL.md`
+path.
+
 ## Interactive controls
 
 See the [keyboard reference](/docs/reference/keybindings/) for navigation,

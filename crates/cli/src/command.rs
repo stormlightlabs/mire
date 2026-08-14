@@ -21,6 +21,7 @@ use crate::protocol::{
 use crate::review_file::{
     DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, write_review_atomic_if_revision,
 };
+use crate::skill::{self, SkillError};
 use crate::watch::{WatchError, WatchSet};
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -54,6 +55,8 @@ enum Command {
     Review(ReviewArgs),
     /// Review one Git commit.
     Show(ShowArgs),
+    /// Locate Mire's bundled agent skill.
+    Skill(SkillArgs),
     /// Watch a Git worktree or revision comparison for changes.
     Watch(WatchArgs),
 }
@@ -88,6 +91,12 @@ enum ReviewCommand {
     Init(ReviewInitArgs),
 }
 
+#[derive(Debug, Subcommand)]
+enum SkillCommand {
+    /// Print the installed SKILL.md path.
+    Path,
+}
+
 #[derive(Debug, Error)]
 enum AppError {
     #[error("cannot read patch from {input:?}: {source}")]
@@ -116,6 +125,8 @@ enum AppError {
     Output(serde_json::Error),
     #[error("cannot write command output: {0}")]
     OutputIo(io::Error),
+    #[error("cannot locate bundled skill: {0}")]
+    Skill(SkillError),
     #[error("terminal interface failed: {0}")]
     Terminal(io::Error),
     #[error("watch mode requires an interactive terminal and cannot be combined with structured output")]
@@ -139,6 +150,7 @@ impl AppError {
             Self::Patch(_) => 4,
             Self::Output(_)
             | Self::OutputIo(_)
+            | Self::Skill(_)
             | Self::Terminal(_)
             | Self::WatchRequiresTerminal
             | Self::WatchStdin
@@ -359,6 +371,12 @@ struct ReviewInitArgs {
 }
 
 #[derive(Args, Debug)]
+struct SkillArgs {
+    #[command(subcommand)]
+    command: SkillCommand,
+}
+
+#[derive(Args, Debug)]
 struct ShowArgs {
     /// Commit to show; defaults to HEAD.
     revision: Option<OsString>,
@@ -479,6 +497,10 @@ fn execute(cli: Cli) -> Result<(), AppError> {
                 None
             };
             run_changeset(changeset, format, language, theme, source)
+        }
+        Command::Skill(SkillArgs { command: SkillCommand::Path }) => {
+            let path = skill::installed_path().map_err(AppError::Skill)?;
+            writeln!(io::stdout().lock(), "{}", path.display()).map_err(AppError::OutputIo)
         }
         Command::Watch(WatchArgs { staged, revisions, paths, language }) => {
             let request = DiffRequest { staged, revisions, paths };

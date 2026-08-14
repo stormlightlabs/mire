@@ -1,6 +1,6 @@
 ---
-title: CLI reference
-description: Command and option reference for Mire's viewer, review protocol, and structured output.
+title: CLI Manual
+description: Command and option reference for Mire.
 section: Reference
 group: Reference
 order: 8

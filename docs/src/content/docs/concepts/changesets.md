@@ -1,6 +1,6 @@
 ---
-title: Changesets and input
-description: Understand how Mire normalizes Git and patch sources for rendering and automation.
+title: Changesets
+description: Understand how Mire normalizes Git and patch sources.
 section: Concepts
 group: Concepts
 order: 6

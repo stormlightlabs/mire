@@ -1,5 +1,5 @@
 ---
-title: Review changes
+title: Reviewing Changes
 description: Inspect worktrees, revisions, commits, and patch files in the terminal viewer.
 section: Guides
 group: Guides

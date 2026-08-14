@@ -1,5 +1,5 @@
 ---
-title: Durable review notes
+title: Review Notes
 description: Create, edit, filter, and disposition anchored notes in a Mire review file.
 section: Guides
 group: Guides

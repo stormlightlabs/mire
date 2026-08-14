@@ -11,6 +11,7 @@
 		{ label: 'Guides', href: '/docs/guides/review-changes/', slug: 'guides' },
 		{ label: 'Reference', href: '/docs/reference/cli/', slug: 'reference' }
 	] as const;
+	const githubUrl = 'https://github.com/stormlightlabs/mire';
 
 	function isCurrent(slug: string): boolean {
 		return currentSlug === slug || currentSlug.startsWith(`${slug}/`);
@@ -33,6 +34,10 @@
 			{#each primaryLinks as link (link.slug)}
 				<a class:active={isCurrent(link.slug)} href={resolve(link.href)}>{link.label}</a>
 			{/each}
+			<a class="github-link" href={githubUrl}>
+				<span class="i-ri-github-fill" aria-hidden="true"></span>
+				<span>GitHub</span>
+			</a>
 		</nav>
 
 		<div class="header-actions">
@@ -46,6 +51,10 @@
 						{#each primaryLinks as link (link.slug)}
 							<a class:active={isCurrent(link.slug)} href={resolve(link.href)}>{link.label}</a>
 						{/each}
+						<a class="github-link" href={githubUrl}>
+							<span class="i-ri-github-fill" aria-hidden="true"></span>
+							<span>GitHub</span>
+						</a>
 					</nav>
 					<div class="mobile-doc-links">
 						{#each docs as doc (doc.slug)}
@@ -129,6 +138,17 @@
 		text-decoration: underline;
 		text-decoration-color: var(--teal);
 		text-decoration-thickness: 2px;
+	}
+
+	.github-link {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+		width: fit-content;
+	}
+
+	.github-link :global([class*='i-ri-github']) {
+		font-size: 1.05rem;
 	}
 
 	.header-actions {

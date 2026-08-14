@@ -56,8 +56,10 @@ pub fn render(frame: &mut Frame<'_>, app: &App<'_>, theme: &Theme) {
             );
         }
         AppState::Ready(stream) => {
-            render_sidebar(frame, areas.sidebar, stream, app, theme);
-            render_sidebar_divider(frame, areas.sidebar_divider, theme);
+            if app.sidebar_visible() {
+                render_sidebar(frame, areas.sidebar, stream, app, theme);
+                render_sidebar_divider(frame, areas.sidebar_divider, theme);
+            }
             if app.help_visible() {
                 render_help(frame, areas.review, theme);
             } else {

@@ -17,6 +17,7 @@ precedence over the general controls.
 | `q` / `Esc`     | Quit Mire when no editor, filter, or search input is open         |
 | `?`             | Show or hide keybinding help                                      |
 | `Tab`           | Switch focus between the file sidebar and review                  |
+| `b`             | Show or hide the file sidebar                                     |
 | `j` / `Down`    | Scroll down, or select the next file when the sidebar has focus   |
 | `k` / `Up`      | Scroll up, or select the previous file when the sidebar has focus |
 | `PgDn` / `PgUp` | Move down or up by one page                                       |

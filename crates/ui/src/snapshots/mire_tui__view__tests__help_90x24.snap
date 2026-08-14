@@ -7,6 +7,7 @@ expression: "snapshot(app, 90, 24)"
 ▌ M file.txt  +1 -1│ q            quit
   M image.bin      │ ?            toggle help
                    │ Tab          switch sidebar/review focus
+                   │ b            toggle sidebar
                    │ j / Down     scroll or select next file
                    │ k / Up       scroll or select previous file
                    │ PgDn         page down
@@ -24,5 +25,4 @@ expression: "snapshot(app, 90, 24)"
                    │ -            show less context
                    │ w            toggle line wrapping
                    │ 1            unified layout
-                   │ 2            split layout
  help  ? / Esc close  q quit

@@ -69,6 +69,7 @@ pub struct AppPosition {
     row_path: Option<Vec<u8>>,
     selected_note_id: Option<String>,
     selected_path: Option<Vec<u8>>,
+    sidebar_visible: bool,
     wrap_lines: bool,
 }
 
@@ -106,6 +107,7 @@ pub struct App<'a> {
     scroll_anchor: Option<RowAnchor>,
     selected_file: usize,
     sidebar_offset: usize,
+    sidebar_visible: bool,
     terminal_width: u16,
     terminal_height: u16,
     help_visible: bool,
@@ -154,7 +156,7 @@ impl<'a> App<'a> {
 
     /// Creates an application with explicit presentation preferences.
     pub fn ready_with_options(changeset: &'a Changeset, options: AppOptions) -> Self {
-        let areas = UiAreas::new(Rect::new(0, 0, DEFAULT_TERMINAL_WIDTH, DEFAULT_TERMINAL_HEIGHT));
+        let areas = UiAreas::new(Rect::new(0, 0, DEFAULT_TERMINAL_WIDTH, DEFAULT_TERMINAL_HEIGHT), true);
         let layout = LayoutMode::Automatic.resolve(areas.review.width);
         let state = if changeset.files().is_empty() {
             AppState::Empty
@@ -166,7 +168,7 @@ impl<'a> App<'a> {
 
     /// Creates an editable application around a durable review.
     pub fn review_with_options(review: &'a Review, options: AppOptions) -> Self {
-        let areas = UiAreas::new(Rect::new(0, 0, DEFAULT_TERMINAL_WIDTH, DEFAULT_TERMINAL_HEIGHT));
+        let areas = UiAreas::new(Rect::new(0, 0, DEFAULT_TERMINAL_WIDTH, DEFAULT_TERMINAL_HEIGHT), true);
         let layout = LayoutMode::Automatic.resolve(areas.review.width);
         let state = if review.changeset().files().is_empty() {
             AppState::Empty
@@ -223,6 +225,11 @@ impl<'a> App<'a> {
     /// Reports whether the complete binding help is visible.
     pub const fn help_visible(&self) -> bool {
         self.help_visible
+    }
+
+    /// Reports whether the file sidebar is visible.
+    pub const fn sidebar_visible(&self) -> bool {
+        self.sidebar_visible
     }
 
     /// Returns the active search text, including input that has not been submitted.
@@ -513,6 +520,7 @@ impl<'a> App<'a> {
             row_path,
             selected_note_id,
             selected_path,
+            sidebar_visible: self.sidebar_visible,
             wrap_lines: self.wrap_lines,
         }
     }
@@ -524,6 +532,7 @@ impl<'a> App<'a> {
         self.help_visible = position.help_visible;
         self.layout_mode = position.layout_mode;
         self.note_filter = position.note_filter;
+        self.sidebar_visible = position.sidebar_visible;
         self.wrap_lines = position.wrap_lines;
 
         let AppState::Ready(stream) = &self.state else {
@@ -589,7 +598,10 @@ impl<'a> App<'a> {
 
     /// Returns layout rectangles for the current terminal size.
     pub fn areas(&self) -> UiAreas {
-        UiAreas::new(Rect::new(0, 0, self.terminal_width, self.terminal_height))
+        UiAreas::new(
+            Rect::new(0, 0, self.terminal_width, self.terminal_height),
+            self.sidebar_visible,
+        )
     }
 
     /// Applies a terminal resize while preserving the top source-row anchor.
@@ -660,6 +672,7 @@ impl<'a> App<'a> {
             scroll_anchor: None,
             selected_file: 0,
             sidebar_offset: 0,
+            sidebar_visible: true,
             terminal_width: DEFAULT_TERMINAL_WIDTH,
             terminal_height: DEFAULT_TERMINAL_HEIGHT,
             help_visible: false,
@@ -728,6 +741,7 @@ impl<'a> App<'a> {
             Action::Quit => self.should_quit = true,
             Action::ToggleHelp => self.help_visible = !self.help_visible,
             Action::ToggleFocus => self.focus = self.focus.toggle(),
+            Action::ToggleSidebar => self.toggle_sidebar(),
             Action::MoveDown if matches!(self.focus, Focus::Sidebar) => self.select_file_by(1),
             Action::MoveDown if self.review.is_some() => self.move_review_cursor(1),
             Action::MoveDown => self.scroll_by(1),
@@ -766,6 +780,17 @@ impl<'a> App<'a> {
             Action::AutomaticLayout => self.set_layout(LayoutMode::Automatic),
         }
         self.extend_selection_to_current();
+    }
+
+    fn toggle_sidebar(&mut self) {
+        let anchor = self.current_anchor();
+        self.sidebar_visible = !self.sidebar_visible;
+        if !self.sidebar_visible {
+            self.focus = Focus::Review;
+        }
+        self.rebuild_stream(anchor);
+        self.clamp_scroll();
+        self.ensure_sidebar_selection_visible();
     }
 
     fn handle_note_key(&mut self, key: KeyEvent) -> bool {
@@ -1553,6 +1578,25 @@ mod tests {
 
     const PATCH: &[u8] = b"--- a/first.txt\n+++ b/first.txt\n@@ -1,2 +1,2 @@\n-old\n+new\n context\n--- a/second.txt\n+++ b/second.txt\n@@ -1 +1 @@\n-before\n+after\n";
     const REORDERED_PATCH: &[u8] = b"--- a/added.txt\n+++ b/added.txt\n@@ -1 +1 @@\n-old\n+added\n--- a/first.txt\n+++ b/first.txt\n@@ -1,2 +1,2 @@\n-old\n+newer\n context\n--- a/second.txt\n+++ b/second.txt\n@@ -1 +1 @@\n-before\n+after again\n";
+
+    #[test]
+    fn sidebar_toggle_expands_the_review_and_returns_focus_to_it() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let mut app = App::ready(&changeset);
+        app.resize(64, 12);
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+
+        assert!(!app.sidebar_visible());
+        assert_eq!(app.focus(), Focus::Review);
+        assert_eq!(app.areas().sidebar.width, 0);
+        assert_eq!(app.areas().sidebar_divider.width, 0);
+        assert_eq!(app.areas().review, app.areas().body);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+        assert!(app.sidebar_visible());
+        assert!(app.areas().sidebar.width > 0);
+    }
 
     #[test]
     fn reload_position_follows_file_identity_and_preserves_presentation() {

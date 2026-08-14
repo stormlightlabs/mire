@@ -25,7 +25,8 @@ pub struct UiAreas {
 }
 
 impl UiAreas {
-    pub fn new(area: Rect) -> Self {
+    /// Calculates pane rectangles with an optional file sidebar.
+    pub fn new(area: Rect, sidebar_visible: bool) -> Self {
         let vertical = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -34,11 +35,13 @@ impl UiAreas {
                 Constraint::Length(FOOTER_HEIGHT),
             ])
             .split(area);
+        let sidebar_width = if sidebar_visible { sidebar_width(area.width) } else { 0 };
+        let divider_width = if sidebar_visible { DIVIDER_WIDTH } else { 0 };
         let horizontal = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Length(sidebar_width(area.width)),
-                Constraint::Length(DIVIDER_WIDTH),
+                Constraint::Length(sidebar_width),
+                Constraint::Length(divider_width),
                 Constraint::Min(1),
             ])
             .split(vertical[1]);
@@ -71,7 +74,7 @@ mod tests {
     #[test]
     fn layout_keeps_sidebar_divider_and_review_visible_at_supported_widths() {
         for (width, expected_sidebar) in [(24, 7), (64, 16), (120, 26), (200, 40)] {
-            let areas = UiAreas::new(Rect::new(0, 0, width, 12));
+            let areas = UiAreas::new(Rect::new(0, 0, width, 12), true);
             assert_eq!(areas.sidebar.width, expected_sidebar);
             assert_eq!(areas.sidebar_divider.width, DIVIDER_WIDTH);
             assert!(areas.review.width > 0);

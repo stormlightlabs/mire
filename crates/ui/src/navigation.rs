@@ -15,6 +15,7 @@ pub enum Action {
     Quit,
     ToggleHelp,
     ToggleFocus,
+    ToggleSidebar,
     MoveDown,
     MoveUp,
     PageDown,
@@ -64,6 +65,12 @@ const BINDINGS: &[Binding] = &[
         description: "switch sidebar/review focus",
         keys: &[KeyPattern::Tab],
         labels: "Tab",
+    },
+    Binding {
+        action: Action::ToggleSidebar,
+        description: "toggle sidebar",
+        keys: &[KeyPattern::Char('b')],
+        labels: "b",
     },
     Binding {
         action: Action::MoveDown,

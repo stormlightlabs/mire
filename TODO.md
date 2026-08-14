@@ -17,17 +17,17 @@ Use the same comparison semantics and limits as `mire diff`.
 
 Acceptance criteria:
 
-- [ ] Worktree, staged, revision-range, and path-filtered comparisons create a
+- [x] Worktree, staged, revision-range, and path-filtered comparisons create a
       valid review at revision 1 with no notes or events.
-- [ ] The captured changeset is byte-for-byte equivalent to `mire diff --format json`
+- [x] The captured changeset is byte-for-byte equivalent to `mire diff --format json`
       for the same request.
-- [ ] Mire creates the destination atomically and refuses to replace an
+- [x] Mire creates the destination atomically and refuses to replace an
       existing file.
-- [ ] Success output identifies the review path, changeset fingerprint, and
+- [x] Success output identifies the review path, changeset fingerprint, and
       review revision in a deterministic form.
-- [ ] Failures leave no partial review file and use the existing Git,
+- [x] Failures leave no partial review file and use the existing Git,
       persistence, and structured-error boundaries.
-- [ ] CLI help and README usage show the create-open-review flow.
+- [x] CLI help and README usage show the create-open-review flow.
 
 Verification:
 

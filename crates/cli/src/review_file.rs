@@ -32,6 +32,9 @@ pub enum ReviewFileError {
     /// The validated review could not be serialized before any filesystem change.
     #[error("cannot serialize review for {path:?}: {source}")]
     Serialize { path: PathBuf, source: serde_json::Error },
+    /// A new review cannot replace an existing filesystem entry.
+    #[error("review file {path:?} already exists")]
+    AlreadyExists { path: PathBuf },
     /// A sibling temporary file could not be created or written.
     #[error("cannot prepare atomic review write beside {path:?}: {source}")]
     Prepare { path: PathBuf, source: io::Error },
@@ -78,13 +81,53 @@ pub fn read_review(path: impl AsRef<Path>) -> Result<Review, ReviewFileError> {
 /// destination still loads with [`read_review`].
 pub fn write_review_atomic(path: impl AsRef<Path>, review: &Review) -> Result<(), ReviewFileError> {
     let path = path.as_ref();
+    let serialized = serialize_review(path, review)?;
+    let (parent, file_name) = destination_parts(path)?;
+    let (temporary_path, temporary) = prepare_temporary(parent, file_name, path, &serialized)?;
+    drop(temporary);
+
+    if let Err(source) = fs::rename(&temporary_path, path) {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(ReviewFileError::Replace { path: path.to_owned(), source });
+    }
+    sync_directory(parent, path)
+}
+
+/// Creates a validated review atomically and refuses to replace any existing entry.
+///
+/// The completed sibling file is linked at the destination only after its
+/// contents have been synchronized. Readers therefore see either no destination
+/// or the complete review.
+pub fn create_review_atomic(path: impl AsRef<Path>, review: &Review) -> Result<(), ReviewFileError> {
+    let path = path.as_ref();
+    let serialized = serialize_review(path, review)?;
+    let (parent, file_name) = destination_parts(path)?;
+    let (temporary_path, temporary) = prepare_temporary(parent, file_name, path, &serialized)?;
+    drop(temporary);
+
+    if let Err(source) = fs::hard_link(&temporary_path, path) {
+        let _ = fs::remove_file(&temporary_path);
+        return if source.kind() == io::ErrorKind::AlreadyExists {
+            Err(ReviewFileError::AlreadyExists { path: path.to_owned() })
+        } else {
+            Err(ReviewFileError::Replace { path: path.to_owned(), source })
+        };
+    }
+    let _ = fs::remove_file(&temporary_path);
+    sync_directory(parent, path)
+}
+
+fn serialize_review(path: &Path, review: &Review) -> Result<Vec<u8>, ReviewFileError> {
     review
         .validate()
         .map_err(|source| ReviewFileError::InvalidReview { path: path.to_owned(), source })?;
     let mut serialized =
         serde_json::to_vec(review).map_err(|source| ReviewFileError::Serialize { path: path.to_owned(), source })?;
     serialized.push(b'\n');
+    Ok(serialized)
+}
 
+fn destination_parts(path: &Path) -> Result<(&Path, &std::ffi::OsStr), ReviewFileError> {
     let parent = match path.parent() {
         Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
         Some(parent) => parent,
@@ -93,18 +136,22 @@ pub fn write_review_atomic(path: impl AsRef<Path>, review: &Review) -> Result<()
     let file_name = path
         .file_name()
         .ok_or_else(|| ReviewFileError::InvalidDestination { path: path.to_owned() })?;
-    let (temporary_path, mut temporary) = create_temporary(parent, file_name, path)?;
-    if let Err(source) = temporary.write_all(&serialized).and_then(|()| temporary.sync_all()) {
+    Ok((parent, file_name))
+}
+
+fn prepare_temporary(
+    parent: &Path, file_name: &std::ffi::OsStr, destination: &Path, serialized: &[u8],
+) -> Result<(PathBuf, File), ReviewFileError> {
+    let (temporary_path, mut temporary) = create_temporary(parent, file_name, destination)?;
+    if let Err(source) = temporary.write_all(serialized).and_then(|()| temporary.sync_all()) {
         drop(temporary);
         let _ = fs::remove_file(&temporary_path);
-        return Err(ReviewFileError::Prepare { path: path.to_owned(), source });
+        return Err(ReviewFileError::Prepare { path: destination.to_owned(), source });
     }
-    drop(temporary);
+    Ok((temporary_path, temporary))
+}
 
-    if let Err(source) = fs::rename(&temporary_path, path) {
-        let _ = fs::remove_file(&temporary_path);
-        return Err(ReviewFileError::Replace { path: path.to_owned(), source });
-    }
+fn sync_directory(parent: &Path, path: &Path) -> Result<(), ReviewFileError> {
     File::open(parent)
         .and_then(|directory| directory.sync_all())
         .map_err(|source| ReviewFileError::SyncDirectory { path: path.to_owned(), source })
@@ -151,6 +198,20 @@ mod tests {
         let review = review(1);
         write_review_atomic(&path, &review).unwrap();
         assert_eq!(read_review(&path).unwrap(), review);
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn atomic_create_refuses_to_replace_an_existing_review() {
+        let directory = test_directory();
+        let path = directory.join("review.json");
+        let original = review(1);
+        create_review_atomic(&path, &original).unwrap();
+
+        let error = create_review_atomic(&path, &review(2)).unwrap_err();
+        assert!(matches!(error, ReviewFileError::AlreadyExists { .. }));
+        assert_eq!(read_review(&path).unwrap(), original);
         assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
         fs::remove_dir_all(directory).unwrap();
     }

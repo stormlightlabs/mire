@@ -82,8 +82,9 @@ error and keeps watching so the session can recover after the source returns.
 Native filesystem notifications are debounced & mire falls back to polling when
 the platform watcher is unavailable, and periodically reloads to recover missed events.
 
-Use `mire help`, `mire help diff`, `mire help show`, `mire help patch`, or
-`mire help watch` for the complete command-line reference.
+Use `mire help`, `mire help diff`, `mire help show`, `mire help patch`,
+`mire help review`, or `mire help watch` for the complete command-line
+reference.
 
 ## Keybinds
 
@@ -132,11 +133,21 @@ Press `?` in Mire to show the built-in keybind reference.
 
 ### Durable review notes
 
-Open an existing Mire review file with:
+Create a durable review from any comparison accepted by `mire diff`, then open
+it:
 
 ```sh
+# Capture the current worktree
+mire review init review.json
+
+# Or capture a revision range limited to selected paths
+mire review init review.json main...HEAD -- src tests
+
 mire review review.json
 ```
+
+Pass `--staged` to capture the index instead. Mire refuses to replace an
+existing review file.
 
 Use `mire review review.json --watch` to reload changes made to the review file
 by another local process.

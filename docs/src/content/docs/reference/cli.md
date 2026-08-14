@@ -80,26 +80,10 @@ mire notes export REVIEW.json [--format json|markdown]
 Import validates and appends a schema-versioned note batch atomically. List
 returns deterministic JSON. Export can produce JSON or standalone Markdown.
 
-## Interactive keybindings
+## Interactive controls
 
-| Key             | Action                                  |
-| --------------- | --------------------------------------- |
-| `q` / `Esc`     | Quit or close the current mode          |
-| `?`             | Toggle keybinding help                  |
-| `Tab`           | Switch focus between sidebar and review |
-| `j` / `k`       | Move down or up                         |
-| `PgDn` / `PgUp` | Move by page                            |
-| `g` / `G`       | Jump to the first or last row           |
-| `]` / `[`       | Next or previous file                   |
-| `}` / `{`       | Next or previous hunk                   |
-| `/`             | Enter a search query                    |
-| `n` / `N`       | Next or previous search match           |
-| `+` / `-`       | Show more or less context               |
-| `w`             | Toggle line wrapping                    |
-| `1` / `2` / `3` | Unified, split, or automatic layout     |
-
-Review-file keybindings are covered in
-[Durable review notes](/docs/guides/review-files/).
+See the [keyboard reference](/docs/reference/keybindings/) for navigation,
+search, display, review-note, editor, filter, and mouse controls.
 
 ## Exit status
 

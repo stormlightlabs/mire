@@ -6,7 +6,8 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use mire_core::{
-    Author, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, PatchError, PatchLimits, Review, parse_patch,
+    Author, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, PatchError, PatchLimits, Review, ReviewError,
+    ReviewRevision, parse_patch,
 };
 use mire_tui::ThemeFamily;
 use thiserror::Error;
@@ -16,7 +17,9 @@ use crate::protocol::{
     ContextSelection, NoteBatch, ProtocolError, context_json, import_error_json, import_result_json, notes_json,
     notes_markdown,
 };
-use crate::review_file::{DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, read_review, write_review_atomic};
+use crate::review_file::{
+    DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, write_review_atomic,
+};
 use crate::watch::{WatchError, WatchSet};
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -62,6 +65,12 @@ enum NotesCommand {
     Export(NoteExportArgs),
 }
 
+#[derive(Debug, Subcommand)]
+enum ReviewCommand {
+    /// Create a durable review from a Git comparison.
+    Init(ReviewInitArgs),
+}
+
 #[derive(Debug, Error)]
 enum AppError {
     #[error("cannot read patch from {input:?}: {source}")]
@@ -72,6 +81,10 @@ enum AppError {
     Git(GitError),
     #[error("cannot load review: {0}")]
     ReviewFile(ReviewFileError),
+    #[error("cannot create review: {0}")]
+    CreateReviewFile(ReviewFileError),
+    #[error("cannot initialize review: {0}")]
+    InitializeReview(ReviewError),
     #[error("cannot read protocol input from {input:?}: {source}")]
     ProtocolInputIo { input: OsString, source: io::Error },
     #[error("protocol input from {input:?} exceeds the {limit}-byte limit")]
@@ -114,7 +127,7 @@ impl AppError {
             | Self::WatchStdin
             | Self::Watch(_) => 5,
             Self::Git(_) => 6,
-            Self::ReviewFile(_) => 7,
+            Self::ReviewFile(_) | Self::CreateReviewFile(_) | Self::InitializeReview(_) => 7,
             Self::ProtocolInputIo { .. }
             | Self::ProtocolInputTooLarge { .. }
             | Self::ProtocolJson(_)
@@ -222,15 +235,36 @@ struct NoteExportArgs {
 }
 
 #[derive(Args, Debug)]
+#[command(
+    arg_required_else_help = true,
+    after_help = "Create and open a review:\n  mire review init review.json main...HEAD -- src\n  mire review review.json --watch"
+)]
 struct ReviewArgs {
     /// JSON review file to open.
-    input: OsString,
+    input: Option<OsString>,
     /// Structured output format.
-    #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
+    #[arg(long, value_name = "FORMAT", value_parser = parse_json_format, requires = "input")]
     format: Option<OutputFormat>,
     /// Reload the interactive review when the review file changes.
-    #[arg(long)]
+    #[arg(long, requires = "input")]
     watch: bool,
+    #[command(subcommand)]
+    command: Option<ReviewCommand>,
+}
+
+#[derive(Args, Debug)]
+struct ReviewInitArgs {
+    /// New JSON review file to create.
+    review: OsString,
+    /// Compare the staged index with HEAD.
+    #[arg(long, conflicts_with = "revisions")]
+    staged: bool,
+    /// Git revision or revision range to compare.
+    #[arg(value_name = "REVISION")]
+    revisions: Vec<OsString>,
+    /// Repository-relative paths, supplied after --.
+    #[arg(last = true, value_name = "PATH")]
+    paths: Vec<OsString>,
 }
 
 #[derive(Args, Debug)]
@@ -324,41 +358,15 @@ fn execute(cli: Cli) -> Result<(), AppError> {
             run_changeset(changeset, format, language, theme, source)
         }
         Command::Notes(NotesArgs { command }) => execute_notes(command),
-        Command::Review(ReviewArgs { input, format, watch }) => {
-            let review_path = Path::new(&input).to_owned();
-            let review = read_review(&review_path).map_err(AppError::ReviewFile)?;
-            let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
-            if watch && (format.is_some() || !interactive) {
-                return Err(AppError::WatchRequiresTerminal);
-            }
-            if format.is_some() || !interactive {
-                write_review(&review)
-            } else if watch {
-                let mut watcher = WatchSet::new(&watched_file_parent(&review_path), false).map_err(AppError::Watch)?;
-                mire_tui::run_review_watch_with_options(
-                    review,
-                    mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
-                    |updated| write_review_atomic(&review_path, updated),
-                    || {
-                        if !watcher.reload_due() {
-                            return mire_tui::WatchUpdate::Unchanged;
-                        }
-                        match read_review(&review_path) {
-                            Ok(review) => mire_tui::WatchUpdate::Loaded(review),
-                            Err(error) => mire_tui::WatchUpdate::Failed(error.to_string()),
-                        }
-                    },
-                )
-                .map_err(AppError::Terminal)
-            } else {
-                mire_tui::run_review_with_options(
-                    &review,
-                    mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
-                    |updated| write_review_atomic(&review_path, updated),
-                )
-                .map_err(AppError::Terminal)
-            }
-        }
+        Command::Review(ReviewArgs { input, format, watch, command }) => match command {
+            Some(ReviewCommand::Init(arguments)) => initialize_review(arguments),
+            None => open_review(
+                input.expect("clap requires a review path when no review subcommand is present"),
+                format,
+                watch,
+                theme,
+            ),
+        },
         Command::Show(ShowArgs { revision, paths, format, language, watch }) => {
             let request = ShowRequest { revision, paths };
             let changeset = git::load_show(request.clone()).map_err(AppError::Git)?;
@@ -381,6 +389,61 @@ fn execute(cli: Cli) -> Result<(), AppError> {
                 Some(ReloadSource::GitDiff { root, request }),
             )
         }
+    }
+}
+
+fn initialize_review(arguments: ReviewInitArgs) -> Result<(), AppError> {
+    let ReviewInitArgs { review: destination, staged, revisions, paths } = arguments;
+    let changeset = git::load_diff(DiffRequest { staged, revisions, paths }).map_err(AppError::Git)?;
+    let review = Review::new(
+        ReviewRevision::new(1).map_err(AppError::InitializeReview)?,
+        changeset,
+        Vec::new(),
+        Vec::new(),
+    )
+    .map_err(AppError::InitializeReview)?;
+    create_review_atomic(Path::new(&destination), &review).map_err(AppError::CreateReviewFile)?;
+
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    writeln!(output, "review: {:?}", Path::new(&destination)).map_err(AppError::OutputIo)?;
+    writeln!(output, "changeset: {}", review.changeset().fingerprint()).map_err(AppError::OutputIo)?;
+    writeln!(output, "revision: {}", review.revision().get()).map_err(AppError::OutputIo)
+}
+
+fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme: ThemeFamily) -> Result<(), AppError> {
+    let review_path = Path::new(&input).to_owned();
+    let review = read_review(&review_path).map_err(AppError::ReviewFile)?;
+    let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
+    if watch && (format.is_some() || !interactive) {
+        return Err(AppError::WatchRequiresTerminal);
+    }
+    if format.is_some() || !interactive {
+        write_review(&review)
+    } else if watch {
+        let mut watcher = WatchSet::new(&watched_file_parent(&review_path), false).map_err(AppError::Watch)?;
+        mire_tui::run_review_watch_with_options(
+            review,
+            mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
+            |updated| write_review_atomic(&review_path, updated),
+            || {
+                if !watcher.reload_due() {
+                    return mire_tui::WatchUpdate::Unchanged;
+                }
+                match read_review(&review_path) {
+                    Ok(review) => mire_tui::WatchUpdate::Loaded(review),
+                    Err(error) => mire_tui::WatchUpdate::Failed(error.to_string()),
+                }
+            },
+        )
+        .map_err(AppError::Terminal)
+    } else {
+        mire_tui::run_review_with_options(
+            &review,
+            mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
+            |updated| write_review_atomic(&review_path, updated),
+        )
+        .map_err(AppError::Terminal)
     }
 }
 
@@ -639,6 +702,24 @@ mod tests {
         };
         assert_eq!(arguments.revisions, ["main...HEAD"]);
         assert_eq!(arguments.paths, ["src/lib.rs"]);
+    }
+
+    #[test]
+    fn clap_accepts_review_initialization_and_opening() {
+        let cli = Cli::try_parse_from(["mire", "review", "init", "review.json", "main...HEAD", "--", "src"]).unwrap();
+        let Command::Review(ReviewArgs { command: Some(ReviewCommand::Init(arguments)), .. }) = cli.command else {
+            panic!("review init command is parsed");
+        };
+        assert_eq!(arguments.review, "review.json");
+        assert_eq!(arguments.revisions, ["main...HEAD"]);
+        assert_eq!(arguments.paths, ["src"]);
+
+        let cli = Cli::try_parse_from(["mire", "review", "review.json", "--watch"]).unwrap();
+        let Command::Review(arguments) = cli.command else {
+            panic!("review command is parsed");
+        };
+        assert_eq!(arguments.input.as_deref(), Some(OsStr::new("review.json")));
+        assert!(arguments.watch);
     }
 
     #[test]

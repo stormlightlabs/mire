@@ -168,6 +168,7 @@ where
                 let size = terminal.size()?;
                 app.resize(size.width, size.height);
             }
+            WatchUpdate::Fatal(error) => return Err(io::Error::other(error)),
         }
     }
     Ok(())
@@ -254,6 +255,7 @@ where
                 let size = terminal.size()?;
                 app.resize(size.width, size.height);
             }
+            WatchUpdate::Fatal(error) => return Err(io::Error::other(error)),
         }
     }
     Ok(())

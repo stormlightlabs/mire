@@ -56,7 +56,18 @@ with a file-backed patch in an interactive terminal.
 mire review REVIEW.json [--format json] [--watch]
 ```
 
-Without a structured format, this opens the review in the TUI.
+Without a structured format, this opens the review in the TUI. Initialize or
+refresh a source-backed review with:
+
+```text
+mire review init REVIEW.json [--staged] [REVISION]... [-- PATH]...
+mire review refresh REVIEW.json
+```
+
+`review refresh` repeats the recorded Git comparison, re-anchors every finding,
+and atomically replaces the file. It prints `status: unchanged` without writing
+when the capture fingerprint has not changed. Reviews without a source binding
+cannot be refreshed.
 
 ### `mire context`
 

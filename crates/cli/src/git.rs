@@ -140,7 +140,7 @@ pub fn load_diff_with_binding(request: DiffRequest) -> Result<(Changeset, Source
     };
     let binding =
         SourceBinding::git(repository_identity(&repository)?, operation.clone()).map_err(GitError::SourceBinding)?;
-    let changeset = load_diff_in_repository_with_source(&repository, &request, source)?;
+    let changeset = load_diff_in_repository_with_source(&repository, &request, source, true)?;
     validate_repository_binding(&binding)?;
     Ok((changeset, binding))
 }
@@ -149,10 +149,29 @@ pub fn load_diff_with_binding(request: DiffRequest) -> Result<(Changeset, Source
 pub fn load_bound_diff(binding: &SourceBinding) -> Result<Changeset> {
     let repository = validate_repository_binding(binding)?;
     let (_, operation) = binding.git_parts();
-    let request = request_from_operation(operation)?;
-    let changeset = load_diff_in_repository(&repository, &request)?;
+    let mut request = request_from_operation(operation)?;
+    for path in &mut request.paths {
+        let mut literal = OsString::from(":(literal)");
+        literal.push(&*path);
+        *path = literal;
+    }
+    if request.paths.is_empty() && !binding.excluded_paths().is_empty() {
+        request.paths.push(OsString::from(":(top)**"));
+    }
+    for path in binding.excluded_paths() {
+        let mut exclusion = OsString::from(":(exclude)");
+        exclusion.push(model_path_to_os_string(path)?);
+        request.paths.push(exclusion);
+    }
+    let source = ChangesetSource::Git { operation: operation.clone() };
+    let changeset = load_diff_in_repository_with_source(&repository, &request, source, false)?;
     validate_repository_binding(binding)?;
     Ok(changeset)
+}
+
+/// Returns the validated worktree root recorded by a source binding.
+pub fn bound_repository_root(binding: &SourceBinding) -> Result<PathBuf> {
+    validate_repository_binding(binding).map(|repository| repository.root)
 }
 
 /// Loads one commit through native Git.
@@ -232,11 +251,11 @@ fn diff_source(request: &DiffRequest) -> Result<ChangesetSource> {
 
 fn load_diff_in_repository(repository: &GitRepository, request: &DiffRequest) -> Result<Changeset> {
     let source = diff_source(request)?;
-    load_diff_in_repository_with_source(repository, request, source)
+    load_diff_in_repository_with_source(repository, request, source, true)
 }
 
 fn load_diff_in_repository_with_source(
-    repository: &GitRepository, request: &DiffRequest, source: ChangesetSource,
+    repository: &GitRepository, request: &DiffRequest, source: ChangesetSource, literal_pathspecs: bool,
 ) -> Result<Changeset> {
     let mut arguments = diff_options();
     if request.staged {
@@ -244,7 +263,12 @@ fn load_diff_in_repository_with_source(
     }
     arguments.extend(request.revisions.iter().cloned());
     push_paths(&mut arguments, &request.paths);
-    let output = run_git(Some(&repository.root), &arguments, DEFAULT_MAX_PATCH_BYTES)?;
+    let output = run_git_with_literal_pathspecs(
+        Some(&repository.root),
+        &arguments,
+        DEFAULT_MAX_PATCH_BYTES,
+        literal_pathspecs,
+    )?;
     ensure_success("diff", &output, &[0])?;
 
     let mut patch = output.stdout;
@@ -254,7 +278,7 @@ fn load_diff_in_repository_with_source(
             ChangesetSource::Git { operation: GitOperation::Worktree { .. } }
         )
     {
-        append_untracked_patches(repository, &request.paths, &mut patch)?;
+        append_untracked_patches(repository, &request.paths, &mut patch, literal_pathspecs)?;
     }
     parse_patch(&patch, source, PatchLimits::default()).map_err(GitError::Patch)
 }
@@ -335,7 +359,9 @@ fn filesystem_identity(path: &Path) -> Result<FilesystemIdentity> {
     Ok(FilesystemIdentity::windows(volume_serial_number, file_index))
 }
 
-fn append_untracked_patches(repository: &GitRepository, paths: &[OsString], patch: &mut Vec<u8>) -> Result<()> {
+fn append_untracked_patches(
+    repository: &GitRepository, paths: &[OsString], patch: &mut Vec<u8>, literal_pathspecs: bool,
+) -> Result<()> {
     let mut arguments = vec![
         OsString::from("ls-files"),
         OsString::from("--others"),
@@ -344,7 +370,12 @@ fn append_untracked_patches(repository: &GitRepository, paths: &[OsString], patc
         OsString::from("-z"),
     ];
     push_paths(&mut arguments, paths);
-    let output = run_git(Some(&repository.root), &arguments, DEFAULT_MAX_PATCH_BYTES)?;
+    let output = run_git_with_literal_pathspecs(
+        Some(&repository.root),
+        &arguments,
+        DEFAULT_MAX_PATCH_BYTES,
+        literal_pathspecs,
+    )?;
     ensure_success("list untracked files", &output, &[0])?;
 
     for path in output.stdout.split(|byte| *byte == 0).filter(|path| !path.is_empty()) {
@@ -363,13 +394,19 @@ fn append_untracked_patches(repository: &GitRepository, paths: &[OsString], patc
 }
 
 fn run_git(cwd: Option<&Path>, arguments: &[OsString], stdout_limit: usize) -> Result<GitOutput> {
+    run_git_with_literal_pathspecs(cwd, arguments, stdout_limit, true)
+}
+
+fn run_git_with_literal_pathspecs(
+    cwd: Option<&Path>, arguments: &[OsString], stdout_limit: usize, literal_pathspecs: bool,
+) -> Result<GitOutput> {
     let mut command = Command::new("git");
     command
         .arg("--no-pager")
         .args(arguments)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_PAGER", "cat")
-        .env("GIT_LITERAL_PATHSPECS", "1")
+        .env("GIT_LITERAL_PATHSPECS", if literal_pathspecs { "1" } else { "0" })
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

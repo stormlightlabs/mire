@@ -11,7 +11,7 @@ use serde_json::json;
 use thiserror::Error;
 
 /// Protocol schema emitted by non-interactive review commands.
-pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 1 };
+pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 2 };
 
 type Result<T> = std::result::Result<T, ProtocolError>;
 
@@ -260,20 +260,23 @@ struct NoteSummary<'a> {
     annotation_kind: mire_core::AnnotationKind,
     status: NoteStatus,
     provenance: &'a Provenance,
+    reanchor_outcome: Option<&'a mire_core::ReanchorOutcome>,
 }
 
 impl<'a> From<&'a ReviewNote> for NoteSummary<'a> {
     fn from(note: &'a ReviewNote) -> Self {
+        let anchor = note.current_anchor().unwrap_or_else(|| note.anchor());
         Self {
             id: note.id().as_str(),
-            path: note.anchor().path(),
-            side: note.anchor().side(),
-            start: note.anchor().range().start().get(),
-            end: note.anchor().range().end().get(),
+            path: anchor.path(),
+            side: anchor.side(),
+            start: anchor.range().start().get(),
+            end: anchor.range().end().get(),
             severity: note.severity(),
             annotation_kind: note.annotation_kind(),
             status: note.status(),
             provenance: note.provenance(),
+            reanchor_outcome: note.reanchor_outcome(),
         }
     }
 }
@@ -464,15 +467,16 @@ pub fn notes_markdown(review: &Review) -> Vec<u8> {
         return output.into_bytes();
     }
     for note in review.notes() {
-        let anchor = note.anchor();
+        let anchor = note.current_anchor().unwrap_or_else(|| note.anchor());
         output.push_str(&format!(
-            "\n## {}: {}\n\n- Kind: `{}`\n- Status: `{}`\n- Author: {}\n- Provenance: {}\n- Location: `{}` ({}, lines {}–{})\n\n{}\n",
+            "\n## {}: {}\n\n- Kind: `{}`\n- Status: `{}`\n- Author: {}\n- Provenance: {}\n- Re-anchor: `{}`\n- Location: `{}` ({}, lines {}–{})\n\n{}\n",
             note.severity(),
             note.id().as_str(),
             note.annotation_kind(),
             note.status(),
             note.author().display_name().unwrap_or(note.author().id()),
             note.provenance(),
+            reanchor_label(note),
             String::from_utf8_lossy(anchor.path().as_bytes()),
             anchor.side(),
             anchor.range().start().get(),
@@ -481,6 +485,16 @@ pub fn notes_markdown(review: &Review) -> Vec<u8> {
         ));
     }
     output.into_bytes()
+}
+
+fn reanchor_label(note: &ReviewNote) -> &'static str {
+    match note.reanchor_outcome() {
+        None => "original",
+        Some(mire_core::ReanchorOutcome::Exact { .. }) => "exact",
+        Some(mire_core::ReanchorOutcome::Moved { .. }) => "moved",
+        Some(mire_core::ReanchorOutcome::Stale { .. }) => "stale",
+        Some(mire_core::ReanchorOutcome::Ambiguous { .. }) => "ambiguous",
+    }
 }
 
 fn bounded_json(value: &impl Serialize, limit: usize) -> Result<Vec<u8>> {

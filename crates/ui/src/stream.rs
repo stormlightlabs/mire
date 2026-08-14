@@ -354,11 +354,15 @@ struct NotePlacement {
 
 fn attach_notes(rows: &mut Vec<RowKey>, changeset: &Changeset, notes: &[ReviewNote], visible_notes: &[usize]) {
     let mut pending = BTreeMap::<NotePlacement, Vec<usize>>::new();
+    let mut unplaced = Vec::new();
     for note_index in visible_notes.iter().copied() {
         let Some(note) = notes.get(note_index) else {
             continue;
         };
-        let anchor = note.anchor();
+        let Some(anchor) = note.current_anchor() else {
+            unplaced.push(note_index);
+            continue;
+        };
         let placement = NotePlacement {
             path: anchor.path().as_bytes().to_vec(),
             side: anchor.side(),
@@ -367,7 +371,7 @@ fn attach_notes(rows: &mut Vec<RowKey>, changeset: &Changeset, notes: &[ReviewNo
         };
         pending.entry(placement).or_default().push(note_index);
     }
-    if pending.is_empty() {
+    if pending.is_empty() && unplaced.is_empty() {
         return;
     }
 
@@ -387,7 +391,21 @@ fn attach_notes(rows: &mut Vec<RowKey>, changeset: &Changeset, notes: &[ReviewNo
             }
         }
     }
+    for note_indices in pending.into_values().chain(std::iter::once(unplaced)) {
+        for note in note_indices {
+            let file = notes.get(note).and_then(|note| note_file(changeset, note)).unwrap_or(0);
+            combined.push(RowKey::Note { file, note });
+        }
+    }
     *rows = combined;
+}
+
+fn note_file(changeset: &Changeset, note: &ReviewNote) -> Option<usize> {
+    let anchor = note.current_anchor().unwrap_or_else(|| note.anchor());
+    changeset.files().iter().position(|file| {
+        file.old_side().is_some_and(|side| side.path == *anchor.path())
+            || file.new_side().is_some_and(|side| side.path == *anchor.path())
+    })
 }
 
 fn row_note_placements(row: RowKey, changeset: &Changeset) -> Vec<NotePlacement> {
@@ -453,9 +471,12 @@ fn note_hunks(changeset: &Changeset, notes: &[ReviewNote], visible_notes: &[usiz
         let Some(note) = notes.get(*note_index) else {
             continue;
         };
+        let Some(anchor) = note.current_anchor() else {
+            continue;
+        };
         for (file_index, file) in changeset.files().iter().enumerate() {
-            let path_matches = file.old_side().is_some_and(|side| side.path == *note.anchor().path())
-                || file.new_side().is_some_and(|side| side.path == *note.anchor().path());
+            let path_matches = file.old_side().is_some_and(|side| side.path == *anchor.path())
+                || file.new_side().is_some_and(|side| side.path == *anchor.path());
             if !path_matches {
                 continue;
             }
@@ -464,7 +485,7 @@ fn note_hunks(changeset: &Changeset, notes: &[ReviewNote], visible_notes: &[usiz
             };
             if let Some(hunk) = hunks
                 .iter()
-                .position(|hunk| hunk.fingerprint() == note.anchor().hunk_fingerprint())
+                .position(|hunk| hunk.fingerprint() == anchor.hunk_fingerprint())
             {
                 result.insert((file_index, hunk));
             }

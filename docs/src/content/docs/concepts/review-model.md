@@ -17,7 +17,7 @@ Mire's durable review model has four primary objects:
 Changeset   source, files, hunks, fingerprint
 Anchor      side, path, line range, hunk and content fingerprints
 ReviewNote  anchor, author, severity, kind, status, body, provenance
-Review      captured changeset, revision, notes, and note events
+Review      captured changeset, source binding, revision, notes, and note events
 ```
 
 The TUI and CLI use the same validation rules. Tools can therefore add findings
@@ -34,6 +34,24 @@ An anchor contains the original location and evidence tying the note to the
 reviewed content. This avoids treating a mutable line number as permanent
 identity.
 
+## Re-anchoring
+
+A review initialized from Git stores the repository identity and comparison
+needed to capture it again. Mire validates that identity before every refresh.
+Moving, replacing, or deleting the repository returns an error rather than
+reading a different source.
+
+A refresh classifies each finding:
+
+- `exact`: the complete prior anchor still exists;
+- `moved`: path, selected content, and nearby context identify one candidate;
+- `stale`: no supported candidate exists;
+- `ambiguous`: several candidates have equal support.
+
+Mire never chooses an ambiguous candidate. The note retains its initial anchor,
+each candidate anchor, and the evidence used for the result, keeping the data
+available in review JSON and note exports.
+
 ## Authorship and provenance
 
 Every note records its author and producer provenance. Human, agent, analyzer,
@@ -49,10 +67,15 @@ only the latest label.
 Review schemas carry explicit versions and reject unsupported major versions.
 Mire bounds review size, note count, imported payloads, and expanded context.
 
-A location batch validates the entire transaction before Mire atomically
-replaces the review file. Failed validation leaves the previous file unchanged.
+A location batch and a source refresh validate the entire transaction before
+Mire atomically replaces the review file.
+
+Failed validation leaves the previous file unchanged.
+
 Every mutation includes the revision its caller read, so a concurrent update
 produces a `revision_conflict` instead of overwriting newer data.
+
+A capture with the same fingerprint does not advance the revision or rewrite the file.
 
 ## Context for agents
 
@@ -65,6 +88,5 @@ mire context review.json --hunk HUNK_FINGERPRINT --max-bytes 20000
 mire context review.json --patch --max-bytes 50000
 ```
 
-The default manifest is compact. File, hunk, and patch expansion requires an
-explicit byte limit so callers choose the amount of code they are prepared to
-consume.
+The default manifest is compact so file, hunk, and patch expansion requires an
+explicit byte limit so callers choose the amount of code they are prepared to consume.

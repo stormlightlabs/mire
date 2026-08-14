@@ -143,12 +143,12 @@ produce one candidate.
 
 Acceptance criteria:
 
-- [ ] Every result is classified as exact, moved, stale, or ambiguous.
-- [ ] Ambiguous notes never move automatically.
-- [ ] The original anchor, candidate anchor, and match evidence remain
+- [x] Every result is classified as exact, moved, stale, or ambiguous.
+- [x] Ambiguous notes never move automatically.
+- [x] The original anchor, candidate anchor, and match evidence remain
       inspectable.
-- [ ] Re-anchoring all notes succeeds or fails as one review transaction.
-- [ ] Property and adversarial tests cover duplicate code, moved hunks, renames,
+- [x] Re-anchoring all notes succeeds or fails as one review transaction.
+- [x] Property and adversarial tests cover duplicate code, moved hunks, renames,
       whitespace-only edits, deleted lines, and changed path filters.
 
 Verification:
@@ -164,16 +164,16 @@ observe both the review file and its bound source.
 
 Acceptance criteria:
 
-- [ ] Refresh captures the bound comparison, re-anchors all notes, advances the
+- [x] Refresh captures the bound comparison, re-anchors all notes, advances the
       review revision, and atomically replaces the review file.
-- [ ] Unchanged captures do not advance the revision or rewrite the file.
-- [ ] External note writes and source changes coalesce without losing either
+- [x] Unchanged captures do not advance the revision or rewrite the file.
+- [x] External note writes and source changes coalesce without losing either
       update.
-- [ ] The selected file, logical row, filters, layout, and nearest finding
+- [x] The selected file, logical row, filters, layout, and nearest finding
       survive when their identities still exist.
-- [ ] Source failures appear as recoverable TUI state while review-file
+- [x] Source failures appear as recoverable TUI state while review-file
       corruption remains a hard persistence error.
-- [ ] Context export always reports the current capture and review revision.
+- [x] Context export always reports the current capture and review revision.
 
 Verification:
 

@@ -29,8 +29,10 @@ pub enum WatchUpdate<T> {
     Unchanged,
     /// New content was loaded successfully.
     Loaded(T),
-    /// Reloading failed, but watching should continue.
+    /// Reloading the bound source failed, but watching should continue.
     Failed(String),
+    /// The durable review file became unreadable and the session must stop.
+    Fatal(String),
 }
 
 /// Opens an interactive review and restores the terminal before returning.

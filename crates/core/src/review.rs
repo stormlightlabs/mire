@@ -13,8 +13,10 @@ use crate::{
     SchemaVersion,
 };
 
+mod reanchor;
+
 /// The review-file JSON schema emitted by this version of Mire.
-pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 2 };
+pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 3 };
 /// Maximum number of notes accepted in one review file.
 pub const MAX_REVIEW_NOTES: usize = 10_000;
 /// Maximum UTF-8 byte length of one note body.
@@ -550,6 +552,110 @@ impl Anchor {
     }
 }
 
+/// Evidence used to accept or reject one re-anchor candidate.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReanchorEvidence {
+    path_match: bool,
+    content_match: bool,
+    context_before: u32,
+    context_after: u32,
+}
+
+impl ReanchorEvidence {
+    /// Reports whether the candidate retains the prior repository-relative path.
+    pub const fn path_match(self) -> bool {
+        self.path_match
+    }
+
+    /// Reports whether every selected source byte matches the prior anchor.
+    pub const fn content_match(self) -> bool {
+        self.content_match
+    }
+
+    /// Returns matching context lines immediately before the selection.
+    pub const fn context_before(self) -> u32 {
+        self.context_before
+    }
+
+    /// Returns matching context lines immediately after the selection.
+    pub const fn context_after(self) -> u32 {
+        self.context_after
+    }
+}
+
+/// One possible current location and the evidence supporting it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ReanchorCandidate {
+    anchor: Anchor,
+    evidence: ReanchorEvidence,
+}
+
+impl ReanchorCandidate {
+    /// Returns the possible current anchor.
+    pub const fn anchor(&self) -> &Anchor {
+        &self.anchor
+    }
+
+    /// Returns the evidence supporting this candidate.
+    pub const fn evidence(&self) -> ReanchorEvidence {
+        self.evidence
+    }
+}
+
+/// The conservative result of matching one note against a later capture.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ReanchorOutcome {
+    /// The complete prior anchor identity still exists.
+    Exact {
+        original_anchor: Anchor,
+        candidate: ReanchorCandidate,
+    },
+    /// One content-and-path-supported current location was found.
+    Moved {
+        original_anchor: Anchor,
+        candidate: ReanchorCandidate,
+    },
+    /// No supported current location was found.
+    Stale {
+        original_anchor: Anchor,
+        evidence: ReanchorEvidence,
+    },
+    /// More than one equally supported current location was found.
+    Ambiguous {
+        original_anchor: Anchor,
+        candidates: Vec<ReanchorCandidate>,
+    },
+}
+
+impl ReanchorOutcome {
+    /// Returns the anchor initially recorded for the note.
+    pub const fn original_anchor(&self) -> &Anchor {
+        match self {
+            Self::Exact { original_anchor, .. }
+            | Self::Moved { original_anchor, .. }
+            | Self::Stale { original_anchor, .. }
+            | Self::Ambiguous { original_anchor, .. } => original_anchor,
+        }
+    }
+
+    /// Returns the accepted current anchor for exact and moved results.
+    pub const fn current_anchor(&self) -> Option<&Anchor> {
+        match self {
+            Self::Exact { candidate, .. } | Self::Moved { candidate, .. } => Some(&candidate.anchor),
+            Self::Stale { .. } | Self::Ambiguous { .. } => None,
+        }
+    }
+
+    /// Returns ambiguous candidates, or an empty slice for a settled result.
+    pub fn candidates(&self) -> &[ReanchorCandidate] {
+        match self {
+            Self::Ambiguous { candidates, .. } => candidates,
+            _ => &[],
+        }
+    }
+}
+
 /// The person or process responsible for a note or event.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Author {
@@ -591,6 +697,8 @@ pub struct ReviewNote {
     status: NoteStatus,
     body: String,
     provenance: Provenance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reanchor_outcome: Option<ReanchorOutcome>,
     #[serde(default, flatten)]
     extensions: BTreeMap<String, Value>,
 }
@@ -612,6 +720,7 @@ impl ReviewNote {
             status,
             body,
             provenance,
+            reanchor_outcome: None,
             extensions: BTreeMap::new(),
         })
     }
@@ -660,6 +769,18 @@ impl ReviewNote {
     /// Returns how the note entered the review.
     pub const fn provenance(&self) -> &Provenance {
         &self.provenance
+    }
+
+    /// Returns the latest match result, if this note has crossed a capture.
+    pub const fn reanchor_outcome(&self) -> Option<&ReanchorOutcome> {
+        self.reanchor_outcome.as_ref()
+    }
+
+    /// Returns the accepted location in the current capture.
+    pub fn current_anchor(&self) -> Option<&Anchor> {
+        self.reanchor_outcome
+            .as_ref()
+            .map_or(Some(&self.anchor), ReanchorOutcome::current_anchor)
     }
 }
 
@@ -791,6 +912,9 @@ pub enum SourceBinding {
         repository: RepositoryIdentity,
         /// The exact native Git request, including path filters.
         comparison: GitOperation,
+        /// Generated artifacts omitted when the comparison is repeated.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        excluded_paths: Vec<BytePath>,
         /// Compatible fields written by newer schema versions.
         #[serde(default, flatten)]
         extensions: BTreeMap<String, Value>,
@@ -803,13 +927,30 @@ impl SourceBinding {
         if matches!(comparison, GitOperation::Show { .. }) {
             return Err(ReviewError::UnsupportedBindingOperation);
         }
-        Ok(Self::Git { repository, comparison, extensions: BTreeMap::new() })
+        Ok(Self::Git { repository, comparison, excluded_paths: Vec::new(), extensions: BTreeMap::new() })
+    }
+
+    /// Excludes a generated repository-relative path from later captures.
+    pub fn with_excluded_path(mut self, path: BytePath) -> Self {
+        let Self::Git { excluded_paths, .. } = &mut self;
+        if !excluded_paths.contains(&path) {
+            excluded_paths.push(path);
+            excluded_paths.sort();
+        }
+        self
     }
 
     /// Returns the bound Git repository identity and comparison request.
     pub const fn git_parts(&self) -> (&RepositoryIdentity, &GitOperation) {
         match self {
             Self::Git { repository, comparison, .. } => (repository, comparison),
+        }
+    }
+
+    /// Returns generated repository-relative paths omitted from later captures.
+    pub fn excluded_paths(&self) -> &[BytePath] {
+        match self {
+            Self::Git { excluded_paths, .. } => excluded_paths,
         }
     }
 }
@@ -1007,6 +1148,11 @@ impl Review {
                 .map(|(input_index, failure)| NoteApplyFailure { input_index, error: failure.error })
                 .collect(),
         })
+    }
+
+    /// Re-anchors every note against a replacement capture as one validated revision.
+    pub fn reanchor(&self, changeset: Changeset) -> Result<Self> {
+        reanchor::reanchor_review(self, changeset)
     }
 
     /// Replaces the editable content of one note and advances the review revision.
@@ -1362,7 +1508,28 @@ fn validate_imported_notes(review: &Review, imported: &[ReviewNote]) -> Vec<Note
 }
 
 fn validate_note(changeset: &Changeset, note: &ReviewNote) -> Result<()> {
-    note.anchor.validate(changeset)?;
+    match &note.reanchor_outcome {
+        None => note.anchor.validate(changeset)?,
+        Some(outcome) => {
+            if outcome.original_anchor() != &note.anchor {
+                return Err(ReviewError::ContentFingerprintMismatch);
+            }
+            match outcome {
+                ReanchorOutcome::Exact { candidate, .. } | ReanchorOutcome::Moved { candidate, .. } => {
+                    candidate.anchor.validate(changeset)?;
+                }
+                ReanchorOutcome::Stale { .. } => {}
+                ReanchorOutcome::Ambiguous { candidates, .. } => {
+                    if candidates.len() < 2 {
+                        return Err(ReviewError::AmbiguousAnchor);
+                    }
+                    for candidate in candidates {
+                        candidate.anchor.validate(changeset)?;
+                    }
+                }
+            }
+        }
+    }
     validate_text("author identifier", note.author.id(), 256)?;
     if let Some(name) = note.author.display_name() {
         validate_text("author display name", name, 256)?;

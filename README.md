@@ -13,7 +13,7 @@ Mire is a terminal-based diffing and collaborative code review tool for humans a
 - Use unified, split, or responsive layouts with syntax and intraline highlighting.
 - Create durable review files with anchored findings, attribution, and decisions.
 - Exchange bounded context and findings with local agents through JSON.
-- Watch Git comparisons, patches, and review files for changes.
+- Watch Git comparisons, patches, and source-backed reviews for changes.
 
 ## Installation
 
@@ -65,9 +65,14 @@ Capture a Git comparison in a review file, then open it:
 ```sh
 mire review init review.json main...HEAD -- src tests
 mire review review.json --watch
+
+# Refresh without opening the TUI
+mire review refresh review.json
 ```
 
-Mire assigns note identifiers and anchor fingerprints. Mutations include
+A source-backed review refreshes from its recorded Git comparison. Mire keeps
+exact findings in place, moves only a unique content-supported match, and marks
+other findings stale or ambiguous. Mire assigns note identifiers and anchor fingerprints. Mutations include
 the review revision the caller read, so stale writes do not replace newer changes.
 
 See [Review Notes](docs/src/content/docs/guides/review-files.md) for the TUI and

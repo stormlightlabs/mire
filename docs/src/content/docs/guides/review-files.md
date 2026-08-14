@@ -30,6 +30,27 @@ annotation kind.
 Mire saves changes by atomically replacing the review file. If a write fails,
 the editor remains open with the note text intact.
 
+## Refresh changed code
+
+Reviews created with `mire review init` retain their Git comparison. Refresh the
+capture after editing the source:
+
+```sh
+mire review refresh review.json
+```
+
+Each finding receives an `exact`, `moved`, `stale`, or `ambiguous` result. Mire
+moves a finding only when its path, selected content, and nearby context leave
+one candidate. Duplicate matches will remain ambiguous.
+
+JSON and Markdown exports retain the initial anchor, current candidates, and
+match evidence.
+
+A refresh advances the review revision only when the captured changeset changes.
+
+The write validates and replaces the complete review, so a failed match or concurrent
+note update cannot leave a partly refreshed file.
+
 ## Navigate and filter notes
 
 Use `p` and `P` to move to the next or previous visible note. Press `f` to
@@ -62,7 +83,7 @@ mire skill path
 
 Give that skill path and the review file path to the agent. Keep the review open
 with `mire review review.json --watch` to see findings as the agent applies
-them. Mire installs the skill in the standard
+them and to refresh when the bound Git source changes. Mire installs the skill in the standard
 `$HOME/.agents/skills/mire` directory.
 
 The skill starts with the context manifest, expands only named context with an

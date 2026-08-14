@@ -60,8 +60,8 @@ impl WatchProcess {
     }
 
     fn finish(mut self) -> (bool, Vec<u8>) {
-        self.writer.write_all(b"q").expect("quit key can be sent");
-        self.writer.flush().expect("quit key can be flushed");
+        let _ = self.writer.write_all(b"q");
+        let _ = self.writer.flush();
         let status = self.child.wait().expect("watch process exits");
         drop(self.writer);
         drop(self.master);
@@ -106,6 +106,47 @@ fn patch_watch_reloads_and_recovers_after_rename_delete_and_recreate() {
         String::from_utf8_lossy(&output)
     );
     assert!(contains(&output, b"\x1b[?1049l"), "alternate screen was not restored");
+}
+
+#[test]
+fn source_backed_review_watch_refreshes_the_review_file() {
+    let directory = TempDirectory::new();
+    git(&directory.0, ["init", "--quiet"]);
+    git(&directory.0, ["config", "user.name", "Mire Tests"]);
+    git(&directory.0, ["config", "user.email", "mire@example.invalid"]);
+    fs::write(directory.0.join("tracked.txt"), b"base\n").expect("base file can be written");
+    git(&directory.0, ["add", "tracked.txt"]);
+    git(&directory.0, ["commit", "--quiet", "-m", "base"]);
+    fs::write(directory.0.join("tracked.txt"), b"initial-review-value\n").expect("initial edit can be written");
+    let initialized = Command::new(binary())
+        .args(["review", "init", "review.json"])
+        .current_dir(&directory.0)
+        .output()
+        .expect("review initialization runs");
+    assert!(
+        initialized.status.success(),
+        "{}",
+        String::from_utf8_lossy(&initialized.stderr)
+    );
+
+    let process = WatchProcess::spawn(&directory.0, &["review", "review.json", "--watch"]);
+    thread::sleep(Duration::from_millis(600));
+    fs::write(directory.0.join("tracked.txt"), b"refreshed-review-value\n").expect("source can be edited");
+    thread::sleep(Duration::from_millis(2_500));
+    let (success, output) = process.finish();
+
+    assert!(
+        success,
+        "review watch process failed: {}",
+        String::from_utf8_lossy(&output)
+    );
+    assert!(
+        contains(&output, b"refreshed-review-value"),
+        "{}",
+        String::from_utf8_lossy(&output)
+    );
+    let review = mire::read_review(directory.0.join("review.json")).expect("watched review remains valid");
+    assert_eq!(review.revision().get(), 2);
 }
 
 #[test]

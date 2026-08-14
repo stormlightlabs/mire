@@ -6,9 +6,9 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use mire_core::{
-    AnchorSide, AnnotationKind, Author, BytePath, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, Fingerprint,
-    LineNumber, LineRange, NoteId, NoteInput, NoteSeverity, NoteStatus, PatchError, PatchLimits, Provenance, Review,
-    ReviewError, ReviewRevision, parse_patch,
+    AnchorSide, AnnotationKind, Author, BytePath, BytePathError, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES,
+    Fingerprint, LineNumber, LineRange, NoteId, NoteInput, NoteSeverity, NoteStatus, PatchError, PatchLimits,
+    Provenance, Review, ReviewError, ReviewRevision, parse_patch,
 };
 use mire_tui::ThemeFamily;
 use thiserror::Error;
@@ -89,6 +89,8 @@ enum NotesCommand {
 enum ReviewCommand {
     /// Create a durable review from a Git comparison.
     Init(ReviewInitArgs),
+    /// Capture the bound comparison and conservatively re-anchor its notes.
+    Refresh(ReviewRefreshArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -111,6 +113,14 @@ enum AppError {
     CreateReviewFile(ReviewFileError),
     #[error("cannot initialize review: {0}")]
     InitializeReview(ReviewError),
+    #[error("cannot resolve review destination {path:?}: {source}")]
+    ReviewDestination { path: PathBuf, source: io::Error },
+    #[error("review destination is not a safe repository-relative path: {0}")]
+    ReviewDestinationPath(BytePathError),
+    #[error("cannot refresh review: {0}")]
+    RefreshReview(ReviewError),
+    #[error("review has no reloadable source binding")]
+    NonRefreshableReview,
     #[error("cannot read protocol input from {input:?}: {source}")]
     ProtocolInputIo { input: OsString, source: io::Error },
     #[error("protocol input from {input:?} exceeds the {limit}-byte limit")]
@@ -156,7 +166,13 @@ impl AppError {
             | Self::WatchStdin
             | Self::Watch(_) => 5,
             Self::Git(_) => 6,
-            Self::ReviewFile(_) | Self::CreateReviewFile(_) | Self::InitializeReview(_) => 7,
+            Self::ReviewFile(_)
+            | Self::CreateReviewFile(_)
+            | Self::InitializeReview(_)
+            | Self::ReviewDestination { .. }
+            | Self::ReviewDestinationPath(_)
+            | Self::RefreshReview(_)
+            | Self::NonRefreshableReview => 7,
             Self::ProtocolInputIo { .. }
             | Self::ProtocolInputTooLarge { .. }
             | Self::ProtocolJson(_)
@@ -356,6 +372,12 @@ struct ReviewArgs {
 }
 
 #[derive(Args, Debug)]
+struct ReviewRefreshArgs {
+    /// Existing source-backed review file to refresh.
+    review: OsString,
+}
+
+#[derive(Args, Debug)]
 struct ReviewInitArgs {
     /// New JSON review file to create.
     review: OsString,
@@ -481,6 +503,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
         Command::Notes(NotesArgs { command }) => execute_notes(command),
         Command::Review(ReviewArgs { input, format, watch, command }) => match command {
             Some(ReviewCommand::Init(arguments)) => initialize_review(arguments),
+            Some(ReviewCommand::Refresh(arguments)) => refresh_review(arguments),
             None => open_review(
                 input.expect("clap requires a review path when no review subcommand is present"),
                 format,
@@ -519,8 +542,11 @@ fn execute(cli: Cli) -> Result<(), AppError> {
 
 fn initialize_review(arguments: ReviewInitArgs) -> Result<(), AppError> {
     let ReviewInitArgs { review: destination, staged, revisions, paths } = arguments;
-    let (changeset, source_binding) =
+    let (changeset, mut source_binding) =
         git::load_diff_with_binding(DiffRequest { staged, revisions, paths }).map_err(AppError::Git)?;
+    if let Some(path) = review_destination_exclusion(Path::new(&destination), &source_binding)? {
+        source_binding = source_binding.with_excluded_path(path);
+    }
     let review = Review::new(
         ReviewRevision::new(1).map_err(AppError::InitializeReview)?,
         changeset,
@@ -538,6 +564,55 @@ fn initialize_review(arguments: ReviewInitArgs) -> Result<(), AppError> {
     writeln!(output, "revision: {}", review.revision().get()).map_err(AppError::OutputIo)
 }
 
+fn review_destination_exclusion(
+    destination: &Path, binding: &mire_core::SourceBinding,
+) -> Result<Option<BytePath>, AppError> {
+    let parent = destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent = std::fs::canonicalize(parent)
+        .map_err(|source| AppError::ReviewDestination { path: destination.to_owned(), source })?;
+    let Some(file_name) = destination.file_name() else {
+        return Ok(None);
+    };
+    let absolute = parent.join(file_name);
+    let root = git::bound_repository_root(binding).map_err(AppError::Git)?;
+    let Ok(relative) = absolute.strip_prefix(root) else {
+        return Ok(None);
+    };
+    BytePath::new(relative.as_os_str().as_encoded_bytes())
+        .map(Some)
+        .map_err(AppError::ReviewDestinationPath)
+}
+
+fn refresh_review(arguments: ReviewRefreshArgs) -> Result<(), AppError> {
+    let path = Path::new(&arguments.review);
+    for _ in 0..8 {
+        let review = read_review(path).map_err(AppError::ReviewFile)?;
+        let binding = review.source_binding().ok_or(AppError::NonRefreshableReview)?;
+        let changeset = git::load_bound_diff(binding).map_err(AppError::Git)?;
+        let refreshed = review.reanchor(changeset).map_err(AppError::RefreshReview)?;
+        if refreshed == review {
+            return write_refresh_result("unchanged", &review);
+        }
+        match write_review_atomic_if_revision(path, review.revision(), &refreshed) {
+            Ok(()) => return write_refresh_result("refreshed", &refreshed),
+            Err(ReviewFileError::RevisionConflict { .. } | ReviewFileError::Locked { .. }) => continue,
+            Err(error) => return Err(AppError::ReviewFile(error)),
+        }
+    }
+    Err(AppError::ReviewFile(ReviewFileError::Locked { path: path.to_owned() }))
+}
+
+fn write_refresh_result(status: &str, review: &Review) -> Result<(), AppError> {
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    writeln!(output, "status: {status}").map_err(AppError::OutputIo)?;
+    writeln!(output, "changeset: {}", review.changeset().fingerprint()).map_err(AppError::OutputIo)?;
+    writeln!(output, "revision: {}", review.revision().get()).map_err(AppError::OutputIo)
+}
+
 fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme: ThemeFamily) -> Result<(), AppError> {
     let review_path = Path::new(&input).to_owned();
     let review = read_review(&review_path).map_err(AppError::ReviewFile)?;
@@ -548,7 +623,15 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
     if format.is_some() || !interactive {
         write_review(&review)
     } else if watch {
-        let mut watcher = WatchSet::new(&watched_file_parent(&review_path), false).map_err(AppError::Watch)?;
+        let mut review_watcher = WatchSet::new(&watched_file_parent(&review_path), false).map_err(AppError::Watch)?;
+        let mut source_watcher = review
+            .source_binding()
+            .map(|binding| {
+                let root = git::bound_repository_root(binding).map_err(AppError::Git)?;
+                WatchSet::new(&root, true).map(Some).map_err(AppError::Watch)
+            })
+            .transpose()?
+            .flatten();
         mire_tui::run_review_watch_with_options(
             review,
             mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
@@ -559,11 +642,41 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
                     .map_err(|error| io::Error::other(error.to_string()))
             },
             || {
-                if !watcher.reload_due() {
+                let review_due = review_watcher.reload_due();
+                let source_due = source_watcher.as_mut().is_some_and(WatchSet::reload_due);
+                if !review_due && !source_due {
                     return mire_tui::WatchUpdate::Unchanged;
                 }
-                match read_review(&review_path) {
-                    Ok(review) => mire_tui::WatchUpdate::Loaded(review),
+                let latest = match read_review(&review_path) {
+                    Ok(review) => review,
+                    Err(error) => return mire_tui::WatchUpdate::Fatal(error.to_string()),
+                };
+                if !source_due {
+                    return mire_tui::WatchUpdate::Loaded(latest);
+                }
+                let Some(binding) = latest.source_binding() else {
+                    source_watcher = None;
+                    return mire_tui::WatchUpdate::Loaded(latest);
+                };
+                let changeset = match git::load_bound_diff(binding) {
+                    Ok(changeset) => changeset,
+                    Err(error) => return mire_tui::WatchUpdate::Failed(error.to_string()),
+                };
+                let refreshed = match latest.reanchor(changeset) {
+                    Ok(review) => review,
+                    Err(error) => return mire_tui::WatchUpdate::Failed(error.to_string()),
+                };
+                if refreshed == latest {
+                    return mire_tui::WatchUpdate::Loaded(latest);
+                }
+                match write_review_atomic_if_revision(&review_path, latest.revision(), &refreshed) {
+                    Ok(()) => mire_tui::WatchUpdate::Loaded(refreshed),
+                    Err(ReviewFileError::RevisionConflict { .. } | ReviewFileError::Locked { .. }) => {
+                        match read_review(&review_path) {
+                            Ok(review) => mire_tui::WatchUpdate::Loaded(review),
+                            Err(error) => mire_tui::WatchUpdate::Fatal(error.to_string()),
+                        }
+                    }
                     Err(error) => mire_tui::WatchUpdate::Failed(error.to_string()),
                 }
             },

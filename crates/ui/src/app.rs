@@ -29,6 +29,7 @@ pub struct AppPosition {
     note_filter: NoteFilter,
     row_offset: usize,
     row_path: Option<Vec<u8>>,
+    selected_note_id: Option<String>,
     selected_path: Option<Vec<u8>>,
     wrap_lines: bool,
 }
@@ -311,6 +312,13 @@ impl<'a> App<'a> {
             }
             AppState::Loading | AppState::Empty | AppState::Error(_) => (None, 0),
         };
+        let selected_note_id = match (&self.state, &self.review) {
+            (AppState::Ready(stream), Some(review)) => match stream.row(self.current_row_index(stream)) {
+                Some(RowKey::Note { note, .. }) => review.notes().get(note).map(|note| note.id().as_str().to_owned()),
+                _ => None,
+            },
+            _ => None,
+        };
         let selected_path = match &self.state {
             AppState::Ready(stream) => stream
                 .changeset()
@@ -332,6 +340,7 @@ impl<'a> App<'a> {
             note_filter: self.note_filter,
             row_offset,
             row_path,
+            selected_note_id,
             selected_path,
             wrap_lines: self.wrap_lines,
         }
@@ -377,7 +386,22 @@ impl<'a> App<'a> {
         let end = stream
             .file_position(row_file.saturating_add(1))
             .unwrap_or_else(|| stream.len());
-        let target = start.saturating_add(position.row_offset).min(end.saturating_sub(1));
+        let fallback = start.saturating_add(position.row_offset).min(end.saturating_sub(1));
+        let target = position
+            .selected_note_id
+            .as_deref()
+            .and_then(|id| {
+                self.review
+                    .as_ref()?
+                    .notes()
+                    .iter()
+                    .position(|note| note.id().as_str() == id)
+            })
+            .and_then(|note| {
+                (0..stream.len())
+                    .find(|row| matches!(stream.row(*row), Some(RowKey::Note { note: found, .. }) if found == note))
+            })
+            .unwrap_or(fallback);
         if self.review.is_some() {
             self.set_review_cursor(target);
         } else {
@@ -1190,10 +1214,15 @@ fn visible_note_indices(review: &Review, filter: NoteFilter) -> Vec<usize> {
 }
 
 fn note_file(changeset: &Changeset, note: &ReviewNote) -> Option<usize> {
-    changeset.files().iter().position(|file| {
-        file.old_side().is_some_and(|side| side.path == *note.anchor().path())
-            || file.new_side().is_some_and(|side| side.path == *note.anchor().path())
-    })
+    let anchor = note.current_anchor().unwrap_or_else(|| note.anchor());
+    changeset
+        .files()
+        .iter()
+        .position(|file| {
+            file.old_side().is_some_and(|side| side.path == *anchor.path())
+                || file.new_side().is_some_and(|side| side.path == *anchor.path())
+        })
+        .or_else(|| (!changeset.files().is_empty()).then_some(0))
 }
 
 fn next_human_note_id(review: &Review) -> NoteId {

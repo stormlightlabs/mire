@@ -41,7 +41,6 @@ enum KeyPattern {
     Char(char),
     Down,
     End,
-    Esc,
     Home,
     PageDown,
     PageUp,
@@ -58,12 +57,7 @@ struct Binding {
 }
 
 const BINDINGS: &[Binding] = &[
-    Binding {
-        action: Action::Quit,
-        description: "quit",
-        keys: &[KeyPattern::Char('q'), KeyPattern::Esc],
-        labels: "q / Esc",
-    },
+    Binding { action: Action::Quit, description: "quit", keys: &[KeyPattern::Char('q')], labels: "q" },
     Binding { action: Action::ToggleHelp, description: "toggle help", keys: &[KeyPattern::Char('?')], labels: "?" },
     Binding {
         action: Action::ToggleFocus,
@@ -202,7 +196,6 @@ impl KeyPattern {
             KeyCode::Char(character) => Some(Self::Char(character)),
             KeyCode::Down => Some(Self::Down),
             KeyCode::End => Some(Self::End),
-            KeyCode::Esc => Some(Self::Esc),
             KeyCode::Home => Some(Self::Home),
             KeyCode::PageDown => Some(Self::PageDown),
             KeyCode::PageUp => Some(Self::PageUp),

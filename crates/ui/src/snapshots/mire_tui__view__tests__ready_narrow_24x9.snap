@@ -10,4 +10,4 @@ expression: "snapshot(App::ready(&changeset), 24, 9)"
        │    2     2  con
        │            \ No
        │ image.bin
- ? help  q quit
+ source  j/k move

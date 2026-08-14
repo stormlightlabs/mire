@@ -76,6 +76,15 @@ impl LineSelection {
         let end = self.start.line.max(self.end.line).get();
         format!("{} lines {start}-{end}", self.start.side)
     }
+
+    /// Reports whether a source location is contained by this active selection.
+    pub fn contains(self, file: usize, hunk: usize, side: AnchorSide, line: LineNumber) -> bool {
+        file == self.start.file
+            && hunk == self.start.hunk
+            && side == self.start.side
+            && self.start.line.min(self.end.line) <= line
+            && line <= self.start.line.max(self.end.line)
+    }
 }
 
 impl NoteEditor {

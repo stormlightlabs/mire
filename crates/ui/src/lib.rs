@@ -17,7 +17,7 @@ use std::io;
 
 use mire_core::{Changeset, Review};
 
-pub use app::{App, AppOptions, AppState};
+pub use app::{App, AppOptions, AppState, GutterMark, InteractionMode};
 pub use live::{
     LiveAction, LiveControl, LiveRequest, LiveResponse, PresentationKind, PresentationState, WalkthroughAction,
 };

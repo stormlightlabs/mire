@@ -7,39 +7,38 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::app::{App, AppState};
+use crate::app::{App, AppState, InteractionMode};
 use crate::navigation::{Focus, help_entries};
 use crate::stream::ReviewStream;
 use crate::theme::Theme;
 
-const FULL_FOOTER: &[(&str, &str)] = &[
-    ("Tab", "focus"),
-    ("j/k", "move"),
-    ("[ ]", "files"),
-    ("{ }", "hunks"),
-    ("/", "search"),
-    ("+/-", "context"),
-    ("w", "wrap"),
-    ("?", "help"),
-    ("q", "quit"),
+const EDITOR_FOOTER: &[(&str, &str)] = &[
+    ("Enter", "save"),
+    ("Tab", "severity"),
+    ("Shift-Tab", "kind"),
+    ("Esc", "cancel"),
 ];
-const REVIEW_FOOTER: &[(&str, &str)] = &[
-    ("j/k", "move"),
-    ("v/c", "range/note"),
-    ("p/P", "notes"),
+const FILTER_FOOTER: &[(&str, &str)] = &[("a/s/v/k/i", "filter"), ("c", "clear"), ("Esc", "close")];
+const SEARCH_FOOTER: &[(&str, &str)] = &[("Enter", "find"), ("Esc", "cancel")];
+const RANGE_FOOTER: &[(&str, &str)] = &[("j/k", "extend"), ("c", "note"), ("v / Esc", "cancel")];
+const HELP_FOOTER: &[(&str, &str)] = &[("? / Esc", "close"), ("q", "quit")];
+const REVIEW_FOOTER: &[(&str, &str)] = &[("?", "help"), ("q", "quit")];
+const FINDING_FOOTER: &[(&str, &str)] = &[
+    ("e", "edit"),
     ("r/d/o/a", "status"),
-    ("f", "filter"),
-    ("?", "help"),
+    ("p/P", "findings"),
+    ("Esc", "clear focus"),
     ("q", "quit"),
 ];
-const COMPACT_FOOTER: &[(&str, &str)] = &[
-    ("Tab", "focus"),
+const SIDEBAR_FOOTER: &[(&str, &str)] = &[("j/k", "files"), ("Tab", "review"), ("Esc", "review"), ("q", "quit")];
+const SOURCE_FOOTER: &[(&str, &str)] = &[
     ("j/k", "move"),
+    ("v", "range"),
+    ("c", "note"),
     ("/", "search"),
     ("?", "help"),
     ("q", "quit"),
 ];
-const MINIMAL_FOOTER: &[(&str, &str)] = &[("?", "help"), ("q", "quit")];
 
 /// Renders the responsive application status bar.
 pub fn render_title(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Theme) {
@@ -94,26 +93,39 @@ pub fn render_title(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Th
     frame.render_widget(Paragraph::new(Line::from(spans)).style(theme.title), area);
 }
 
-/// Renders keyboard hints selected for the available terminal width.
+/// Renders keyboard hints for the active interaction state without hiding its mode on narrow terminals.
 pub fn render_footer(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Theme) {
-    let entries = if app.review().is_some() && area.width >= 100 {
-        REVIEW_FOOTER
-    } else if area.width >= 100 {
-        FULL_FOOTER
-    } else if area.width >= 48 {
-        COMPACT_FOOTER
-    } else {
-        MINIMAL_FOOTER
-    };
-    let mut spans = vec![Span::raw(" ")];
-    for (index, (key, description)) in entries.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::styled("  ", theme.divider));
+    let (mode, entries) = footer_context(app.interaction_mode());
+    let mut spans = vec![Span::raw(" "), Span::styled(mode, theme.accent)];
+    let mut used = 1 + Span::raw(mode).width();
+    for (key, description) in entries {
+        let entry_width = Span::raw(*key).width() + 1 + Span::raw(*description).width();
+        if used.saturating_add(2).saturating_add(entry_width) > usize::from(area.width) {
+            break;
         }
+        spans.push(Span::styled("  ", theme.divider));
         spans.push(Span::styled(*key, theme.accent));
         spans.push(Span::styled(format!(" {description}"), theme.footer));
+        used += 2 + entry_width;
     }
-    frame.render_widget(Paragraph::new(Line::from(spans)).style(theme.footer), area);
+    frame.render_widget(
+        Paragraph::new(fit_line(spans, usize::from(area.width), theme.footer)),
+        area,
+    );
+}
+
+fn footer_context(mode: InteractionMode) -> (&'static str, &'static [(&'static str, &'static str)]) {
+    match mode {
+        InteractionMode::Editor => ("editor", EDITOR_FOOTER),
+        InteractionMode::Filter => ("filter", FILTER_FOOTER),
+        InteractionMode::Search => ("search", SEARCH_FOOTER),
+        InteractionMode::RangeSelection => ("range", RANGE_FOOTER),
+        InteractionMode::Help => ("help", HELP_FOOTER),
+        InteractionMode::Review => ("", REVIEW_FOOTER),
+        InteractionMode::Finding => ("finding", FINDING_FOOTER),
+        InteractionMode::Sidebar => ("files", SIDEBAR_FOOTER),
+        InteractionMode::Source => ("source", SOURCE_FOOTER),
+    }
 }
 
 /// Renders the file navigator with selection, status, and compact change counts.

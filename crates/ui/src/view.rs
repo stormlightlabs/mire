@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use mire_core::{FileDiff, FileStatus, LineKind, MissingNewline};
+use mire_core::{AnchorSide, FileDiff, FileStatus, LineKind, MissingNewline};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::EditorTarget;
-use crate::app::{App, AppState};
+use crate::app::{App, AppState, GutterMark};
 use crate::chrome::{
     diff_stats, file_path, fit_line, render_footer, render_help, render_sidebar, render_sidebar_divider, render_title,
     truncate_text,
@@ -87,18 +87,17 @@ fn render_stream(
         .visible_keys(app.scroll(), usize::from(area.height))
         .enumerate()
         .map(|(offset, key)| {
-            let line = row_line(stream, key, area.width, app, theme);
-            if app.row_selected(app.scroll().saturating_add(offset)) {
-                line.patch_style(theme.selected)
-            } else {
-                line
-            }
+            let selected = app.row_selected(app.scroll().saturating_add(offset));
+            let line = row_line(stream, key, area.width, selected, app, theme);
+            if selected { line.patch_style(theme.selected) } else { line }
         })
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(visible), area);
 }
 
-fn row_line<'a>(stream: &'a ReviewStream<'a>, key: RowKey, width: u16, app: &App<'a>, theme: &Theme) -> Line<'static> {
+fn row_line<'a>(
+    stream: &'a ReviewStream<'a>, key: RowKey, width: u16, selected: bool, app: &App<'a>, theme: &Theme,
+) -> Line<'static> {
     let context = RenderContext { stream, app, theme };
     match key {
         RowKey::File { file } => file_line(stream.file(file), width, theme),
@@ -124,37 +123,31 @@ fn row_line<'a>(stream: &'a ReviewStream<'a>, key: RowKey, width: u16, app: &App
         RowKey::ContextGap { hidden, .. } => {
             Line::styled(format!("            ⋯ {hidden} context lines hidden"), theme.marker)
         }
-        RowKey::Note { note, .. } => note_line(app, note, width, theme),
+        RowKey::Note { note, .. } => note_line(app, note, width, selected, theme),
     }
 }
 
-fn note_line(app: &App<'_>, note_index: usize, width: u16, theme: &Theme) -> Line<'static> {
+fn note_line(app: &App<'_>, note_index: usize, width: u16, selected: bool, theme: &Theme) -> Line<'static> {
+    const ACTIONS: &str = " [e][o][r][d][a]";
+
     let Some(note) = app.note(note_index) else {
-        return Line::styled("  unavailable note", theme.error);
+        return Line::styled("  unavailable finding", theme.error);
     };
     let author = note.author().display_name().unwrap_or_else(|| note.author().id());
-    let body = truncate_text(note.body(), usize::from(width).saturating_sub(52));
-    fit_line(
-        vec![
-            Span::styled("[edit]", theme.accent),
-            Span::styled("[open]", theme.muted),
-            Span::styled("[resolve]", theme.accent),
-            Span::styled("[dismiss]", theme.muted),
-            Span::styled("[risk] ", theme.error),
-            Span::styled(
-                format!(
-                    "{} {} {} · {author}: ",
-                    note.status(),
-                    note.severity(),
-                    note.annotation_kind()
-                ),
-                theme.muted,
-            ),
-            Span::styled(body, theme.panel),
-        ],
-        usize::from(width),
-        theme.panel,
-    )
+    let finding = format!(
+        " {} {} {} · {author}: {}",
+        note.status(),
+        note.severity(),
+        note.annotation_kind(),
+        note.body()
+    );
+    let action_width = if selected { Span::raw(ACTIONS).width() } else { 0 };
+    let finding_width = usize::from(width).saturating_sub(action_width);
+    let mut spans = vec![Span::styled(truncate_text(&finding, finding_width), theme.panel)];
+    if selected {
+        spans.push(Span::styled(ACTIONS, theme.accent));
+    }
+    fit_line(spans, usize::from(width), theme.panel)
 }
 
 fn render_note_editor(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Theme) {
@@ -246,8 +239,22 @@ impl RenderContext<'_, '_, '_, '_> {
             LineKind::Addition => ('+', self.theme.addition),
             LineKind::Deletion => ('-', self.theme.deletion),
         };
-        let gutter =
-            if range.start == 0 { format!("{old:>5} {new:>5} {prefix}") } else { "            ↪".to_owned() };
+        let gutter = if range.start == 0 {
+            format!(
+                "{old:>5} {new:>5} {}",
+                gutter_symbol(
+                    &[
+                        self.app
+                            .gutter_mark(position.file, position.hunk, position.line, AnchorSide::Old),
+                        self.app
+                            .gutter_mark(position.file, position.hunk, position.line, AnchorSide::New),
+                    ],
+                    prefix,
+                )
+            )
+        } else {
+            "            ↪".to_owned()
+        };
         let counterpart = paired_line(self.stream, position.file, position.hunk, position.line);
         let mut spans = vec![Span::styled(gutter, style)];
         spans.extend(self.styled_source(position, range, counterpart, style));
@@ -279,7 +286,15 @@ impl RenderContext<'_, '_, '_, '_> {
             LineKind::Addition => ('+', self.theme.addition),
             LineKind::Deletion => ('-', self.theme.deletion),
         };
-        let gutter = if range.start == 0 { format!("{number:>5} {prefix}") } else { "      ↪".to_owned() };
+        let gutter = if range.start == 0 {
+            let side = if old_side { AnchorSide::Old } else { AnchorSide::New };
+            format!(
+                "{number:>5} {}",
+                gutter_symbol(&[self.app.gutter_mark(file, hunk, index, side)], prefix)
+            )
+        } else {
+            "      ↪".to_owned()
+        };
         let gutter_width = Span::raw(&gutter).width();
         let mut spans = vec![Span::styled(gutter, style)];
         let source_spans = self.styled_source(SourcePosition { file, hunk, line: index }, range, counterpart, style);
@@ -342,6 +357,18 @@ impl RenderContext<'_, '_, '_, '_> {
                 Some(Span::styled(segment.to_owned(), style))
             })
             .collect()
+    }
+}
+
+fn gutter_symbol(marks: &[GutterMark], fallback: char) -> char {
+    if marks.contains(&GutterMark::Cursor) {
+        '>'
+    } else if marks.contains(&GutterMark::Selection) {
+        '▌'
+    } else if marks.contains(&GutterMark::Finding) {
+        '◆'
+    } else {
+        fallback
     }
 }
 

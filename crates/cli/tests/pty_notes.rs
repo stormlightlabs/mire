@@ -49,7 +49,7 @@ fn pty_notes_create_disposition_save_and_reload_without_touching_source_files() 
     writer.write_all(b"pr").unwrap();
     writer.flush().unwrap();
     thread::sleep(Duration::from_millis(150));
-    writer.write_all(b"\x1b").unwrap();
+    writer.write_all(b"\x1bq").unwrap();
     writer.flush().unwrap();
     let deadline = Instant::now() + Duration::from_secs(3);
     let status = loop {

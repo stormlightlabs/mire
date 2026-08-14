@@ -13,4 +13,4 @@ expression: "snapshot(App::ready(&changeset), 64, 12)"
                 │     Binary files differ
                 │
                 │
- Tab focus  j/k move  / search  ? help  q quit
+ source  j/k move  v range  c note  / search  ? help  q quit

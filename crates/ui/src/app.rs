@@ -18,6 +18,43 @@ const DEFAULT_TERMINAL_WIDTH: u16 = 80;
 const DEFAULT_CONTEXT_LINES: usize = 3;
 const MAX_CONTEXT_LINES: usize = 100;
 const MAX_SEARCH_MATCHES: usize = 100_000;
+const NOTE_ACTIONS_WIDTH: u16 = 16;
+
+/// The UI state that determines the currently relevant keyboard actions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InteractionMode {
+    /// Text is being entered into a note editor.
+    Editor,
+    /// Note filter controls are open.
+    Filter,
+    /// A search query is being entered.
+    Search,
+    /// A source range is being selected for a new finding.
+    RangeSelection,
+    /// The keyboard reference is visible.
+    Help,
+    /// The review has no source content to navigate.
+    Review,
+    /// A finding is under the review cursor.
+    Finding,
+    /// The file navigator has focus.
+    Sidebar,
+    /// The review cursor is on source or structure.
+    Source,
+}
+
+/// The highest-priority visual meaning attached to a source gutter cell.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GutterMark {
+    /// The source row has no review-specific gutter mark.
+    None,
+    /// The source row contains a finding anchor.
+    Finding,
+    /// The source row belongs to the active range selection.
+    Selection,
+    /// The source row is under the review cursor.
+    Cursor,
+}
 
 #[derive(Clone, Debug)]
 /// Presentation state retained while watched content is unavailable or replaced.
@@ -196,6 +233,83 @@ impl<'a> App<'a> {
     /// Reports whether keyboard text is being entered into search.
     pub const fn search_input(&self) -> bool {
         self.search_input
+    }
+
+    /// Returns the active interaction state used by contextual UI chrome.
+    pub fn interaction_mode(&self) -> InteractionMode {
+        if self.editor.is_some() {
+            InteractionMode::Editor
+        } else if self.filter_visible {
+            InteractionMode::Filter
+        } else if self.search_input {
+            InteractionMode::Search
+        } else if self.line_selection.is_some() {
+            InteractionMode::RangeSelection
+        } else if self.help_visible {
+            InteractionMode::Help
+        } else if !matches!(&self.state, AppState::Ready(stream) if !stream.is_empty()) {
+            InteractionMode::Review
+        } else if matches!(self.focus, Focus::Sidebar) {
+            InteractionMode::Sidebar
+        } else if self.selected_note().is_some() {
+            InteractionMode::Finding
+        } else {
+            InteractionMode::Source
+        }
+    }
+
+    /// Returns the review meaning attached to one source gutter cell.
+    pub fn gutter_mark(&self, file: usize, hunk: usize, line: usize, side: AnchorSide) -> GutterMark {
+        let AppState::Ready(stream) = &self.state else {
+            return GutterMark::None;
+        };
+        let cursor = matches!(
+            stream.row(self.current_row_index(stream)),
+            Some(RowKey::UnifiedLine { file: found_file, hunk: found_hunk, line: found_line, .. })
+                if found_file == file && found_hunk == hunk && found_line == line
+        ) || matches!(
+            stream.row(self.current_row_index(stream)),
+            Some(RowKey::SplitLine { file: found_file, hunk: found_hunk, old, new, .. })
+                if found_file == file && found_hunk == hunk && (old == Some(line) || new == Some(line))
+        );
+        if cursor {
+            return GutterMark::Cursor;
+        }
+
+        let source = &stream.hunk(file, hunk).lines()[line];
+        let line_number = line_number_on_side(source, side);
+        if self
+            .line_selection
+            .is_some_and(|selection| line_number.is_some_and(|number| selection.contains(file, hunk, side, number)))
+        {
+            return GutterMark::Selection;
+        }
+
+        let Some(review) = &self.review else {
+            return GutterMark::None;
+        };
+        let Some(number) = line_number else {
+            return GutterMark::None;
+        };
+        let Some(path) = (match side {
+            AnchorSide::Old => stream.file(file).old_side(),
+            AnchorSide::New => stream.file(file).new_side(),
+        }) else {
+            return GutterMark::None;
+        };
+        let hunk_fingerprint = stream.hunk(file, hunk).fingerprint();
+        if review.notes().iter().any(|note| {
+            let anchor = note.current_anchor().unwrap_or_else(|| note.anchor());
+            anchor.side() == side
+                && anchor.path() == &path.path
+                && anchor.hunk_fingerprint() == hunk_fingerprint
+                && anchor.range().start() <= number
+                && number <= anchor.range().end()
+        }) {
+            GutterMark::Finding
+        } else {
+            GutterMark::None
+        }
     }
 
     /// Returns current and total search match positions.
@@ -493,6 +607,9 @@ impl<'a> App<'a> {
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             return;
         }
+        if matches!(key.code, KeyCode::Esc) && self.dismiss_active_state() {
+            return;
+        }
         if self.editor.is_some() {
             self.handle_editor_key(key);
         } else if self.filter_visible {
@@ -567,6 +684,39 @@ impl<'a> App<'a> {
             syntax_cache,
             should_quit: false,
         }
+    }
+
+    fn dismiss_active_state(&mut self) -> bool {
+        if self.editor.is_some() {
+            self.editor = None;
+            self.close_editor_after_save = false;
+            self.interaction_error = None;
+            return true;
+        }
+        if self.filter_visible {
+            self.filter_visible = false;
+            return true;
+        }
+        if self.search_input {
+            self.search_input = false;
+            self.search_query.clear();
+            self.search_matches.clear();
+            self.search_match = None;
+            return true;
+        }
+        if self.line_selection.is_some() {
+            self.line_selection = None;
+            return true;
+        }
+        if self.help_visible {
+            self.help_visible = false;
+            return true;
+        }
+        if matches!(self.focus, Focus::Sidebar) {
+            self.focus = Focus::Review;
+            return true;
+        }
+        false
     }
 
     fn apply(&mut self, action: Action) {
@@ -974,12 +1124,16 @@ impl<'a> App<'a> {
         if self.selected_note().is_none() {
             return;
         }
-        match column {
-            0..=5 => self.edit_selected_note(),
-            6..=11 => self.change_selected_note_status(NoteStatus::Open),
-            12..=20 => self.change_selected_note_status(NoteStatus::Resolved),
-            21..=29 => self.change_selected_note_status(NoteStatus::Dismissed),
-            30..=35 => self.change_selected_note_status(NoteStatus::AcceptedRisk),
+        let start = self.areas().review.width.saturating_sub(NOTE_ACTIONS_WIDTH);
+        if column < start {
+            return;
+        }
+        match column - start {
+            1..=3 => self.edit_selected_note(),
+            4..=6 => self.change_selected_note_status(NoteStatus::Open),
+            7..=9 => self.change_selected_note_status(NoteStatus::Resolved),
+            10..=12 => self.change_selected_note_status(NoteStatus::Dismissed),
+            13..=15 => self.change_selected_note_status(NoteStatus::AcceptedRisk),
             _ => {}
         }
     }
@@ -1440,6 +1594,49 @@ mod tests {
     }
 
     #[test]
+    fn escape_unwinds_transient_states_without_quitting_the_review() {
+        let review = review();
+        let mut app = App::review_with_options(&review, AppOptions::default());
+        app.resize(100, 12);
+        for _ in 0..3 {
+            app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE));
+        assert!(app.selection_label().is_some());
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+        assert!(app.editor().is_some());
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.editor().is_none());
+        assert!(app.selection_label().is_some());
+
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.selection_label().is_none());
+        app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE));
+        assert!(app.filter_visible());
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.filter_visible());
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        assert!(app.search_input());
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.search_input());
+        assert!(app.search_query().is_empty());
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        assert!(app.help_visible());
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.help_visible());
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(app.focus(), Focus::Sidebar);
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.focus(), Focus::Review);
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.should_quit());
+    }
+
+    #[test]
     fn navigation_scrolling_is_bounded_by_the_stream_and_viewport() {
         let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
         let mut app = App::ready(&changeset);
@@ -1675,7 +1872,7 @@ mod tests {
         let visible_row = note_row.saturating_sub(app.scroll()) as u16;
         app.handle_mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
-            column: review_area.x + 12,
+            column: review_area.x + review_area.width - NOTE_ACTIONS_WIDTH + 7,
             row: review_area.y + visible_row,
             modifiers: KeyModifiers::NONE,
         });

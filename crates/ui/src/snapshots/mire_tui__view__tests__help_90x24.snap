@@ -4,7 +4,7 @@ expression: "snapshot(app, 90, 24)"
 ---
  Mire review │ unified │ focus review │ context 3 │ wrap off
  Files         1/2 │ Navigation and layout
-▌ M file.txt  +1 -1│ q / Esc      quit
+▌ M file.txt  +1 -1│ q            quit
   M image.bin      │ ?            toggle help
                    │ Tab          switch sidebar/review focus
                    │ j / Down     scroll or select next file
@@ -25,4 +25,4 @@ expression: "snapshot(app, 90, 24)"
                    │ w            toggle line wrapping
                    │ 1            unified layout
                    │ 2            split layout
- Tab focus  j/k move  / search  ? help  q quit
+ help  ? / Esc close  q quit

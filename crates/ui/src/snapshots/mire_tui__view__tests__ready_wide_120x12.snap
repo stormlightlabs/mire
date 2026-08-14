@@ -13,4 +13,4 @@ expression: "snapshot(App::ready(&changeset), 120, 12)"
                           │
                           │
                           │
- Tab focus  j/k move  [ ] files  { } hunks  / search  +/- context  w wrap  ? help  q quit
+ source  j/k move  v range  c note  / search  ? help  q quit

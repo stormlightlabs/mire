@@ -7,4 +7,4 @@ expression: "snapshot(App::error(\"broken input\"), 32, 6)"
   broken input
 
 
- ? help  q quit
+   ? help  q quit

@@ -24,7 +24,7 @@ Type "render_note_editor"
 Enter
 Wait+Screen /render_note_editor/
 Sleep 200ms
-Screenshot .github/assets/screencap.png
+Screenshot docs/static/screencap.png
 Sleep 1s
 Type "q"
 Hide

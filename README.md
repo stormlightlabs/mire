@@ -4,7 +4,7 @@
 
 Mire is a difftool for humans and agents.
 
-![screenshot](.github/assets/screencap.png)
+![screenshot](docs/static/screencap.png)
 
 ## Features
 
@@ -210,6 +210,19 @@ Set [`NO_COLOR`](https://github.com/jcs/no_color) to disable color output:
 ```sh
 NO_COLOR=1 mire diff
 ```
+
+## Documentation site
+
+The documentation site lives in `docs/` and uses SvelteKit. Run it locally with:
+
+```sh
+cd docs
+pnpm install
+pnpm dev
+```
+
+Use `pnpm check`, `pnpm test -- --run`, `pnpm lint`, and `pnpm build` before
+publishing changes.
 
 ## License
 

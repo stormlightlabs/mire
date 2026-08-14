@@ -519,13 +519,15 @@ fn execute(cli: Cli) -> Result<(), AppError> {
 
 fn initialize_review(arguments: ReviewInitArgs) -> Result<(), AppError> {
     let ReviewInitArgs { review: destination, staged, revisions, paths } = arguments;
-    let changeset = git::load_diff(DiffRequest { staged, revisions, paths }).map_err(AppError::Git)?;
+    let (changeset, source_binding) =
+        git::load_diff_with_binding(DiffRequest { staged, revisions, paths }).map_err(AppError::Git)?;
     let review = Review::new(
         ReviewRevision::new(1).map_err(AppError::InitializeReview)?,
         changeset,
         Vec::new(),
         Vec::new(),
     )
+    .and_then(|review| review.with_source_binding(source_binding))
     .map_err(AppError::InitializeReview)?;
     create_review_atomic(Path::new(&destination), &review).map_err(AppError::CreateReviewFile)?;
 

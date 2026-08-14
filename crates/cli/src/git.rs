@@ -1,12 +1,13 @@
 use std::ffi::OsString;
+use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
 
 use mire_core::{
-    BytePath, BytePathError, ByteString, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, GitOperation, PatchError,
-    PatchLimits, parse_patch,
+    BytePath, BytePathError, ByteString, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, FilesystemIdentity,
+    GitOperation, PatchError, PatchLimits, RepositoryIdentity, SourceBinding, parse_patch,
 };
 use thiserror::Error;
 
@@ -57,6 +58,32 @@ pub enum GitError {
     /// Git emitted a patch outside Mire's supported patch contract.
     #[error("cannot parse Git patch output: {0}")]
     Patch(PatchError),
+    /// A bound repository path cannot be decoded on this platform.
+    #[cfg(not(unix))]
+    #[error("the bound repository path cannot be represented on this platform")]
+    InvalidBoundRepositoryPath,
+    /// A bound revision or path filter cannot be decoded on this platform.
+    #[error("the bound Git comparison contains bytes that cannot be represented on this platform")]
+    InvalidBoundComparison,
+    /// A bound repository path no longer names a readable filesystem entry.
+    #[error("bound repository entry {path:?} is unavailable: {source}")]
+    RepositoryUnavailable { path: PathBuf, source: io::Error },
+    /// The worktree resolves to a different location than the bound repository.
+    #[error("bound repository moved: expected {expected:?}, found {actual:?}")]
+    RepositoryMoved { expected: PathBuf, actual: PathBuf },
+    /// A repository entry no longer has the identity recorded at initialization.
+    #[error("bound repository was replaced: {entry} identity changed")]
+    RepositoryReplaced { entry: &'static str },
+    /// The platform did not return a stable filesystem identity.
+    #[cfg(windows)]
+    #[error("cannot determine a stable filesystem identity for {path:?}")]
+    RepositoryIdentityUnavailable { path: PathBuf },
+    /// The binding contains an operation that is not a repeatable comparison.
+    #[error("bound Git source is not a worktree or revision comparison")]
+    InvalidBoundOperation,
+    /// The captured source binding violated a core review invariant.
+    #[error("cannot create source binding: {0}")]
+    SourceBinding(mire_core::ReviewError),
 }
 
 /// A Git-backed diff request from the command line.
@@ -82,6 +109,7 @@ pub struct ShowRequest {
 #[derive(Debug)]
 struct GitRepository {
     root: PathBuf,
+    git_directory: PathBuf,
 }
 
 #[derive(Debug)]
@@ -100,41 +128,31 @@ struct StreamCapture {
 /// Loads a worktree or revision comparison through native Git.
 pub fn load_diff(request: DiffRequest) -> Result<Changeset> {
     let repository = discover_repository()?;
-    let paths = model_paths(&request.paths)?;
-    let source = if request.revisions.is_empty() {
-        ChangesetSource::Git { operation: GitOperation::Worktree { staged: request.staged, paths } }
-    } else {
-        ChangesetSource::Git {
-            operation: GitOperation::Diff {
-                revisions: request
-                    .revisions
-                    .iter()
-                    .map(|value| ByteString::new(value.as_encoded_bytes()))
-                    .collect(),
-                paths,
-            },
-        }
+    load_diff_in_repository(&repository, &request)
+}
+
+/// Loads a comparison and records the validated local source needed to repeat it.
+pub fn load_diff_with_binding(request: DiffRequest) -> Result<(Changeset, SourceBinding)> {
+    let repository = discover_repository()?;
+    let source = diff_source(&request)?;
+    let ChangesetSource::Git { operation } = &source else {
+        unreachable!("diff sources are always Git operations");
     };
+    let binding =
+        SourceBinding::git(repository_identity(&repository)?, operation.clone()).map_err(GitError::SourceBinding)?;
+    let changeset = load_diff_in_repository_with_source(&repository, &request, source)?;
+    validate_repository_binding(&binding)?;
+    Ok((changeset, binding))
+}
 
-    let mut arguments = diff_options();
-    if request.staged {
-        arguments.push(OsString::from("--cached"));
-    }
-    arguments.extend(request.revisions);
-    push_paths(&mut arguments, &request.paths);
-    let output = run_git(Some(&repository.root), &arguments, DEFAULT_MAX_PATCH_BYTES)?;
-    ensure_success("diff", &output, &[0])?;
-
-    let mut patch = output.stdout;
-    if !request.staged
-        && matches!(
-            &source,
-            ChangesetSource::Git { operation: GitOperation::Worktree { .. } }
-        )
-    {
-        append_untracked_patches(&repository, &request.paths, &mut patch)?;
-    }
-    parse_patch(&patch, source, PatchLimits::default()).map_err(GitError::Patch)
+/// Repeats a bound comparison only after validating its paths and repository identity.
+pub fn load_bound_diff(binding: &SourceBinding) -> Result<Changeset> {
+    let repository = validate_repository_binding(binding)?;
+    let (_, operation) = binding.git_parts();
+    let request = request_from_operation(operation)?;
+    let changeset = load_diff_in_repository(&repository, &request)?;
+    validate_repository_binding(binding)?;
+    Ok(changeset)
 }
 
 /// Loads one commit through native Git.
@@ -161,8 +179,12 @@ pub fn repository_root() -> Result<PathBuf> {
 }
 
 fn discover_repository() -> Result<GitRepository> {
+    discover_repository_at(None)
+}
+
+fn discover_repository_at(cwd: Option<&Path>) -> Result<GitRepository> {
     let bare = run_git(
-        None,
+        cwd,
         &[OsString::from("rev-parse"), OsString::from("--is-bare-repository")],
         MAX_GIT_METADATA_BYTES,
     )?;
@@ -174,13 +196,143 @@ fn discover_repository() -> Result<GitRepository> {
     }
 
     let root = run_git(
-        None,
+        cwd,
         &[OsString::from("rev-parse"), OsString::from("--show-toplevel")],
         MAX_GIT_METADATA_BYTES,
     )?;
     ensure_success("repository discovery", &root, &[0])?;
-    let root = path_from_git_bytes(trim_ascii(&root.stdout))?;
-    Ok(GitRepository { root })
+    let root = canonicalize_repository_path(path_from_git_bytes(trim_ascii(&root.stdout))?)?;
+
+    let git_directory = run_git(
+        Some(&root),
+        &[OsString::from("rev-parse"), OsString::from("--absolute-git-dir")],
+        MAX_GIT_METADATA_BYTES,
+    )?;
+    ensure_success("Git directory discovery", &git_directory, &[0])?;
+    let git_directory = canonicalize_repository_path(path_from_git_bytes(trim_ascii(&git_directory.stdout))?)?;
+    Ok(GitRepository { root, git_directory })
+}
+
+fn diff_source(request: &DiffRequest) -> Result<ChangesetSource> {
+    let paths = model_paths(&request.paths)?;
+    let operation = if request.revisions.is_empty() {
+        GitOperation::Worktree { staged: request.staged, paths }
+    } else {
+        GitOperation::Diff {
+            revisions: request
+                .revisions
+                .iter()
+                .map(|value| ByteString::new(value.as_encoded_bytes()))
+                .collect(),
+            paths,
+        }
+    };
+    Ok(ChangesetSource::Git { operation })
+}
+
+fn load_diff_in_repository(repository: &GitRepository, request: &DiffRequest) -> Result<Changeset> {
+    let source = diff_source(request)?;
+    load_diff_in_repository_with_source(repository, request, source)
+}
+
+fn load_diff_in_repository_with_source(
+    repository: &GitRepository, request: &DiffRequest, source: ChangesetSource,
+) -> Result<Changeset> {
+    let mut arguments = diff_options();
+    if request.staged {
+        arguments.push(OsString::from("--cached"));
+    }
+    arguments.extend(request.revisions.iter().cloned());
+    push_paths(&mut arguments, &request.paths);
+    let output = run_git(Some(&repository.root), &arguments, DEFAULT_MAX_PATCH_BYTES)?;
+    ensure_success("diff", &output, &[0])?;
+
+    let mut patch = output.stdout;
+    if !request.staged
+        && matches!(
+            &source,
+            ChangesetSource::Git { operation: GitOperation::Worktree { .. } }
+        )
+    {
+        append_untracked_patches(repository, &request.paths, &mut patch)?;
+    }
+    parse_patch(&patch, source, PatchLimits::default()).map_err(GitError::Patch)
+}
+
+fn request_from_operation(operation: &GitOperation) -> Result<DiffRequest> {
+    match operation {
+        GitOperation::Worktree { staged, paths } => Ok(DiffRequest {
+            staged: *staged,
+            revisions: Vec::new(),
+            paths: paths.iter().map(model_path_to_os_string).collect::<Result<_>>()?,
+        }),
+        GitOperation::Diff { revisions, paths } => Ok(DiffRequest {
+            staged: false,
+            revisions: revisions.iter().map(byte_string_to_os_string).collect::<Result<_>>()?,
+            paths: paths.iter().map(model_path_to_os_string).collect::<Result<_>>()?,
+        }),
+        GitOperation::Show { .. } => Err(GitError::InvalidBoundOperation),
+    }
+}
+
+fn repository_identity(repository: &GitRepository) -> Result<RepositoryIdentity> {
+    Ok(RepositoryIdentity::new(
+        path_to_byte_string(&repository.root)?,
+        path_to_byte_string(&repository.git_directory)?,
+        filesystem_identity(&repository.root)?,
+        filesystem_identity(&repository.git_directory)?,
+    ))
+}
+
+fn validate_repository_binding(binding: &SourceBinding) -> Result<GitRepository> {
+    let (expected, operation) = binding.git_parts();
+    let _ = request_from_operation(operation)?;
+    let expected_root = path_from_binding_bytes(expected.root().as_bytes())?;
+    let expected_git_directory = path_from_binding_bytes(expected.git_directory().as_bytes())?;
+
+    if filesystem_identity(&expected_root)? != *expected.root_filesystem() {
+        return Err(GitError::RepositoryReplaced { entry: "worktree root" });
+    }
+    if filesystem_identity(&expected_git_directory)? != *expected.git_directory_filesystem() {
+        return Err(GitError::RepositoryReplaced { entry: "Git directory" });
+    }
+
+    let repository = discover_repository_at(Some(&expected_root))?;
+    if repository.root != expected_root {
+        return Err(GitError::RepositoryMoved { expected: expected_root, actual: repository.root });
+    }
+    if repository.git_directory != expected_git_directory {
+        return Err(GitError::RepositoryReplaced { entry: "Git directory" });
+    }
+    Ok(repository)
+}
+
+fn canonicalize_repository_path(path: PathBuf) -> Result<PathBuf> {
+    fs::canonicalize(&path).map_err(|source| GitError::RepositoryUnavailable { path, source })
+}
+
+#[cfg(unix)]
+fn filesystem_identity(path: &Path) -> Result<FilesystemIdentity> {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata =
+        fs::metadata(path).map_err(|source| GitError::RepositoryUnavailable { path: path.to_owned(), source })?;
+    Ok(FilesystemIdentity::unix(metadata.dev(), metadata.ino()))
+}
+
+#[cfg(windows)]
+fn filesystem_identity(path: &Path) -> Result<FilesystemIdentity> {
+    use std::os::windows::fs::MetadataExt;
+
+    let metadata =
+        fs::metadata(path).map_err(|source| GitError::RepositoryUnavailable { path: path.to_owned(), source })?;
+    let volume_serial_number = metadata
+        .volume_serial_number()
+        .ok_or_else(|| GitError::RepositoryIdentityUnavailable { path: path.to_owned() })?;
+    let file_index = metadata
+        .file_index()
+        .ok_or_else(|| GitError::RepositoryIdentityUnavailable { path: path.to_owned() })?;
+    Ok(FilesystemIdentity::windows(volume_serial_number, file_index))
 }
 
 fn append_untracked_patches(repository: &GitRepository, paths: &[OsString], patch: &mut Vec<u8>) -> Result<()> {
@@ -321,11 +473,69 @@ fn path_from_git_bytes(bytes: &[u8]) -> Result<PathBuf> {
     Ok(PathBuf::from(OsString::from_vec(bytes.to_vec())))
 }
 
+#[cfg(unix)]
+fn path_from_binding_bytes(bytes: &[u8]) -> Result<PathBuf> {
+    use std::os::unix::ffi::OsStringExt;
+
+    Ok(PathBuf::from(OsString::from_vec(bytes.to_vec())))
+}
+
+#[cfg(unix)]
+fn path_to_byte_string(path: &Path) -> Result<ByteString> {
+    use std::os::unix::ffi::OsStrExt;
+
+    Ok(ByteString::new(path.as_os_str().as_bytes()))
+}
+
+#[cfg(unix)]
+fn byte_string_to_os_string(value: &ByteString) -> Result<OsString> {
+    use std::os::unix::ffi::OsStringExt;
+
+    Ok(OsString::from_vec(value.as_bytes().to_vec()))
+}
+
+#[cfg(unix)]
+fn model_path_to_os_string(path: &BytePath) -> Result<OsString> {
+    use std::os::unix::ffi::OsStringExt;
+
+    BytePath::new(path.as_bytes().to_vec()).map_err(|_| GitError::InvalidBoundComparison)?;
+    Ok(OsString::from_vec(path.as_bytes().to_vec()))
+}
+
 #[cfg(not(unix))]
 fn path_from_git_bytes(bytes: &[u8]) -> Result<PathBuf> {
     String::from_utf8(bytes.to_vec())
         .map(PathBuf::from)
         .map_err(|_| GitError::InvalidRepositoryPath)
+}
+
+#[cfg(not(unix))]
+fn path_from_binding_bytes(bytes: &[u8]) -> Result<PathBuf> {
+    String::from_utf8(bytes.to_vec())
+        .map(PathBuf::from)
+        .map_err(|_| GitError::InvalidBoundRepositoryPath)
+}
+
+#[cfg(not(unix))]
+fn path_to_byte_string(path: &Path) -> Result<ByteString> {
+    path.to_str()
+        .map(ByteString::from)
+        .ok_or(GitError::InvalidRepositoryPath)
+}
+
+#[cfg(not(unix))]
+fn byte_string_to_os_string(value: &ByteString) -> Result<OsString> {
+    String::from_utf8(value.as_bytes().to_vec())
+        .map(OsString::from)
+        .map_err(|_| GitError::InvalidBoundComparison)
+}
+
+#[cfg(not(unix))]
+fn model_path_to_os_string(path: &BytePath) -> Result<OsString> {
+    BytePath::new(path.as_bytes().to_vec()).map_err(|_| GitError::InvalidBoundComparison)?;
+    String::from_utf8(path.as_bytes().to_vec())
+        .map(OsString::from)
+        .map_err(|_| GitError::InvalidBoundComparison)
 }
 
 #[cfg(unix)]

@@ -8,10 +8,13 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use crate::{BytePath, Changeset, DiffLine, FileContent, Fingerprint, LineNumber, SchemaVersion};
+use crate::{
+    BytePath, ByteString, Changeset, ChangesetSource, DiffLine, FileContent, Fingerprint, GitOperation, LineNumber,
+    SchemaVersion,
+};
 
 /// The review-file JSON schema emitted by this version of Mire.
-pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 1 };
+pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 2 };
 /// Maximum number of notes accepted in one review file.
 pub const MAX_REVIEW_NOTES: usize = 10_000;
 /// Maximum UTF-8 byte length of one note body.
@@ -105,6 +108,12 @@ pub enum ReviewError {
     /// The event sequence cannot be incremented again.
     #[error("note event sequence cannot be incremented beyond {0}")]
     EventSequenceOverflow(u64),
+    /// A source binding must describe the Git operation that produced the capture.
+    #[error("review source binding does not match its captured changeset")]
+    SourceBindingMismatch,
+    /// Review initialization binds comparisons, not single-commit shows.
+    #[error("a reloadable review source must be a Git comparison")]
+    UnsupportedBindingOperation,
 }
 
 impl ReviewError {
@@ -135,6 +144,8 @@ impl ReviewError {
             ReviewError::FinalStatus { .. } => "final_status",
             ReviewError::RevisionOverflow(_) => "revision_overflow",
             ReviewError::EventSequenceOverflow(_) => "event_sequence_overflow",
+            ReviewError::SourceBindingMismatch => "source_binding_mismatch",
+            ReviewError::UnsupportedBindingOperation => "unsupported_binding_operation",
         }
     }
 }
@@ -691,12 +702,126 @@ impl NoteEvent {
     }
 }
 
+/// A platform filesystem identity used to detect a replaced repository.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FilesystemIdentity {
+    /// Device and inode identity on Unix filesystems.
+    Unix {
+        /// Filesystem device number.
+        device: u64,
+        /// File identity within the device.
+        inode: u64,
+        /// Compatible fields written by newer schema versions.
+        #[serde(default, flatten)]
+        extensions: BTreeMap<String, Value>,
+    },
+    /// Volume and file identity on Windows filesystems.
+    Windows {
+        /// Filesystem volume serial number.
+        volume_serial_number: u32,
+        /// File identity within the volume.
+        file_index: u64,
+        /// Compatible fields written by newer schema versions.
+        #[serde(default, flatten)]
+        extensions: BTreeMap<String, Value>,
+    },
+}
+
+impl FilesystemIdentity {
+    /// Creates a Unix device and inode identity.
+    pub fn unix(device: u64, inode: u64) -> Self {
+        Self::Unix { device, inode, extensions: BTreeMap::new() }
+    }
+
+    /// Creates a Windows volume and file identity.
+    pub fn windows(volume_serial_number: u32, file_index: u64) -> Self {
+        Self::Windows { volume_serial_number, file_index, extensions: BTreeMap::new() }
+    }
+}
+
+/// Stable local identity for the worktree and Git administrative directory.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RepositoryIdentity {
+    root: ByteString,
+    git_directory: ByteString,
+    root_filesystem: FilesystemIdentity,
+    git_directory_filesystem: FilesystemIdentity,
+    #[serde(default, flatten)]
+    extensions: BTreeMap<String, Value>,
+}
+
+impl RepositoryIdentity {
+    /// Creates a repository identity from canonical paths and filesystem identities.
+    pub fn new(
+        root: ByteString, git_directory: ByteString, root_filesystem: FilesystemIdentity,
+        git_directory_filesystem: FilesystemIdentity,
+    ) -> Self {
+        Self { root, git_directory, root_filesystem, git_directory_filesystem, extensions: BTreeMap::new() }
+    }
+
+    /// Returns the canonical worktree root bytes.
+    pub const fn root(&self) -> &ByteString {
+        &self.root
+    }
+
+    /// Returns the canonical Git administrative-directory bytes.
+    pub const fn git_directory(&self) -> &ByteString {
+        &self.git_directory
+    }
+
+    /// Returns the worktree root's filesystem identity.
+    pub const fn root_filesystem(&self) -> &FilesystemIdentity {
+        &self.root_filesystem
+    }
+
+    /// Returns the Git administrative directory's filesystem identity.
+    pub const fn git_directory_filesystem(&self) -> &FilesystemIdentity {
+        &self.git_directory_filesystem
+    }
+}
+
+/// The local source information needed to repeat a native comparison safely.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SourceBinding {
+    /// A native Git comparison bound to one repository identity.
+    Git {
+        /// The repository captured when the review was initialized.
+        repository: RepositoryIdentity,
+        /// The exact native Git request, including path filters.
+        comparison: GitOperation,
+        /// Compatible fields written by newer schema versions.
+        #[serde(default, flatten)]
+        extensions: BTreeMap<String, Value>,
+    },
+}
+
+impl SourceBinding {
+    /// Creates a Git source binding for a worktree or revision comparison.
+    pub fn git(repository: RepositoryIdentity, comparison: GitOperation) -> Result<Self> {
+        if matches!(comparison, GitOperation::Show { .. }) {
+            return Err(ReviewError::UnsupportedBindingOperation);
+        }
+        Ok(Self::Git { repository, comparison, extensions: BTreeMap::new() })
+    }
+
+    /// Returns the bound Git repository identity and comparison request.
+    pub const fn git_parts(&self) -> (&RepositoryIdentity, &GitOperation) {
+        match self {
+            Self::Git { repository, comparison, .. } => (repository, comparison),
+        }
+    }
+}
+
 /// A versioned review around an immutable captured changeset.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Review {
     schema_version: SchemaVersion,
     revision: ReviewRevision,
     changeset: Changeset,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_binding: Option<SourceBinding>,
     notes: Vec<ReviewNote>,
     events: Vec<NoteEvent>,
     #[serde(default, flatten)]
@@ -712,6 +837,7 @@ impl Review {
             schema_version: CURRENT_REVIEW_SCHEMA_VERSION,
             revision,
             changeset,
+            source_binding: None,
             notes,
             events,
             extensions: BTreeMap::new(),
@@ -734,6 +860,18 @@ impl Review {
     /// Returns the immutable captured changeset.
     pub const fn changeset(&self) -> &Changeset {
         &self.changeset
+    }
+
+    /// Returns the reloadable local source, or `None` for older and imported reviews.
+    pub const fn source_binding(&self) -> Option<&SourceBinding> {
+        self.source_binding.as_ref()
+    }
+
+    /// Attaches a reloadable source that matches the captured Git operation.
+    pub fn with_source_binding(mut self, source_binding: SourceBinding) -> Result<Self> {
+        self.source_binding = Some(source_binding);
+        self.validate()?;
+        Ok(self)
     }
 
     /// Returns notes in their stored deterministic order.
@@ -795,6 +933,7 @@ impl Review {
             events,
         )
         .map_err(|error| NoteImportError { failures: vec![NoteImportFailure { note_id: first_note_id, error }] })?;
+        review.source_binding = self.source_binding.clone();
         review.extensions = self.extensions.clone();
         Ok(review)
     }
@@ -927,6 +1066,15 @@ impl Review {
         if self.notes.len() > MAX_REVIEW_NOTES {
             return Err(ReviewError::TooManyNotes { actual: self.notes.len(), limit: MAX_REVIEW_NOTES });
         }
+        if let Some(binding) = &self.source_binding {
+            let (_, comparison) = binding.git_parts();
+            if matches!(comparison, GitOperation::Show { .. }) {
+                return Err(ReviewError::UnsupportedBindingOperation);
+            }
+            if !matches!(self.changeset.source(), ChangesetSource::Git { operation } if operation == comparison) {
+                return Err(ReviewError::SourceBindingMismatch);
+            }
+        }
         validate_notes(&self.changeset, &self.notes)?;
         validate_events(&self.notes, &self.events)
     }
@@ -947,6 +1095,7 @@ impl Review {
 
     fn rebuild(&self, revision: ReviewRevision, notes: Vec<ReviewNote>, events: Vec<NoteEvent>) -> Result<Self> {
         let mut review = Self::new(revision, self.changeset.clone(), notes, events)?;
+        review.source_binding = self.source_binding.clone();
         review.extensions = self.extensions.clone();
         Ok(review)
     }
@@ -968,6 +1117,7 @@ impl<'de> Deserialize<'de> for Review {
             schema_version: wire.schema_version,
             revision: wire.revision,
             changeset: wire.changeset,
+            source_binding: wire.source_binding,
             notes: wire.notes,
             events: wire.events,
             extensions: wire.extensions,
@@ -983,6 +1133,8 @@ struct ReviewWire {
     schema_version: SchemaVersion,
     revision: ReviewRevision,
     changeset: Changeset,
+    #[serde(default)]
+    source_binding: Option<SourceBinding>,
     notes: Vec<ReviewNote>,
     events: Vec<NoteEvent>,
     #[serde(default, flatten)]
@@ -1367,11 +1519,43 @@ mod tests {
     #[test]
     fn review_round_trip_preserves_unknown_fields() {
         let review = empty_review();
-        let json = serde_json::to_string(&review).unwrap();
+        let json = serde_json::to_string(&review)
+            .unwrap()
+            .replacen("\"minor\":2", "\"minor\":1", 1);
         let json = json.replacen("\"revision\":1", "\"future\":{\"enabled\":true},\"revision\":1", 1);
         let decoded: Review = serde_json::from_str(&json).unwrap();
+        assert!(decoded.source_binding().is_none());
         let encoded = serde_json::to_string(&decoded).unwrap();
         assert!(encoded.contains("\"future\":{\"enabled\":true}"));
+        assert!(!encoded.contains("source_binding"));
+    }
+
+    #[test]
+    fn source_binding_round_trip_preserves_unknown_fields() {
+        let operation = GitOperation::Worktree { staged: false, paths: vec![BytePath::new(b"src".to_vec()).unwrap()] };
+        let changeset = Changeset::new(
+            ChangesetSource::Git { operation: operation.clone() },
+            Vec::new(),
+            FINGERPRINT,
+        );
+        let repository = RepositoryIdentity::new(
+            ByteString::from("/repo"),
+            ByteString::from("/repo/.git"),
+            FilesystemIdentity::unix(1, 2),
+            FilesystemIdentity::unix(1, 3),
+        );
+        let review = Review::new(ReviewRevision::new(1).unwrap(), changeset, Vec::new(), Vec::new())
+            .unwrap()
+            .with_source_binding(SourceBinding::git(repository, operation).unwrap())
+            .unwrap();
+        let json = serde_json::to_string(&review)
+            .unwrap()
+            .replacen("\"comparison\":", "\"future_binding\":true,\"comparison\":", 1)
+            .replacen("\"git_directory\":", "\"future_repository\":7,\"git_directory\":", 1);
+        let decoded: Review = serde_json::from_str(&json).unwrap();
+        let encoded = serde_json::to_string(&decoded).unwrap();
+        assert!(encoded.contains("\"future_binding\":true"));
+        assert!(encoded.contains("\"future_repository\":7"));
     }
 
     #[test]

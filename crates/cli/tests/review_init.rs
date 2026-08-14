@@ -5,6 +5,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use mire::read_review;
+use mire_core::{GitOperation, SourceBinding};
 
 static TEST_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -94,6 +95,27 @@ fn worktree_staged_range_and_filtered_initialization_match_diff_json() {
         assert_eq!(review.revision().get(), 1);
         assert!(review.notes().is_empty());
         assert!(review.events().is_empty());
+        let Some(SourceBinding::Git { repository: identity, comparison, .. }) = review.source_binding() else {
+            panic!("initialized review has a Git source binding");
+        };
+        let canonical_root = fs::canonicalize(&repository.root).unwrap();
+        assert_eq!(
+            identity.root().as_bytes(),
+            canonical_root.as_os_str().as_encoded_bytes()
+        );
+        match (name, comparison) {
+            ("worktree.json" | "filtered.json", GitOperation::Worktree { staged: false, .. })
+            | ("staged.json", GitOperation::Worktree { staged: true, .. })
+            | ("range.json", GitOperation::Diff { .. }) => {}
+            _ => panic!("unexpected bound comparison for {name}: {comparison:?}"),
+        }
+        assert_eq!(
+            comparison,
+            match review.changeset().source() {
+                mire_core::ChangesetSource::Git { operation } => operation,
+                source => panic!("unexpected initialized source: {source:?}"),
+            }
+        );
         let mut expected = diff.stdout;
         assert_eq!(expected.pop(), Some(b'\n'));
         assert_eq!(serde_json::to_vec(review.changeset()).unwrap(), expected);
@@ -108,6 +130,35 @@ fn worktree_staged_range_and_filtered_initialization_match_diff_json() {
             )
         );
     }
+}
+
+#[test]
+fn bound_reload_rejects_moved_and_replaced_repositories() {
+    let repository = FixtureRepository::new();
+    let review_path = repository.review_path("bound.json");
+    let initialized = run_mire(
+        &repository.root,
+        [
+            OsString::from("review"),
+            OsString::from("init"),
+            review_path.as_os_str().to_owned(),
+        ],
+    );
+    assert_success(&initialized);
+    let review = read_review(&review_path).unwrap();
+    let binding = review.source_binding().unwrap().clone();
+    mire::load_bound_diff(&binding).expect("an unchanged bound repository reloads");
+
+    let moved = repository.directory.join("moved-repository");
+    fs::rename(&repository.root, &moved).unwrap();
+    let moved_error = mire::load_bound_diff(&binding).unwrap_err();
+    assert!(moved_error.to_string().contains("unavailable"));
+    fs::rename(&moved, &repository.root).unwrap();
+
+    fs::rename(repository.root.join(".git"), repository.root.join(".git-old")).unwrap();
+    git(&repository.root, ["init", "--quiet"]);
+    let replaced_error = mire::load_bound_diff(&binding).unwrap_err();
+    assert!(replaced_error.to_string().contains("was replaced"));
 }
 
 #[test]

@@ -126,14 +126,14 @@ binding separate from the normalized changeset source description.
 
 Acceptance criteria:
 
-- [ ] The binding records the repository identity, comparison request, and path
+- [x] The binding records the repository identity, comparison request, and path
       filters needed to repeat the native Git operation.
-- [ ] Repository and path validation occurs before every reload.
-- [ ] Moving, deleting, or replacing the repository produces a recoverable
+- [x] Repository and path validation occurs before every reload.
+- [x] Moving, deleting, or replacing the repository produces a recoverable
       error instead of reading a different source.
-- [ ] Older review files without a binding remain readable and are reported as
+- [x] Older review files without a binding remain readable and are reported as
       non-refreshable.
-- [ ] Schema fixtures cover the optional binding and unknown-field round trips.
+- [x] Schema fixtures cover the optional binding and unknown-field round trips.
 
 ### M4.2 Re-anchor notes conservatively
 

@@ -189,13 +189,14 @@ or persistence layer.
 
 Acceptance criteria:
 
-- [ ] A developer initializes and opens a watched review.
-- [ ] The bundled skill reads bounded context and applies a batch of findings.
-- [ ] A source edit produces exact, moved, stale, and ambiguous outcomes.
-- [ ] Human dispositions survive another source refresh and agent batch.
-- [ ] The final JSON and Markdown exports preserve authorship, provenance,
+- [x] A developer initializes and opens a watched review.
+- [x] The bundled skill reads bounded context and applies a batch of findings.
+- [x] A source edit produces exact, moved, stale, and ambiguous outcomes.
+- [x] Human dispositions survive another source refresh and agent batch.
+- [x] The final JSON and Markdown exports preserve authorship, provenance,
       events, prior anchors, and re-anchor outcomes.
-- [ ] README usage follows this workflow from initialization through export.
+- [x] Documentation covers this workflow from initialization through export, and
+      the README links to it.
 
 ## Milestone 5: Live TUI control
 

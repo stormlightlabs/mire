@@ -13,6 +13,36 @@ provenance, and note history. Open one with:
 mire review review.json
 ```
 
+## Complete a review
+
+Capture the comparison, install the bundled skill, and leave the review open
+while an agent works. Give the agent the path printed by `mire skill path` and
+the review path.
+
+```sh
+mire review init review.json main...HEAD -- src tests
+mire skill path
+mire review review.json --watch
+mire context review.json
+mire context review.json --file src/example.rs --max-bytes 30000
+mire notes apply review.json --stdin < findings.json
+```
+
+After source edits, refresh the capture. A human can then record a disposition
+against the revision they observed. Export the completed review in either
+format.
+
+```sh
+mire review refresh review.json
+mire note resolve review.json note-1 --revision 3 --author reviewer
+mire notes export review.json --format json > review-notes.json
+mire notes export review.json --format markdown > review-notes.md
+```
+
+The JSON export includes finding authorship, provenance, events, original
+anchors, and re-anchor outcomes. The Markdown export renders those details for
+reading.
+
 ## Create and edit notes
 
 Press `c` on a source row to create a note. To cover a range, press `v`, move
@@ -43,8 +73,8 @@ Each finding receives an `exact`, `moved`, `stale`, or `ambiguous` result. Mire
 moves a finding only when its path, selected content, and nearby context leave
 one candidate. Duplicate matches will remain ambiguous.
 
-JSON and Markdown exports retain the initial anchor, current candidates, and
-match evidence.
+JSON and Markdown exports retain authorship, provenance, decision events, the
+initial anchor, current candidates, and match evidence.
 
 A refresh advances the review revision only when the captured changeset changes.
 

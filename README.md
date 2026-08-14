@@ -72,18 +72,20 @@ mire review refresh review.json
 
 A source-backed review refreshes from its recorded Git comparison. Mire keeps
 exact findings in place, moves only a unique content-supported match, and marks
-other findings stale or ambiguous. Mire assigns note identifiers and anchor fingerprints. Mutations include
-the review revision the caller read, so stale writes do not replace newer changes.
+other findings stale or ambiguous. Mire assigns note identifiers and anchor
+fingerprints. Mutations include the review revision the caller read, so stale
+writes do not replace newer changes.
 
-See [Review Notes](docs/src/content/docs/guides/review-files.md) for the TUI and
-agent workflow.
+See [Review Notes](docs/src/content/docs/guides/review-files.md) for the
+complete initialization, agent handoff, refresh, disposition, and export
+workflow.
 
 ## Agent Skill
 
 Give the review path and Mire's bundled skill to a local agent:
 
 ```sh
-mire skill path/to/skills
+mire skill <path>
 ```
 
 The skill tells the agent to inspect the compact manifest, expand only named

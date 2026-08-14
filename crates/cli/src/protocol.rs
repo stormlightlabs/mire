@@ -3,8 +3,8 @@ use std::io::{self, Write};
 
 use mire_core::{
     AnchorSide, AnnotationKind, Author, BytePath, Changeset, FileContent, FileDiff, Fingerprint, Hunk, LineNumber,
-    LineRange, NoteApplyError, NoteImportError, NoteInput, NoteSeverity, NoteStatus, Provenance, Review, ReviewNote,
-    SchemaVersion,
+    LineRange, NoteApplyError, NoteEvent, NoteEventKind, NoteImportError, NoteInput, NoteSeverity, NoteStatus,
+    Provenance, ReanchorEvidence, ReanchorOutcome, Review, ReviewNote, SchemaVersion,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -287,6 +287,7 @@ struct NoteDocument<'a> {
     review_revision: u64,
     changeset_fingerprint: mire_core::Fingerprint,
     notes: &'a [ReviewNote],
+    events: &'a [NoteEvent],
 }
 
 struct BoundedBuffer {
@@ -378,6 +379,7 @@ pub fn notes_json(review: &Review) -> Result<Vec<u8>> {
         review_revision: review.revision().get(),
         changeset_fingerprint: review.changeset().fingerprint(),
         notes: review.notes(),
+        events: review.events(),
     };
     let mut bytes = serde_json::to_vec(&document).map_err(ProtocolError::Serialize)?;
     bytes.push(b'\n');
@@ -469,7 +471,7 @@ pub fn notes_markdown(review: &Review) -> Vec<u8> {
     for note in review.notes() {
         let anchor = note.current_anchor().unwrap_or_else(|| note.anchor());
         output.push_str(&format!(
-            "\n## {}: {}\n\n- Kind: `{}`\n- Status: `{}`\n- Author: {}\n- Provenance: {}\n- Re-anchor: `{}`\n- Location: `{}` ({}, lines {}–{})\n\n{}\n",
+            "\n## {}: {}\n\n- Kind: `{}`\n- Status: `{}`\n- Author: {}\n- Provenance: {}\n- Re-anchor: `{}`\n- Original location: {}\n- Current location: {}\n{}\n",
             note.severity(),
             note.id().as_str(),
             note.annotation_kind(),
@@ -477,12 +479,11 @@ pub fn notes_markdown(review: &Review) -> Vec<u8> {
             note.author().display_name().unwrap_or(note.author().id()),
             note.provenance(),
             reanchor_label(note),
-            String::from_utf8_lossy(anchor.path().as_bytes()),
-            anchor.side(),
-            anchor.range().start().get(),
-            anchor.range().end().get(),
-            note.body()
+            anchor_location(note.anchor()),
+            anchor_location(anchor),
+            reanchor_details(note)
         ));
+        markdown_events(&mut output, review.events(), note);
     }
     output.into_bytes()
 }
@@ -495,6 +496,79 @@ fn reanchor_label(note: &ReviewNote) -> &'static str {
         Some(mire_core::ReanchorOutcome::Stale { .. }) => "stale",
         Some(mire_core::ReanchorOutcome::Ambiguous { .. }) => "ambiguous",
     }
+}
+
+fn reanchor_details(note: &ReviewNote) -> String {
+    match note.reanchor_outcome() {
+        None => String::new(),
+        Some(ReanchorOutcome::Exact { candidate, .. } | ReanchorOutcome::Moved { candidate, .. }) => {
+            format!("- Match evidence: {}\n", evidence_markdown(candidate.evidence()))
+        }
+        Some(ReanchorOutcome::Stale { evidence, .. }) => {
+            format!("- Match evidence: {}\n", evidence_markdown(*evidence))
+        }
+        Some(ReanchorOutcome::Ambiguous { candidates, .. }) => {
+            let candidates = candidates
+                .iter()
+                .map(|candidate| {
+                    format!(
+                        "{} ({})",
+                        anchor_location(candidate.anchor()),
+                        evidence_markdown(candidate.evidence())
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!("- Candidates: {candidates}\n")
+        }
+    }
+}
+
+fn markdown_events(output: &mut String, events: &[NoteEvent], note: &ReviewNote) {
+    let events = events
+        .iter()
+        .filter(|event| event.note_id() == note.id())
+        .collect::<Vec<_>>();
+    if events.is_empty() {
+        return;
+    }
+    output.push_str("- Events:\n");
+    for event in events {
+        let author = event.author().display_name().unwrap_or(event.author().id());
+        output.push_str(&format!(
+            "  - {}. {} {}\n",
+            event.sequence(),
+            author,
+            event_description(event.event())
+        ));
+    }
+}
+
+fn event_description(event: &NoteEventKind) -> String {
+    match event {
+        NoteEventKind::Created { status } => format!("created the note as `{status}`"),
+        NoteEventKind::StatusChanged { from, to } => format!("changed the status from `{from}` to `{to}`"),
+    }
+}
+
+fn evidence_markdown(evidence: ReanchorEvidence) -> String {
+    format!(
+        "path match: {}; content match: {}; nearby context: {} before, {} after",
+        evidence.path_match(),
+        evidence.content_match(),
+        evidence.context_before(),
+        evidence.context_after()
+    )
+}
+
+fn anchor_location(anchor: &mire_core::Anchor) -> String {
+    format!(
+        "`{}` ({}, lines {}–{})",
+        String::from_utf8_lossy(anchor.path().as_bytes()),
+        anchor.side(),
+        anchor.range().start().get(),
+        anchor.range().end().get()
+    )
 }
 
 fn bounded_json(value: &impl Serialize, limit: usize) -> Result<Vec<u8>> {

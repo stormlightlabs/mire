@@ -6,7 +6,15 @@
 
 #### 2026-08-14
 
-- A bundled provider-neutral review skill, installed and located with `mire skill path/to/skills`.
+- Reviews initialized from a Git comparison with `mire review init`.
+- Location-based note creation and atomic batches that assign durable anchors,
+  require the observed review revision, and preserve authorship and provenance.
+- Source-backed review refresh with conservative exact, moved, stale, and
+  ambiguous re-anchoring, including watched review updates and JSON or Markdown
+  exports of re-anchor outcomes and note events.
+- A bundled provider-neutral review skill, installed and located with `mire skill path`.
+- Local live-session controls for inspecting and navigating an open TUI,
+  requesting reloads, and coordinating walkthroughs.
 
 #### 2026-07
 

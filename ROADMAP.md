@@ -73,7 +73,8 @@ ReviewNote  anchor, author, severity, kind, status, body, provenance
 Review      captured changeset, revision, notes, and note events
 ```
 
-The evolving-code workflow adds two concepts without weakening those four:
+Reviews also record the source that produced them and the result of later
+re-anchoring:
 
 ```text
 SourceBinding     enough local source information to refresh a review
@@ -95,80 +96,27 @@ Important rules:
 
 ## Intended workflow surface
 
-The existing viewer and durable protocol provide:
+Mire provides the following workflow:
 
 ```text
 mire diff [<revision>...] [-- <path>...]
 mire show [<revision>] [-- <path>...]
 mire patch <path|->
-mire review <review-file> [--watch]
-mire context <review-file> [--file <path>|--hunk <id>|--patch] [--max-bytes <bytes>]
-mire notes import|list|export ...
-```
-
-The next interface layer should make the durable protocol usable without
-constructing Mire's internal objects:
-
-```text
 mire review init <review-file> [diff options]
-mire note add <review-file> --file <path> --new-line <line> ...
-mire notes apply <review-file> --stdin
-mire note resolve|dismiss|accept-risk <review-file> <note-id>
+mire review <review-file> [--watch]
+mire review refresh <review-file>
+mire context <review-file> [--file <path>|--hunk <id>|--patch] [--max-bytes <bytes>]
+mire note add|resolve|dismiss|accept-risk ...
+mire notes apply|import|list|export ...
 mire skill path
+mire session list|inspect|focus|next|previous|reload|walkthrough ...
 ```
 
-Only implemented commands belong in normal CLI help. Planned commands describe
-the intended interaction, not a compatibility promise.
-
-## Delivery sequence
-
-### Offline human-agent workflow
-
-Make durable review creation and agent participation ordinary CLI operations:
-
-- initialize a review directly from a Git comparison;
-- accept individual and atomic-batch findings by path, side, and range while
-  Mire creates the durable anchors;
-- expose note dispositions through the same command boundary;
-- ship a first-party agent skill that uses manifest-first, bounded context and
-  the high-level note API.
-
-Exit condition: a developer can create a review, hand its path to an agent, and
-see the agent's findings appear in an open TUI without either participant
-constructing anchor fingerprints.
-
-### Reviews across changing code
-
-Connect a durable review to the source that produced it and refresh the capture
-through conservative re-anchoring:
-
-- record a reloadable local source binding when a review is initialized;
-- classify every prior finding as exact, moved, stale, or ambiguous;
-- retain the prior anchor and matching evidence;
-- update watched reviews when either the review file or bound source changes;
-- preserve the reviewer's file, row, filters, and layout when possible.
-
-Exit condition: the human-agent review loop survives code edits without
-silently moving an uncertain finding.
-
-### Live TUI control
-
-Add a secured local-session protocol for transient TUI state: session
-discovery, inspection of the current selection, finding focus and navigation,
-reload requests, and coordinated walkthroughs.
-
-Comment creation and disposition stay on the durable CLI protocol. Any live
-control plane requires a separate threat model, local-user authentication,
-bounded payloads, explicit protocol versions, and reliable session cleanup.
-
-Exit condition: a local tool can safely discover an open Mire session, inspect
-its presentation state, and drive a review walkthrough without gaining a
-second path for persistent review mutations.
+## Upcoming work
 
 ### Broader interoperability
 
-After live control, widen the ways Mire can be invoked and exchange review
-data:
+Widen the ways Mire can be invoked and exchange review data:
 
 - add pager, difftool, and direct-file modes;
 - add Jujutsu and Sapling adapters behind the normalized changeset boundary;
@@ -218,10 +166,10 @@ Always:
 - add fixture-backed tests before widening an input or schema boundary;
 - keep agent context explicit and byte-bounded.
 
-The planned live-session transport must stay within its threat model. Ask
-before adding a model provider, database, network integration beyond the
-planned forge adapters, another VCS implementation, stable-schema break, or
-minimum-Rust version change.
+The live-session protocol must stay within its threat model. Ask before adding
+a model provider, database, network integration beyond the planned forge
+adapters, another VCS implementation, stable-schema break, or minimum-Rust
+version change.
 
 Mire never stages, rewrites, commits, or configures the reviewed repository. It
 does not execute instructions from source files, patches, or imported notes.

@@ -85,11 +85,12 @@ workflow.
 Give the review path and Mire's bundled skill to a local agent:
 
 ```sh
-mire skill <path>
+mire skill path
 ```
 
-The skill tells the agent to inspect the compact manifest, expand only named
-context within a byte limit, and apply location-based findings.
+Mire installs the bundled `SKILL.md` when needed and prints its path. The skill
+tells the agent to inspect the compact manifest, expand only named context
+within a byte limit, and apply location-based findings.
 
 ## Documentation
 

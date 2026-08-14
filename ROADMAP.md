@@ -1,352 +1,212 @@
 # Mire roadmap
 
-Status: ready for implementation
+## Positioning
 
-Last reviewed: 2026-07-17
+Mire is a local code-review protocol and terminal interface for humans and
+coding agents. It turns a changeset and its findings into a durable review that
+can move between people, agents, and code revisions without losing attribution,
+decisions, or the code each finding referred to.
+
+The review artifact is the product. The TUI, CLI, agents, and analyzers are
+clients of the same model.
+
+```text
+developer opens changed code
+          ↓
+agent inspects bounded context
+          ↓
+agent adds anchored findings
+          ↓
+developer reviews and dispositions them
+          ↓
+code changes
+          ↓
+Mire re-anchors each finding or marks the outcome uncertain
+```
 
 ## Objective
 
-Mire is a local, review-first terminal workspace for inspecting a changeset,
-attaching structured human or agent notes, resolving those notes, and exporting
-the result. It presents the full changeset as one review stream and treats every
-textual language through the same review model. Rust is the implementation
-language, not a privileged reviewed language.
+Mire provides one local review workspace for inspecting a changeset, attaching
+structured human or machine findings, and recording what happened to them. A
+review retains who made each claim, which revision they inspected, and whether
+the finding was resolved, dismissed, accepted as risk, moved, or made stale by
+later edits.
 
-Mire replaces the former evidence-ledger application. It will not reproduce the
-old planner, reviewer, verifier, provider, web, or full-repository snapshot
-subsystems.
-
-## Users and use cases
-
-- A developer reviews worktree changes or a commit without leaving the terminal.
-- A maintainer reviews a large, mixed-language changeset by file and hunk.
-- An agent reads a bounded, versioned changeset and returns anchored notes.
-- A human and an agent inspect the same notes, then resolve, dismiss, or accept
-  the risk without losing authorship or provenance.
-- A tool imports structured annotations without claiming that they are
-  human-approved findings.
+Mire reviews every textual language through the same model. Rust is the
+implementation language, not a privileged reviewed language.
 
 ## Product principles
 
-1. **Review first.** The main view is one continuous multi-file stream. A
-   sidebar navigates that stream instead of replacing it with a single-file
-   view.
-2. **Read only.** Mire may read the reviewed repository and its VCS metadata. It
-   does not edit files, stage changes, create commits, or change repository
+1. **Review artifacts are durable.** Changesets, findings, decisions, and event
+   history survive TUI sessions and agent handoffs.
+2. **Review first.** The main view is one continuous multi-file stream. A
+   sidebar navigates that stream.
+3. **Read only.** Mire reads reviewed repositories and VCS metadata. It does not
+   edit files, stage changes, create commits, or change repository
    configuration.
-3. **One changeset model.** Git, patch input, direct files, and later VCS
-   adapters normalize into the same representation before rendering.
-4. **Review data is separate.** A changeset describes code. A review stores
-   notes and decisions. Agent context is a bounded projection assembled for one
+4. **One changeset model.** Git, patch input, direct files, and later VCS
+   adapters normalize before rendering or annotation.
+5. **Review data is separate.** A changeset describes code. A review stores
+   findings and decisions. Agent context is a bounded projection for one
    consumer.
-5. **Humans and agents share a protocol.** Every essential review action has a
-   deterministic CLI or JSON form; the TUI is a client of the same model.
-6. **Language neutral.** Every textual patch uses the same model and review
-   workflow. Syntax highlighting is optional presentation metadata.
-7. **Native tools own VCS semantics.** Start with `git diff`, `git show`, and
-   `git cat-file`. Do not reimplement Git in the first release.
-8. **No embedded model pipeline.** Agents and analyzers produce notes through a
-   protocol. Mire does not choose providers, prompts, or verification models.
+6. **Humans and tools share a protocol.** Essential review actions have
+   deterministic CLI or JSON forms. The TUI uses the same validation rules.
+7. **Durable anchors are Mire's responsibility.** Callers identify a path,
+   side, and range. Mire resolves fingerprints and rejects missing or ambiguous
+   locations.
+8. **Provenance does not grant authority.** Human, agent, analyzer, and imported
+   findings retain their producer identity. Machine output never becomes a
+   human decision through import.
+9. **Native tools own VCS semantics.** Mire invokes native Git commands without
+   a shell and does not reimplement Git.
+10. **Model providers stay outside Mire.** Agents use the protocol. Mire does
+    not select providers, prompts, or verification models.
 
-## Smallest useful release
+## Product model
 
-Version 0.1 is a read-only Git and patch viewer:
+The current core model has four primary concepts:
 
 ```text
-mire diff
-mire diff main...HEAD
-mire show HEAD~1
-git diff --no-color | mire patch -
+Changeset   source, files, hunks, fingerprint
+Anchor      side, path, line range, hunk and content fingerprints
+ReviewNote  anchor, author, severity, kind, status, body, provenance
+Review      captured changeset, revision, notes, and note events
 ```
 
-It provides:
+The evolving-code workflow adds two concepts without weakening those four:
 
-- a complete multi-file review stream and file sidebar;
-- unified, split, and responsive layouts from one row model;
-- keyboard navigation, search, context controls, and line wrapping;
-- syntax and intraline highlighting with selectable built-in themes;
-- explicit handling of renames, binary files, missing final newlines, invalid
-  UTF-8, empty changesets, and large patches;
-- stable JSON output for the normalized changeset.
+```text
+SourceBinding     enough local source information to refresh a review
+ReanchorOutcome   exact, moved, stale, or ambiguous
+```
 
-Persistent notes, tool annotations, watch mode, and live agent control follow in
-later milestones. They must extend the 0.1 model rather than replace it.
+Important rules:
 
-## Product surface
+- Paths remain repository-relative byte strings internally. Display conversion
+  occurs at the UI boundary.
+- Line numbers alone are not durable identity. Anchors include path, side,
+  range, hunk fingerprint, and selected-content fingerprint.
+- Ambiguous findings never move automatically. Mire retains the original
+  anchor and the evidence for every re-anchor result.
+- Schemas carry explicit versions and reject unsupported major versions.
+- Limits for patch size, file size, note count, and subprocess output return
+  machine-readable errors.
+- Review-file updates validate the whole transaction before atomic replacement.
 
-The command shape should remain close to the underlying source:
+## Intended workflow surface
+
+The existing viewer and durable protocol provide:
 
 ```text
 mire diff [<revision>...] [-- <path>...]
 mire show [<revision>] [-- <path>...]
 mire patch <path|->
-mire review <review-file>
-mire context --format json
-mire notes import <path|->
-mire notes export --format json|markdown|sarif
-mire watch
+mire review <review-file> [--watch]
+mire context <review-file> [--file <path>|--hunk <id>|--patch] [--max-bytes <bytes>]
+mire notes import|list|export ...
 ```
 
-Only commands implemented in the current milestone should appear in normal
-help output. Future commands above describe the intended interface, not a
-compatibility promise.
-
-## Domain model
-
-The core library owns four concepts:
+The next interface layer should make the durable protocol usable without
+constructing Mire's internal objects:
 
 ```text
-Changeset   source, files, hunks, fingerprint
-Anchor      side, path, line range, hunk and blob fingerprints
-ReviewNote  anchor, author, severity, status, body, provenance
-Review      changeset reference, revision, notes and note events
+mire review init <review-file> [diff options]
+mire note add <review-file> --file <path> --new-line <line> ...
+mire notes apply <review-file> --stdin
+mire note resolve|dismiss|accept-risk <review-file> <note-id>
+mire skill path
 ```
 
-Important rules:
+Only implemented commands belong in normal CLI help. Planned commands describe
+the intended interaction, not a compatibility promise.
 
-- Paths are repository-relative byte strings internally. Display conversion
-  must be lossy only at the UI boundary.
-- Line numbers alone are not stable identity. Anchors include path, side, line
-  range, and content fingerprints.
-- Imported claims remain attributed to their producer. Importing a tool or agent
-  annotation does not mark it verified.
-- Schemas include an explicit version and reject unsupported major versions.
-- Unknown fields survive a read/write round trip where practical so newer
-  producers do not lose data through an older client.
-- Limits for patch size, file size, note count, and subprocess output are
-  explicit and return actionable errors.
+## Delivery sequence
 
-## Rust implementation affordances
+### Offline human-agent workflow
 
-Rust benefits Mire as an implementation ecosystem:
+Make durable review creation and agent participation ordinary CLI operations:
 
-- Ship one native executable without requiring a language runtime.
-- Model paths, sides, anchors, statuses, and protocol versions with enums and
-  newtypes so invalid states are hard to construct.
-- Use ownership to keep changeset data immutable while the UI maintains its own
-  selection and cache state.
-- Bound subprocess output, channels, caches, and background tasks explicitly.
-- Reuse the same typed core from the CLI, TUI, import/export paths, and tests.
-- Use Cargo features to include only the syntax grammars and optional adapters
-  that a release intends to support.
+- initialize a review directly from a Git comparison;
+- accept individual and atomic-batch findings by path, side, and range while
+  Mire creates the durable anchors;
+- expose note dispositions through the same command boundary;
+- ship a first-party agent skill that uses manifest-first, bounded context and
+  the high-level note API.
 
-These are implementation properties. They must not leak Rust concepts into the
-changeset schema or require a Rust project to use Mire.
+Exit condition: a developer can create a review, hand its path to an agent, and
+see the agent's findings appear in an open TUI without either participant
+constructing anchor fingerprints.
 
-### Language support
+### Reviews across changing code
 
-- Render every textual patch, including unknown and extensionless files.
-- Use Inkjet for syntax highlighting, with a curated language feature set rather
-  than its all-languages default.
-- Detect syntax from path and shebang where possible. Let users override an
-  incorrect detection.
-- Treat highlighting failure as a presentation error and fall back to plain diff
-  rows without changing anchors.
-- Keep syntax backend types out of `mire-core` so another highlighter can replace
-  Inkjet without changing review files or agent integrations.
+Connect a durable review to the source that produced it and refresh the capture
+through conservative re-anchoring:
 
-### Theme system
+- record a reloadable local source binding when a review is initialized;
+- classify every prior finding as exact, moved, stale, or ambiguous;
+- retain the prior anchor and matching evidence;
+- update watched reviews when either the review file or bound source changes;
+- preserve the reviewer's file, row, filters, and layout when possible.
 
-Mire currently resolves one semantic `Theme` at terminal startup with
-`terminal-colorsaurus`. It detects light and dark terminals, uses a limited ANSI
-palette for `TERM=dumb`, and removes color when `NO_COLOR` is set. Theme
-selection should extend this boundary instead of introducing colors in view
-code or replacing the existing detector.
+Exit condition: the human-agent review loop survives code edits without
+silently moving an uncertain finding.
 
-The command line selects `auto` or a theme family. `terminal-colorsaurus`
-selects the light or dark variant:
+### Live TUI control
 
-| Identifier | Dark variant | Light variant |
-| ---------- | ------------ | ------------- |
-| `auto` | Eldritch Minimal | Eldritch Dusk |
-| `iceberg` | Iceberg Dark | Nord Light |
-| `eldritch` | Eldritch Minimal | Eldritch Dusk |
-| `catppuccin` | Catppuccin Mocha | Catppuccin Latte |
+Add a secured local-session protocol for transient TUI state: session
+discovery, inspection of the current selection, finding focus and navigation,
+reload requests, and coordinated walkthroughs.
 
-`auto` is the default and resolves to the same variants as `eldritch`, matching
-Thunderus's Eldritch default while respecting the terminal's detected mode. The
-dark palettes come from
-[Thunderus](https://github.com/stormlightlabs/thunderus/blob/main/crates/thndrs/src/cli/renderer/style.rs).
-Eldritch Dusk comes from the official
-[Eldritch palette](https://github.com/eldritch-theme/eldritch#-palette), Nord
-Light comes from the
-[Tinted Theming scheme](https://github.com/tinted-theming/schemes/blob/main/base16/nord-light.yaml),
-and Latte comes from the official
-[Catppuccin palette](https://github.com/catppuccin/palette/blob/main/palette.json).
-Mire owns the copied values and maps them to review-specific semantic roles;
-the source projects are prior art, not runtime or build dependencies. Hunk's
-[theme catalog and contrast tests](https://github.com/modem-dev/hunk/blob/main/src/ui/themes.test.ts)
-are the model for checking complete UI coverage and readable foreground and
-background pairs.
+Comment creation and disposition stay on the durable CLI protocol. Any live
+control plane requires a separate threat model, local-user authentication,
+bounded payloads, explicit protocol versions, and reliable session cleanup.
 
-`--theme <name>` is a global option accepted by every interactive command.
-Structured JSON output accepts the option but does not initialize a terminal or
-query its colors.
+Exit condition: a local tool can safely discover an open Mire session, inspect
+its presentation state, and drive a review walkthrough without gaining a
+second path for persistent review mutations.
 
-Terminal safety takes precedence over a requested palette:
+### Broader interoperability
 
-1. `NO_COLOR` uses the color-free theme.
-2. `TERM=dumb` uses the limited ANSI theme.
-3. `terminal-colorsaurus` reports light or dark mode for the selected family.
-4. A failed terminal query uses the selected family's dark variant; `auto`
-   falls back to Eldritch Minimal.
+After live control, widen the ways Mire can be invoked and exchange review
+data:
 
-Each palette maps once to Mire's semantic roles: application background,
-panels, title, selection, dividers, files, hunks, additions, deletions, context,
-markers, errors, footer text, search matches, intraline emphasis, and syntax
-categories. Rendering code consumes those roles and contains no palette RGB
-values. The selected theme covers loading, empty, help, error, unified, and
-split views as well as the sidebar and footer.
+- add pager, difftool, and direct-file modes;
+- add Jujutsu and Sapling adapters behind the normalized changeset boundary;
+- export SARIF and publish through optional forge adapters.
 
-Theme resolution should accept an explicit light/dark mode internally so unit
-and rendering tests never query the developer's terminal. Production startup is
-the only caller that asks `terminal-colorsaurus` for that mode.
+Exit condition: each adapter preserves Mire's changeset, anchor, provenance,
+and review-event rules, and optional network publication never enters the core
+or TUI crates.
 
-The first theme release includes bundled family pairs and command-line
-selection. Keep the identifiers independent of Clap so a later configuration
-layer or in-app selector can reuse them. Do not add a configuration file solely
-to persist one UI preference.
+### Review expressiveness and quality
 
-### Tool and agent context
+After interoperability, add independently releasable review capabilities:
 
-- Emit a compact manifest of files, hunks, and existing annotations before
-  offering raw patch or full-file content.
-- Let callers request bounded context by file, hunk, or note identifier.
-- Accept notes in one batch and validate every anchor before changing review
-  state.
-- Record whether an annotation came from a human, agent, analyzer, or imported
-  interchange format without granting any producer extra authority.
-- Add live session inspection, navigation, and comment APIs only after the
-  offline protocol is stable and secured to the local user.
+- optional confidence and evidence plus structured remediation for consumption
+  by external coding agents;
+- primary and related locations for findings that span several code sites;
+- reviewer-quality summaries derived from provenance and dispositions;
+
+These capabilities must reuse the changeset, anchor, provenance, and review
+event rules.
 
 ## Architecture
 
-The workspace starts with three crates:
+The workspace keeps side effects at the outer boundary:
 
 ```text
 crates/
-  core/  package mire-core: normalized changesets, anchors, schemas, parsing
-  ui/    package mire-tui: application state, rows, rendering, input
-  cli/   package mire: arguments, native-tool adapters, persistence, orchestration
-```
+  core/  mire-core: changesets, anchors, review schemas, parsing
+  ui/    mire-tui: application state, rows, rendering, input
+  cli/   mire: arguments, native-tool adapters, persistence, orchestration
 
-Implementation dependencies must point one way:
-
-```text
 mire -> mire-tui -> mire-core
      \------------> mire-core
 ```
 
 `mire-core` has no terminal, subprocess, filesystem-watching, database, or model
-provider dependency. Side effects live behind concrete boundaries in
-`mire`; traits are introduced only when tests or a second implementation
-need one.
-
-Initial technical choices:
-
-- Rust 2024, with Rust 1.88 as the initial minimum supported version.
-- Ratatui with Crossterm for the terminal application.
-- Native Git subprocesses for repository comparisons.
-- `similar` for direct-file and intraline comparison.
-- Inkjet for multi-language syntax highlighting, with selected language features
-  and bounded caches.
-- Serde JSON for versioned interchange.
-- Atomic JSON review files first. Adopt SQLite only when concurrent access,
-  query volume, or measured file size justifies it.
-
-Third-party dependencies are added by the ticket that first needs them. Each
-addition must state why the standard library or an existing dependency is
-insufficient, disable unused default features, and keep features additive.
-
-## Persistence and safety
-
-- Committed revisions rely on Git object IDs plus the captured raw patch and
-  changed-blob fingerprints. Mire does not copy complete trees.
-- Worktree reviews persist the patch and only the changed content needed to
-  preserve anchors.
-- Review files use atomic replace and a documented recovery path. The original
-  is retained if serialization or validation fails.
-- Imported paths cannot escape the repository or review storage root.
-- Subprocess arguments are passed without a shell, output is bounded, and
-  stderr is retained for diagnosis.
-- Local automation endpoints bind to loopback, authenticate requests, and are
-  disabled unless a live session needs them.
-
-## Testing and verification
-
-The highest stable boundary is the compiled `mire` binary operating on fixture
-repositories, patch files, and a pseudo-terminal. Unit tests support this
-boundary but do not replace it.
-
-Fixtures must cover:
-
-- staged, unstaged, untracked, two-dot, three-dot, and commit diffs;
-- adds, deletes, renames, copies, mode changes, submodules, and binary files;
-- missing final newlines, CRLF, Unicode, invalid UTF-8, very long lines, and
-  large changesets;
-- mixed-language patches, unknown extensions, shebang detection, malformed
-  source, and highlighting fallback;
-- stale, ambiguous, and invalid note anchors;
-- interrupted review-file writes and unsupported schema versions.
-
-Standard checks, once crate targets exist:
-
-```text
-cargo fmt --all -- --check
-cargo check --workspace --all-targets --all-features
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-cargo doc --workspace --all-features --no-deps
-```
-
-Every TUI milestone also needs a real-terminal smoke review. Performance work
-uses checked-in large-patch fixtures and records startup time, peak memory, and
-scroll-frame latency before setting budgets.
-
-## Milestones
-
-### 0. Workspace foundation
-
-Create the three-crate workspace, starter targets, shared package policy, and
-test fixture conventions without choosing implementation dependencies.
-
-Evidence: Cargo builds and tests every starter target, and crate ownership is
-unambiguous.
-
-### 1. Read-only review viewer
-
-Deliver Git diff/show and patch input, the normalized model, the continuous TUI
-stream, navigation, layouts, highlighting, selectable built-in themes, and
-black-box fixtures.
-
-Evidence: a reviewer can inspect the fixture matrix and a real repository
-without Mire modifying either.
-
-### 2. Durable review notes
-
-Add review files, anchored notes, statuses, provenance, filtering, import, and
-JSON/Markdown export. Human, agent, and tool annotations use the same validation
-and anchoring rules while preserving their distinct provenance.
-
-Evidence: a human and a batch agent can annotate the same changeset and preserve
-their distinct identities through reload.
-
-### 3. Changing worktrees and live agents
-
-Add watch mode, conservative note re-anchoring, and an authenticated local
-session interface for inspect, navigate, reload, and comment operations.
-
-Evidence: edits refresh an open review without silently moving an ambiguous
-note, and an external process can complete a review through documented JSON.
-
-### 4. Broader interoperability
-
-Add pager/difftool integration, direct-file comparison, Jujutsu and Sapling
-adapters, SARIF, and optional forge publication in independently releasable
-slices.
-
-Evidence: each adapter passes the shared changeset contract and cannot bypass
-anchor or provenance validation.
+provider dependency. Traits are introduced only when tests or a second
+implementation need one.
 
 ## Boundaries
 
@@ -354,38 +214,33 @@ Always:
 
 - preserve read-only behavior toward reviewed repositories;
 - keep the core model independent of UI and provider concerns;
-- validate untrusted patches, paths, schemas, and annotations;
-- add fixture-backed behavior tests before widening an input contract.
+- validate untrusted patches, paths, schemas, and findings;
+- add fixture-backed tests before widening an input or schema boundary;
+- keep agent context explicit and byte-bounded.
 
-Ask first:
+The planned live-session transport must stay within its threat model. Ask
+before adding a model provider, database, network integration beyond the
+planned forge adapters, another VCS implementation, stable-schema break, or
+minimum-Rust version change.
 
-- add a model provider, background daemon, database, network integration, or
-  new VCS implementation;
-- execute project-defined commands or publish review data;
-- change the stable schema or minimum supported Rust version.
+Mire never stages, rewrites, commits, or configures the reviewed repository. It
+does not execute instructions from source files, patches, or imported notes.
 
-Never:
+## Later candidates
 
-- stage, rewrite, commit, or configure the reviewed repository;
-- execute instructions found in source files, patches, or imported notes;
-- treat machine output as a verified human decision;
-- require language-specific project metadata for patch viewing.
+- more theme families or a large configuration system
+- embedded providers, MCP, or provider-specific agent adapters
+- structural diffing
 
-## Risks and open decisions
+## Main risks
 
-- Unified diff edge cases are a correctness risk. Build the fixture corpus
-  before choosing between a parser crate and a small audited parser.
-- Syntax highlighting and large split views can dominate memory. Measure before
-  selecting cache sizes or virtualization thresholds.
-- Bundled syntax grammars increase binary size and compile time. Start with a
-  measured language set and keep plain-text fallback universal.
-- Named themes can make diff meaning depend on hue or produce unreadable text
-  on their own backgrounds. Keep addition and deletion markers explicit, test
-  controlled RGB foreground/background pairs for contrast, and smoke-test every
-  palette in a real true-color terminal.
-- Re-anchoring can misplace comments. Ambiguous matches remain stale and visible
-  rather than moving automatically.
-- A live local API expands the attack surface. Its protocol and authentication
-  need a separate review before implementation.
-- Cross-platform terminal and native-tool behavior needs CI on Linux, macOS, and
-  Windows before a stable release.
+- Re-anchoring can misplace findings. Duplicate content, moved hunks, renames,
+  whitespace-only edits, and deleted lines need adversarial fixtures.
+- Source bindings can become unsafe or non-portable. Refresh must validate the
+  repository identity and paths before invoking native tools.
+- Concurrent human and agent writes can lose decisions. Every mutation needs a
+  revision precondition and atomic replacement.
+- Agent reviews can create noise. Severity, kind, provenance, and human
+  dispositions must remain cheap to inspect and filter.
+- A live local API expands the attack surface. Its transport needs a separate
+  threat model, local-user authentication, strict bounds, and reliable cleanup.

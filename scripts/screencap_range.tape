@@ -13,7 +13,7 @@ Set TypingSpeed 20ms
 Set Theme { "name": "Eldritch", "black": "#171928", "red": "#f16c75", "green": "#37f499", "yellow": "#f1fc79", "blue": "#7081d0", "magenta": "#a48cf2", "cyan": "#04d1f9", "white": "#ebfafa", "brightBlack": "#292e42", "brightRed": "#f16c75", "brightGreen": "#37f499", "brightYellow": "#f7c67f", "brightBlue": "#abb4da", "brightMagenta": "#f265b5", "brightCyan": "#04d1f9", "brightWhite": "#ebfafa", "background": "#171928", "foreground": "#ebfafa", "selection": "#292e42", "cursor": "#f1fc79" }
 
 Hide
-Type "cargo build -p mire && rm -f /tmp/mire-screencap-range.json && mire review init /tmp/mire-screencap-range.json HEAD..bf30007"
+Type "cargo build -p mire && rm -f /tmp/mire-screencap-range.json && mire review init /tmp/mire-screencap-range.json 751692a..bf30007"
 Enter
 Wait+Screen /revision: 1/
 Show

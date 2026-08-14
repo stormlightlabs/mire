@@ -2,36 +2,31 @@
 
 > Model Independent Review Environment
 
-Mire is a difftool for humans and agents.
+Mire is a terminal-based diffing and collaborative code review tool for humans and agents.
 
-![screenshot](docs/static/screencap.png)
+![Mire showing a split review](docs/static/screencap.png)
 
 ## Features
 
-- Review unstaged and untracked worktree changes, staged changes, revisions,
-  commits, or patch files.
-- Move through every changed file in one continuous stream or jump by file and
-  hunk.
-- Switch between unified, split, and automatic layouts while you review.
-- Search the full changeset, adjust surrounding context, and wrap long lines.
-- Highlight supported languages automatically, with a plain-text fallback for
-  everything else.
-- Create and disposition durable, anchored review notes from the terminal.
-- Keep an open Git, patch, or review-file session current as files change.
-- Produce stable JSON for scripts and other tools.
+- Review worktree changes, staged changes, revisions, commits, and patch files.
+- Move through every changed file in one continuous stream.
+- Use unified, split, or responsive layouts with syntax and intraline highlighting.
+- Create durable review files with anchored findings, attribution, and decisions.
+- Exchange bounded context and findings with local agents through JSON.
+- Watch Git comparisons, patches, and review files for changes.
 
-## Install from source
+## Installation
 
 Mire requires Git and Rust 1.88 or newer.
 
 ```sh
 git clone https://github.com/stormlightlabs/mire.git
 cd mire
-cargo install --path crates/cli
+cargo install --path crates/cli --locked
 ```
 
-The last command installs the `mire` executable in Cargo's binary directory,
-usually `~/.cargo/bin`.
+See the [installation guide](docs/src/content/docs/getting-started/installation.md)
+for verification, updates, and uninstall instructions.
 
 ## Quick start
 
@@ -44,196 +39,58 @@ mire diff
 # Staged changes
 mire diff --staged
 
-# Changes on the current branch since it diverged from main
+# Changes since this branch diverged from main
 mire diff main...HEAD
 
-# The latest commit
-mire show
+# One commit
+mire show HEAD
 
-# A patch saved on disk
+# A patch file
 mire patch changes.diff
-
-# Keep the current worktree review open and reload changes
-mire watch
 ```
 
-Limit a Git review to one or more repository-relative paths by placing them
-after `--`:
+Place repository-relative path filters after `--`:
 
 ```sh
 mire diff main...HEAD -- src tests
-mire show HEAD~1 -- crates/core
 ```
 
-Add `--watch` to `diff`, `show`, or a file-backed `patch` command when you want
-to keep the same command shape:
+Press `?` in the TUI for the current keybindings. See
+[quick start](docs/src/content/docs/getting-started/quick-start.md) for more information.
+
+## Reviews
+
+Capture a Git comparison in a review file, then open it:
 
 ```sh
-mire diff main...HEAD --watch
-mire patch changes.diff --watch
-```
-
-Watch mode preserves the selected file, nearby logical row, layout, and review
-filters when the refreshed content still contains them.
-
-If a watched file or repository disappears or becomes invalid, Mire shows an
-error and keeps watching so the session can recover after the source returns.
-
-Native filesystem notifications are debounced & mire falls back to polling when
-the platform watcher is unavailable, and periodically reloads to recover missed events.
-
-Use `mire help`, `mire help diff`, `mire help show`, `mire help patch`,
-`mire help review`, or `mire help watch` for the complete command-line
-reference.
-
-## Keybinds
-
-Press `?` in Mire to show the built-in keybind reference.
-
-### General navigation
-
-| Key           | Action                                                            |
-| ------------- | ----------------------------------------------------------------- |
-| `q` or `Esc`  | Quit                                                              |
-| `?`           | Show or hide keybind help                                         |
-| `Tab`         | Switch focus between the file sidebar and review                  |
-| `j` or `Down` | Scroll down, or select the next file when the sidebar has focus   |
-| `k` or `Up`   | Scroll up, or select the previous file when the sidebar has focus |
-| `PgDn`        | Move down one page                                                |
-| `PgUp`        | Move up one page                                                  |
-| `g` or `Home` | Jump to the first row                                             |
-| `G` or `End`  | Jump to the last row                                              |
-| `]`           | Jump to the next file                                             |
-| `[`           | Jump to the previous file                                         |
-| `}`           | Jump to the next hunk                                             |
-| `{`           | Jump to the previous hunk                                         |
-
-### Search and display
-
-| Key | Action                                                  |
-| --- | ------------------------------------------------------- |
-| `/` | Enter a search query                                    |
-| `n` | Jump to the next search match                           |
-| `N` | Jump to the previous search match                       |
-| `+` | Show more context lines                                 |
-| `-` | Show fewer context lines                                |
-| `w` | Toggle line wrapping                                    |
-| `1` | Use the unified layout                                  |
-| `2` | Use the split layout                                    |
-| `3` | Choose the layout automatically for the available width |
-
-### While entering a search query
-
-| Key                     | Action                             |
-| ----------------------- | ---------------------------------- |
-| `Enter`                 | Search and jump to the first match |
-| `Esc`                   | Cancel search input                |
-| `Backspace`             | Delete the previous character      |
-| Any printable character | Add it to the query                |
-
-### Durable review notes
-
-Create a durable review from any comparison accepted by `mire diff`, then open
-it:
-
-```sh
-# Capture the current worktree
-mire review init review.json
-
-# Or capture a revision range limited to selected paths
 mire review init review.json main...HEAD -- src tests
-
-mire review review.json
+mire review review.json --watch
 ```
 
-Pass `--staged` to capture the index instead. Mire refuses to replace an
-existing review file.
-
-Use `mire review review.json --watch` to reload changes made to the review file
-by another local process.
-
-Mire waits until the in-terminal editor is clean before applying an external update.
-
-Review-file sessions add these controls:
-
-| Key                   | Action                                                     |
-| --------------------- | ---------------------------------------------------------- |
-| `v`                   | Start or clear a source range; move with `j` and `k`       |
-| `c`                   | Create a note on the selected range or current source line |
-| `e`                   | Edit the selected note                                     |
-| `p` / `P`             | Jump to the next or previous visible note                  |
-| `r` / `d` / `o`       | Resolve, dismiss, or reopen the selected note              |
-| `a`                   | Accept the selected note's risk                            |
-| `f`                   | Filter notes by author, status, severity, kind, or file    |
-| `Ctrl-S`              | Retry a failed save                                        |
-| `Enter` in the editor | Save the note                                              |
-| `Tab` / `Shift-Tab`   | Change severity or annotation kind in the editor           |
-
-Mire saves note changes by atomically replacing the review file. If a save
-fails, the editor stays open with the note text intact. Right-click a source row
-to create a note, or use the action buttons on a note row to edit it and change
-its status.
-
-Mire also supports the mouse. Scroll the wheel over the review or sidebar, or
-left-click a file or review row to select it.
-
-## Patch input and JSON output
-
-Pass a patch file to open it in the interactive viewer:
+A local agent or analyzer can inspect the compact manifest, expand a named hunk
+within a byte limit, and apply location-based findings:
 
 ```sh
-mire patch changes.diff
+mire context review.json
+mire context review.json --hunk HUNK_FINGERPRINT --max-bytes 20000
+mire notes apply review.json --stdin < findings.json
 ```
 
-Use `--format json` when another program needs the normalized changeset:
+Mire assigns note identifiers and anchor fingerprints. Mutations include the
+review revision the caller read, so stale writes do not replace newer changes.
+See [Review Notes](docs/src/content/docs/guides/review-files.md) for the TUI and
+agentic/cli workflows.
 
-```sh
-mire diff --format json > changeset.json
-mire patch changes.diff --format json
-```
+## Documentation
 
-Mire also reads a patch from standard input. Since the interactive viewer needs
-stdin for keyboard input, this form writes JSON:
-
-```sh
-git diff --no-color | mire patch - > changeset.json
-```
-
-Redirecting Mire's output also selects JSON automatically.
-
-## Syntax highlighting and color
-
-Mire detects syntax from file names, extensions, and supported shebangs. If the
-detection is wrong, pass `--language` to apply one language to every text file
-in the interactive viewer:
-
-```sh
-mire diff --language typescript
-mire patch changes.diff --language plain
-```
-
-Supported values are `bash`, `sh`, `css`, `html`, `javascript`, `js`, `json`,
-`markdown`, `md`, `plain`, `plaintext`, `python`, `py`, `rust`, `rs`, `toml`,
-`tsx`, `typescript`, `ts`, `yaml`, and `yml`.
-
-Set [`NO_COLOR`](https://github.com/jcs/no_color) to disable color output:
-
-```sh
-NO_COLOR=1 mire diff
-```
-
-## Documentation site
-
-The documentation site lives in `docs/` and uses SvelteKit. Run it locally with:
-
-```sh
-cd docs
-pnpm install
-pnpm dev
-```
-
-Use `pnpm check`, `pnpm test -- --run`, `pnpm lint`, and `pnpm build` before
-publishing changes.
+- [Installation](docs/src/content/docs/getting-started/installation.md)
+- [Quick start](docs/src/content/docs/getting-started/quick-start.md)
+- [Reviewing changes](docs/src/content/docs/guides/review-changes.md)
+- [Review notes](docs/src/content/docs/guides/review-files.md)
+- [Watch mode](docs/src/content/docs/guides/watch-mode.md)
+- [CLI manual](docs/src/content/docs/reference/cli.md)
+- [Keybindings](docs/src/content/docs/reference/keybindings.md)
+- [Review model](docs/src/content/docs/concepts/review-model.md)
 
 ## License
 

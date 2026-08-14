@@ -58,22 +58,22 @@ mire note accept-risk <review-file> <note-id>
 
 Acceptance criteria:
 
-- [ ] Callers supply source locations and review metadata. Mire assigns note
+- [x] Callers supply source locations and review metadata. Mire assigns note
       identifiers and computes the durable anchor fingerprints.
-- [ ] Hunk fingerprints from the manifest select one bounded hunk expansion;
+- [x] Hunk fingerprints from the manifest select one bounded hunk expansion;
       missing or duplicate fingerprints return machine-readable errors.
-- [ ] Old/new side flags are mutually exclusive; ranges must lie on one side of
+- [x] Old/new side flags are mutually exclusive; ranges must lie on one side of
       one hunk.
-- [ ] Missing, duplicate, context-only, and ambiguous locations return stable
+- [x] Missing, duplicate, context-only, and ambiguous locations return stable
       machine-readable errors.
-- [ ] `notes apply` validates every request and writes none when any request is
+- [x] `notes apply` validates every request and writes none when any request is
       invalid.
-- [ ] Every mutation requires the review revision it read and rejects stale
+- [x] Every mutation requires the review revision it read and rejects stale
       concurrent writes.
-- [ ] Agent and tool commands cannot claim human provenance or author status.
-- [ ] Existing full-note import remains readable for compatibility, but the
+- [x] Agent and tool commands cannot claim human provenance or author status.
+- [x] Existing full-note import remains readable for compatibility, but the
       first-party workflow uses the location-based input.
-- [ ] Disposition commands append attributed events and preserve all existing
+- [x] Disposition commands append attributed events and preserve all existing
       note data.
 
 Verification:

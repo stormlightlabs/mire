@@ -2,7 +2,8 @@ use std::ffi::OsStr;
 use std::io::{self, Write};
 
 use mire_core::{
-    BytePath, Changeset, FileContent, FileDiff, NoteImportError, NoteStatus, Provenance, Review, ReviewNote,
+    AnchorSide, AnnotationKind, Author, BytePath, Changeset, FileContent, FileDiff, Fingerprint, Hunk, LineNumber,
+    LineRange, NoteApplyError, NoteImportError, NoteInput, NoteSeverity, NoteStatus, Provenance, Review, ReviewNote,
     SchemaVersion,
 };
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,8 @@ pub enum ContextSelection<'a> {
     Patch,
     /// One complete normalized file diff.
     File(&'a OsStr),
+    /// One normalized hunk selected by its manifest fingerprint.
+    Hunk(Fingerprint),
 }
 
 /// Failures while producing or consuming the offline review protocol.
@@ -34,12 +37,36 @@ pub enum ProtocolError {
     /// A requested file is absent from the captured changeset.
     #[error("captured changeset has no file matching {0:?}")]
     FileNotFound(Vec<u8>),
+    /// A requested hunk fingerprint is absent from the captured changeset.
+    #[error("captured changeset has no hunk matching {0}")]
+    HunkNotFound(Fingerprint),
+    /// A requested hunk fingerprint occurs more than once.
+    #[error("captured changeset has duplicate hunks matching {0}")]
+    DuplicateHunkFingerprint(Fingerprint),
     /// An explicitly requested context payload exceeds its caller-supplied bound.
     #[error("context output is {actual} bytes; requested limit is {limit} bytes")]
     ContextTooLarge { actual: usize, limit: usize },
+    /// A location request contains an invalid high-level field.
+    #[error("invalid location-based note input: {0}")]
+    InvalidInput(String),
     /// A protocol response could not be encoded.
     #[error("cannot serialize protocol output: {0}")]
     Serialize(serde_json::Error),
+}
+
+impl ProtocolError {
+    /// Returns the stable machine-readable failure code.
+    pub const fn error_code(&self) -> &'static str {
+        match self {
+            Self::UnsupportedSchemaMajor { .. } => "unsupported_schema_major",
+            Self::FileNotFound(_) => "file_not_found",
+            Self::HunkNotFound(_) => "hunk_not_found",
+            Self::DuplicateHunkFingerprint(_) => "duplicate_hunk_fingerprint",
+            Self::ContextTooLarge { .. } => "context_too_large",
+            Self::InvalidInput(_) => "invalid_input",
+            Self::Serialize(_) => "serialize_error",
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -54,6 +81,9 @@ enum ContextPayload<'a> {
     },
     File {
         file: &'a FileDiff,
+    },
+    Hunk {
+        hunk: &'a Hunk,
     },
 }
 
@@ -75,6 +105,98 @@ impl NoteBatch {
         }
         Ok(self.notes)
     }
+}
+
+/// A schema-versioned atomic batch of location-based findings.
+#[derive(Debug, Deserialize)]
+pub struct LocationBatch {
+    schema_version: SchemaVersion,
+    review_revision: u64,
+    notes: Vec<LocationRequest>,
+}
+
+impl LocationBatch {
+    /// Validates and converts the wire request into core note inputs.
+    pub fn into_inputs(self) -> Result<(u64, Vec<NoteInput>)> {
+        if self.schema_version.major != CURRENT_PROTOCOL_SCHEMA_VERSION.major {
+            return Err(ProtocolError::UnsupportedSchemaMajor {
+                found: self.schema_version.major,
+                supported: CURRENT_PROTOCOL_SCHEMA_VERSION.major,
+            });
+        }
+        let inputs = self
+            .notes
+            .into_iter()
+            .map(LocationRequest::into_input)
+            .collect::<Result<_>>()?;
+        Ok((self.review_revision, inputs))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct LocationRequest {
+    #[serde(alias = "path")]
+    file: PathInput,
+    #[serde(default)]
+    side: Option<AnchorSide>,
+    #[serde(default)]
+    start: Option<u64>,
+    #[serde(default)]
+    old_line: Option<u64>,
+    #[serde(default)]
+    new_line: Option<u64>,
+    #[serde(default, alias = "end_line")]
+    end: Option<u64>,
+    author: Author,
+    provenance: Provenance,
+    severity: NoteSeverity,
+    #[serde(alias = "kind")]
+    annotation_kind: AnnotationKind,
+    body: String,
+}
+
+impl LocationRequest {
+    fn into_input(self) -> Result<NoteInput> {
+        let path = match self.file {
+            PathInput::Text(path) => BytePath::new(path.into_bytes()),
+            PathInput::Bytes(path) => BytePath::new(path),
+        }
+        .map_err(|error| ProtocolError::InvalidInput(error.to_string()))?;
+        let (side, start_value) = match (self.side, self.start, self.old_line, self.new_line) {
+            (Some(side), Some(start), None, None) => (side, start),
+            (None, None, Some(start), None) => (AnchorSide::Old, start),
+            (None, None, None, Some(start)) => (AnchorSide::New, start),
+            _ => {
+                return Err(ProtocolError::InvalidInput(
+                    "supply either side and start, old_line, or new_line".to_owned(),
+                ));
+            }
+        };
+        let start = LineNumber::new(start_value)
+            .ok_or_else(|| ProtocolError::InvalidInput("line number must be greater than zero".to_owned()))?;
+        let end_value = self.end.unwrap_or(start_value);
+        let end = LineNumber::new(end_value)
+            .ok_or_else(|| ProtocolError::InvalidInput("line number must be greater than zero".to_owned()))?;
+        let range = LineRange::new(start, end).map_err(|error| ProtocolError::InvalidInput(error.to_string()))?;
+        NoteInput::new(
+            path,
+            side,
+            range,
+            self.author,
+            self.provenance,
+            self.severity,
+            self.annotation_kind,
+            self.body,
+        )
+        .map_err(|error| ProtocolError::InvalidInput(error.to_string()))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum PathInput {
+    Text(String),
+    Bytes(Vec<u8>),
 }
 
 #[derive(Serialize)]
@@ -211,6 +333,25 @@ pub fn context_json(review: &Review, selection: ContextSelection<'_>, limit: Opt
                 .ok_or_else(|| ProtocolError::FileNotFound(path.as_bytes().to_vec()))?;
             ContextPayload::File { file }
         }
+        ContextSelection::Hunk(fingerprint) => {
+            let matching = review
+                .changeset()
+                .files()
+                .iter()
+                .filter_map(|file| match file.content() {
+                    FileContent::Text { hunks } => Some(hunks),
+                    FileContent::Binary => None,
+                })
+                .flatten()
+                .filter(|hunk| hunk.fingerprint() == fingerprint)
+                .collect::<Vec<_>>();
+            let hunk = match matching.as_slice() {
+                [] => return Err(ProtocolError::HunkNotFound(fingerprint)),
+                [hunk] => *hunk,
+                _ => return Err(ProtocolError::DuplicateHunkFingerprint(fingerprint)),
+            };
+            ContextPayload::Hunk { hunk }
+        }
     };
     let document = ContextDocument {
         schema_version: CURRENT_PROTOCOL_SCHEMA_VERSION,
@@ -254,6 +395,37 @@ pub fn import_result_json(review: &Review, imported: usize) -> Result<Vec<u8>> {
 }
 
 /// Serializes every rejected note from an atomic import.
+pub fn protocol_error_json(error: &ProtocolError) -> Result<Vec<u8>> {
+    let value = json!({
+        "schema_version": CURRENT_PROTOCOL_SCHEMA_VERSION,
+        "status": "rejected",
+        "failures": [{
+            "code": error.error_code(),
+            "error": error.to_string(),
+        }],
+    });
+    let mut bytes = serde_json::to_vec(&value).map_err(ProtocolError::Serialize)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+/// Serializes every rejected location-based input.
+pub fn apply_error_json(error: &NoteApplyError) -> Result<Vec<u8>> {
+    let failures = error
+        .failures()
+        .iter()
+        .map(|failure| {
+            json!({
+                "input_index": failure.input_index(),
+                "code": failure.error().error_code(),
+                "error": failure.error().to_string(),
+            })
+        })
+        .collect::<Vec<_>>();
+    rejection_json(failures)
+}
+
+/// Serializes every rejected full-note import.
 pub fn import_error_json(error: &NoteImportError) -> Result<Vec<u8>> {
     let failures = error
         .failures()
@@ -266,6 +438,10 @@ pub fn import_error_json(error: &NoteImportError) -> Result<Vec<u8>> {
             })
         })
         .collect::<Vec<_>>();
+    rejection_json(failures)
+}
+
+fn rejection_json(failures: Vec<serde_json::Value>) -> Result<Vec<u8>> {
     let value = json!({
         "schema_version": CURRENT_PROTOCOL_SCHEMA_VERSION,
         "status": "rejected",

@@ -6,19 +6,20 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use mire_core::{
-    Author, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, PatchError, PatchLimits, Review, ReviewError,
-    ReviewRevision, parse_patch,
+    AnchorSide, AnnotationKind, Author, BytePath, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, Fingerprint,
+    LineNumber, LineRange, NoteId, NoteInput, NoteSeverity, NoteStatus, PatchError, PatchLimits, Provenance, Review,
+    ReviewError, ReviewRevision, parse_patch,
 };
 use mire_tui::ThemeFamily;
 use thiserror::Error;
 
 use crate::git::{self, DiffRequest, GitError, ShowRequest};
 use crate::protocol::{
-    ContextSelection, NoteBatch, ProtocolError, context_json, import_error_json, import_result_json, notes_json,
-    notes_markdown,
+    ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, context_json, import_error_json,
+    import_result_json, notes_json, notes_markdown, protocol_error_json,
 };
 use crate::review_file::{
-    DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, write_review_atomic,
+    DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, write_review_atomic_if_revision,
 };
 use crate::watch::{WatchError, WatchSet};
 
@@ -45,7 +46,9 @@ enum Command {
     Diff(DiffArgs),
     /// Normalize patch input for inspection.
     Patch(PatchArgs),
-    /// Import, list, or export durable review notes.
+    /// Add or disposition one durable review note.
+    Note(NoteArgs),
+    /// Apply, import, list, or export durable review notes.
     Notes(NotesArgs),
     /// Open a durable review file.
     Review(ReviewArgs),
@@ -56,8 +59,22 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
+enum NoteCommand {
+    /// Add one finding from a source location.
+    Add(NoteAddArgs),
+    /// Mark one finding as resolved.
+    Resolve(NoteDispositionArgs),
+    /// Dismiss one finding.
+    Dismiss(NoteDispositionArgs),
+    /// Accept the remaining risk from one finding.
+    AcceptRisk(NoteDispositionArgs),
+}
+
+#[derive(Debug, Subcommand)]
 enum NotesCommand {
-    /// Atomically append a schema-versioned note batch.
+    /// Atomically apply a schema-versioned location batch from standard input.
+    Apply(NoteApplyArgs),
+    /// Atomically append a schema-versioned full-note batch.
     Import(NoteImportArgs),
     /// List notes as deterministic JSON.
     List(NoteListArgs),
@@ -93,8 +110,8 @@ enum AppError {
     ProtocolJson(serde_json::Error),
     #[error("review protocol failed: {0}")]
     Protocol(ProtocolError),
-    #[error("note import was rejected")]
-    ImportRejected { report: Vec<u8> },
+    #[error("note mutation was rejected")]
+    MutationRejected { report: Vec<u8> },
     #[error("cannot write JSON output: {0}")]
     Output(serde_json::Error),
     #[error("cannot write command output: {0}")]
@@ -132,7 +149,7 @@ impl AppError {
             | Self::ProtocolInputTooLarge { .. }
             | Self::ProtocolJson(_)
             | Self::Protocol(_)
-            | Self::ImportRejected { .. } => 8,
+            | Self::MutationRejected { .. } => 8,
         }
     }
 }
@@ -155,8 +172,17 @@ struct ContextArgs {
     #[arg(long, conflicts_with = "file", requires = "max_bytes")]
     patch: bool,
     /// Include one complete normalized file diff.
-    #[arg(long, value_name = "PATH", conflicts_with = "patch", requires = "max_bytes")]
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["patch", "hunk"], requires = "max_bytes")]
     file: Option<OsString>,
+    /// Include one hunk selected from the manifest.
+    #[arg(
+        long,
+        value_name = "FINGERPRINT",
+        value_parser = parse_fingerprint,
+        conflicts_with_all = ["patch", "file"],
+        requires = "max_bytes"
+    )]
+    hunk: Option<Fingerprint>,
     /// Maximum serialized bytes for an expanded context request.
     #[arg(long, value_name = "BYTES")]
     max_bytes: Option<usize>,
@@ -203,9 +229,71 @@ struct PatchArgs {
 }
 
 #[derive(Args, Debug)]
+struct NoteArgs {
+    #[command(subcommand)]
+    command: NoteCommand,
+}
+
+#[derive(Args, Debug)]
 struct NotesArgs {
     #[command(subcommand)]
     command: NotesCommand,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum ProvenanceArgument {
+    Agent,
+    Analyzer,
+    Interchange,
+}
+
+#[derive(Args, Debug)]
+struct NoteAddArgs {
+    review: OsString,
+    #[arg(long)]
+    revision: u64,
+    #[arg(long)]
+    file: OsString,
+    #[arg(long, conflicts_with = "new_line", required_unless_present = "new_line")]
+    old_line: Option<u64>,
+    #[arg(long, conflicts_with = "old_line", required_unless_present = "old_line")]
+    new_line: Option<u64>,
+    #[arg(long)]
+    end_line: Option<u64>,
+    #[arg(long)]
+    author: String,
+    #[arg(long)]
+    author_name: Option<String>,
+    #[arg(long, value_enum)]
+    provenance: ProvenanceArgument,
+    #[arg(long)]
+    producer: String,
+    #[arg(long, value_parser = parse_severity)]
+    severity: NoteSeverity,
+    #[arg(long = "kind", value_parser = parse_annotation_kind)]
+    annotation_kind: AnnotationKind,
+    #[arg(long)]
+    body: String,
+}
+
+#[derive(Args, Debug)]
+struct NoteDispositionArgs {
+    review: OsString,
+    note_id: String,
+    #[arg(long)]
+    revision: u64,
+    #[arg(long)]
+    author: String,
+    #[arg(long)]
+    author_name: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct NoteApplyArgs {
+    review: OsString,
+    /// Read the location batch from standard input.
+    #[arg(long, required = true)]
+    stdin: bool,
 }
 
 #[derive(Args, Debug)]
@@ -214,6 +302,9 @@ struct NoteImportArgs {
     review: OsString,
     /// Note batch JSON file, or - for standard input.
     input: OsString,
+    /// Review revision observed before constructing the batch.
+    #[arg(long)]
+    revision: u64,
 }
 
 #[derive(Args, Debug)]
@@ -313,8 +404,17 @@ pub fn run(args: impl Iterator<Item = OsString>) -> ExitCode {
     match execute(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            if let AppError::ImportRejected { report } = &error {
+            if let AppError::MutationRejected { report } = &error {
                 let _ = io::stderr().lock().write_all(report);
+            } else if let AppError::Protocol(protocol_error) = &error {
+                match protocol_error_json(protocol_error) {
+                    Ok(report) => {
+                        let _ = io::stderr().lock().write_all(&report);
+                    }
+                    Err(_) => {
+                        let _ = writeln!(io::stderr().lock(), "mire: {error}");
+                    }
+                }
             } else {
                 let _ = writeln!(io::stderr().lock(), "mire: {error}");
             }
@@ -326,13 +426,15 @@ pub fn run(args: impl Iterator<Item = OsString>) -> ExitCode {
 fn execute(cli: Cli) -> Result<(), AppError> {
     let theme = ThemeFamily::from(cli.theme);
     match cli.command {
-        Command::Context(ContextArgs { review, patch, file, max_bytes, format }) => {
+        Command::Context(ContextArgs { review, patch, file, hunk, max_bytes, format }) => {
             let _ = format;
             let review = read_review(Path::new(&review)).map_err(AppError::ReviewFile)?;
             let selection = if patch {
                 ContextSelection::Patch
             } else if let Some(path) = file.as_deref() {
                 ContextSelection::File(path)
+            } else if let Some(fingerprint) = hunk {
+                ContextSelection::Hunk(fingerprint)
             } else {
                 ContextSelection::Manifest
             };
@@ -357,6 +459,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
                 watch.then(|| ReloadSource::Patch { watch_path: watched_file_parent(Path::new(&input)), input });
             run_changeset(changeset, format, language, theme, source)
         }
+        Command::Note(NoteArgs { command }) => execute_note(command),
         Command::Notes(NotesArgs { command }) => execute_notes(command),
         Command::Review(ReviewArgs { input, format, watch, command }) => match command {
             Some(ReviewCommand::Init(arguments)) => initialize_review(arguments),
@@ -425,7 +528,12 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
         mire_tui::run_review_watch_with_options(
             review,
             mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
-            |updated| write_review_atomic(&review_path, updated),
+            |updated| {
+                let expected = ReviewRevision::new(updated.revision().get().saturating_sub(1))
+                    .map_err(|error| io::Error::other(error.to_string()))?;
+                write_review_atomic_if_revision(&review_path, expected, updated)
+                    .map_err(|error| io::Error::other(error.to_string()))
+            },
             || {
                 if !watcher.reload_due() {
                     return mire_tui::WatchUpdate::Unchanged;
@@ -441,7 +549,12 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
         mire_tui::run_review_with_options(
             &review,
             mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
-            |updated| write_review_atomic(&review_path, updated),
+            |updated| {
+                let expected = ReviewRevision::new(updated.revision().get().saturating_sub(1))
+                    .map_err(|error| io::Error::other(error.to_string()))?;
+                write_review_atomic_if_revision(&review_path, expected, updated)
+                    .map_err(|error| io::Error::other(error.to_string()))
+            },
         )
         .map_err(AppError::Terminal)
     }
@@ -541,9 +654,19 @@ fn write_review(review: &Review) -> Result<(), AppError> {
     writeln!(output).map_err(AppError::OutputIo)
 }
 
+fn execute_note(command: NoteCommand) -> Result<(), AppError> {
+    match command {
+        NoteCommand::Add(arguments) => add_note(arguments),
+        NoteCommand::Resolve(arguments) => disposition_note(arguments, NoteStatus::Resolved),
+        NoteCommand::Dismiss(arguments) => disposition_note(arguments, NoteStatus::Dismissed),
+        NoteCommand::AcceptRisk(arguments) => disposition_note(arguments, NoteStatus::AcceptedRisk),
+    }
+}
+
 fn execute_notes(command: NotesCommand) -> Result<(), AppError> {
     match command {
-        NotesCommand::Import(NoteImportArgs { review, input }) => import_notes(&review, &input),
+        NotesCommand::Apply(NoteApplyArgs { review, stdin: _ }) => apply_notes(&review),
+        NotesCommand::Import(NoteImportArgs { review, input, revision }) => import_notes(&review, &input, revision),
         NotesCommand::List(NoteListArgs { review, format }) => {
             let _ = format;
             let review = read_review(Path::new(&review)).map_err(AppError::ReviewFile)?;
@@ -560,7 +683,108 @@ fn execute_notes(command: NotesCommand) -> Result<(), AppError> {
     }
 }
 
-fn import_notes(review_path: &OsStr, input: &OsStr) -> Result<(), AppError> {
+fn add_note(arguments: NoteAddArgs) -> Result<(), AppError> {
+    let NoteAddArgs {
+        review: review_path,
+        revision,
+        file,
+        old_line,
+        new_line,
+        end_line,
+        author,
+        author_name,
+        provenance,
+        producer,
+        severity,
+        annotation_kind,
+        body,
+    } = arguments;
+    let review = read_review(Path::new(&review_path)).map_err(AppError::ReviewFile)?;
+    let (side, start_value) = match (old_line, new_line) {
+        (Some(line), None) => (AnchorSide::Old, line),
+        (None, Some(line)) => (AnchorSide::New, line),
+        _ => unreachable!("clap requires exactly one side"),
+    };
+    let start = LineNumber::new(start_value).ok_or_else(|| {
+        AppError::Protocol(ProtocolError::InvalidInput(
+            "line number must be greater than zero".to_owned(),
+        ))
+    })?;
+    let end_value = end_line.unwrap_or(start_value);
+    let end = LineNumber::new(end_value).ok_or_else(|| {
+        AppError::Protocol(ProtocolError::InvalidInput(
+            "line number must be greater than zero".to_owned(),
+        ))
+    })?;
+    let range = LineRange::new(start, end).map_err(AppError::InitializeReview)?;
+    let path = BytePath::new(file.as_encoded_bytes().to_vec())
+        .map_err(|error| AppError::Protocol(ProtocolError::InvalidInput(error.to_string())))?;
+    let author = Author::new(author, author_name).map_err(AppError::InitializeReview)?;
+    let provenance = match provenance {
+        ProvenanceArgument::Agent => Provenance::Agent { producer },
+        ProvenanceArgument::Analyzer => Provenance::Analyzer { producer },
+        ProvenanceArgument::Interchange => Provenance::Interchange { format: producer, producer: None },
+    };
+    let input = NoteInput::new(path, side, range, author, provenance, severity, annotation_kind, body)
+        .map_err(AppError::InitializeReview)?;
+    let updated = review.apply_notes(vec![input]).map_err(|error| {
+        apply_error_json(&error)
+            .map(|report| AppError::MutationRejected { report })
+            .unwrap_or_else(AppError::Protocol)
+    })?;
+    write_mutation(Path::new(&review_path), revision, &updated)?;
+    write_bytes(&import_result_json(&updated, 1).map_err(AppError::Protocol)?)
+}
+
+fn apply_notes(review_path: &OsStr) -> Result<(), AppError> {
+    let review = read_review(Path::new(review_path)).map_err(AppError::ReviewFile)?;
+    let bytes = read_protocol_input(OsStr::new("-"), DEFAULT_MAX_REVIEW_FILE_BYTES)?;
+    let batch: LocationBatch = serde_json::from_slice(&bytes).map_err(AppError::ProtocolJson)?;
+    let (revision, inputs) = batch.into_inputs().map_err(AppError::Protocol)?;
+    let applied = inputs.len();
+    let updated = review.apply_notes(inputs).map_err(|error| {
+        apply_error_json(&error)
+            .map(|report| AppError::MutationRejected { report })
+            .unwrap_or_else(AppError::Protocol)
+    })?;
+    write_mutation(Path::new(review_path), revision, &updated)?;
+    write_bytes(&import_result_json(&updated, applied).map_err(AppError::Protocol)?)
+}
+
+fn disposition_note(arguments: NoteDispositionArgs, status: NoteStatus) -> Result<(), AppError> {
+    let NoteDispositionArgs { review: review_path, note_id, revision, author, author_name } = arguments;
+    let review = read_review(Path::new(&review_path)).map_err(AppError::ReviewFile)?;
+    let note_id = NoteId::new(note_id).map_err(AppError::InitializeReview)?;
+    let author = Author::new(author, author_name).map_err(AppError::InitializeReview)?;
+    let updated = review
+        .change_note_status(&note_id, status, author)
+        .map_err(AppError::InitializeReview)?;
+    write_mutation(Path::new(&review_path), revision, &updated)?;
+    write_bytes(&notes_json(&updated).map_err(AppError::Protocol)?)
+}
+
+fn write_mutation(path: &Path, expected_revision: u64, review: &Review) -> Result<(), AppError> {
+    let expected = ReviewRevision::new(expected_revision).map_err(AppError::InitializeReview)?;
+    write_review_atomic_if_revision(path, expected, review).map_err(|error| match error {
+        ReviewFileError::RevisionConflict { expected, actual } => {
+            let report = serde_json::to_vec(&serde_json::json!({
+                "schema_version": { "major": 1, "minor": 1 },
+                "status": "rejected",
+                "failures": [{
+                    "code": "revision_conflict",
+                    "error": format!("review revision conflict: expected {expected}, found {actual}"),
+                    "expected": expected,
+                    "actual": actual,
+                }],
+            }))
+            .unwrap_or_else(|_| b"{\"status\":\"rejected\"}".to_vec());
+            AppError::MutationRejected { report: [report, b"\n".to_vec()].concat() }
+        }
+        other => AppError::ReviewFile(other),
+    })
+}
+
+fn import_notes(review_path: &OsStr, input: &OsStr, expected_revision: u64) -> Result<(), AppError> {
     let review = read_review(Path::new(review_path)).map_err(AppError::ReviewFile)?;
     let bytes = read_protocol_input(input, DEFAULT_MAX_REVIEW_FILE_BYTES)?;
     let batch: NoteBatch = serde_json::from_slice(&bytes).map_err(AppError::ProtocolJson)?;
@@ -570,11 +794,26 @@ fn import_notes(review_path: &OsStr, input: &OsStr) -> Result<(), AppError> {
         Ok(updated) => updated,
         Err(error) => {
             let report = import_error_json(&error).map_err(AppError::Protocol)?;
-            return Err(AppError::ImportRejected { report });
+            return Err(AppError::MutationRejected { report });
         }
     };
-    write_review_atomic(Path::new(review_path), &updated).map_err(AppError::ReviewFile)?;
+    write_mutation(Path::new(review_path), expected_revision, &updated)?;
     write_bytes(&import_result_json(&updated, imported).map_err(AppError::Protocol)?)
+}
+
+fn parse_fingerprint(value: &str) -> Result<Fingerprint, String> {
+    serde_json::from_str(&format!("\"{value}\"")).map_err(|error| error.to_string())
+}
+
+fn parse_severity(value: &str) -> Result<NoteSeverity, String> {
+    serde_json::from_str(&format!("\"{value}\""))
+        .map_err(|_| format!("unsupported severity {value:?}; possible values: note, low, medium, high, critical"))
+}
+
+fn parse_annotation_kind(value: &str) -> Result<AnnotationKind, String> {
+    serde_json::from_str(&format!("\"{value}\"")).map_err(|_| {
+        format!("unsupported annotation kind {value:?}; possible values: comment, defect, suggestion, question")
+    })
 }
 
 fn parse_json_format(value: &str) -> Result<OutputFormat, String> {

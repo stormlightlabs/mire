@@ -46,6 +46,21 @@ pub enum ReviewError {
     /// The stored content fingerprint does not match the selected lines.
     #[error("anchor content fingerprint does not match the captured changeset")]
     ContentFingerprintMismatch,
+    /// No captured file and hunk contain the requested source location.
+    #[error("source location is not present on one changed hunk")]
+    LocationNotFound,
+    /// More than one captured file has the requested path and side.
+    #[error("source location matches duplicate file sides")]
+    DuplicateLocation,
+    /// More than one hunk contains the complete requested range.
+    #[error("source location is ambiguous across changed hunks")]
+    AmbiguousLocation,
+    /// The requested range contains only unchanged context lines.
+    #[error("source location contains only unchanged context")]
+    ContextOnlyLocation,
+    /// Location-based agent and tool input cannot claim human provenance.
+    #[error("location-based note input cannot claim human provenance")]
+    HumanProvenanceForbidden,
     /// A required identifier or author field is empty or too large.
     #[error("{field} must contain between 1 and {max} UTF-8 bytes")]
     InvalidTextField { field: &'static str, max: usize },
@@ -103,6 +118,11 @@ impl ReviewError {
             ReviewError::AmbiguousAnchor => "ambiguous_anchor",
             ReviewError::LineRangeNotFound { .. } => "line_range_not_found",
             ReviewError::ContentFingerprintMismatch => "content_fingerprint_mismatch",
+            ReviewError::LocationNotFound => "location_not_found",
+            ReviewError::DuplicateLocation => "duplicate_location",
+            ReviewError::AmbiguousLocation => "ambiguous_location",
+            ReviewError::ContextOnlyLocation => "context_only_location",
+            ReviewError::HumanProvenanceForbidden => "human_provenance_forbidden",
             ReviewError::InvalidTextField { .. } => "invalid_text_field",
             ReviewError::NoteBodyTooLarge { .. } => "note_body_too_large",
             ReviewError::TooManyNotes { .. } => "too_many_notes",
@@ -394,6 +414,65 @@ impl NoteImportError {
     /// Returns every rejected note in input order.
     pub fn failures(&self) -> &[NoteImportFailure] {
         &self.failures
+    }
+}
+
+/// One rejected location-based note in an otherwise atomic batch.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NoteApplyFailure {
+    input_index: usize,
+    error: ReviewError,
+}
+
+impl NoteApplyFailure {
+    /// Returns the zero-based input position.
+    pub const fn input_index(&self) -> usize {
+        self.input_index
+    }
+
+    /// Returns why this input was rejected.
+    pub const fn error(&self) -> &ReviewError {
+        &self.error
+    }
+}
+
+/// All failures found while resolving one atomic location-based batch.
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+#[error("batch apply rejected {count} note(s)", count = .failures.len())]
+pub struct NoteApplyError {
+    failures: Vec<NoteApplyFailure>,
+}
+
+impl NoteApplyError {
+    /// Returns every rejected input in request order.
+    pub fn failures(&self) -> &[NoteApplyFailure] {
+        &self.failures
+    }
+}
+
+/// High-level finding input whose durable anchor and identifier Mire creates.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NoteInput {
+    path: BytePath,
+    side: AnchorSide,
+    range: LineRange,
+    author: Author,
+    provenance: Provenance,
+    severity: NoteSeverity,
+    annotation_kind: AnnotationKind,
+    body: String,
+}
+
+impl NoteInput {
+    /// Creates a location-based finding request.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        path: BytePath, side: AnchorSide, range: LineRange, author: Author, provenance: Provenance,
+        severity: NoteSeverity, annotation_kind: AnnotationKind, body: String,
+    ) -> Result<Self> {
+        validate_note_body(&body)?;
+        validate_provenance(&provenance)?;
+        Ok(Self { path, side, range, author, provenance, severity, annotation_kind, body })
     }
 }
 
@@ -720,6 +799,77 @@ impl Review {
         Ok(review)
     }
 
+    /// Resolves and atomically appends location-based agent or tool findings.
+    pub fn apply_notes(&self, inputs: Vec<NoteInput>) -> std::result::Result<Self, NoteApplyError> {
+        if inputs.is_empty() {
+            return Ok(self.clone());
+        }
+        let mut failures = Vec::new();
+        let mut anchors = Vec::with_capacity(inputs.len());
+        for (input_index, input) in inputs.iter().enumerate() {
+            match resolve_location(self.changeset(), input) {
+                Ok(anchor) => anchors.push(Some(anchor)),
+                Err(error) => {
+                    failures.push(NoteApplyFailure { input_index, error });
+                    anchors.push(None);
+                }
+            }
+        }
+        if self.notes.len().saturating_add(inputs.len()) > MAX_REVIEW_NOTES {
+            failures.push(NoteApplyFailure {
+                input_index: 0,
+                error: ReviewError::TooManyNotes {
+                    actual: self.notes.len().saturating_add(inputs.len()),
+                    limit: MAX_REVIEW_NOTES,
+                },
+            });
+        }
+        if !failures.is_empty() {
+            return Err(NoteApplyError { failures });
+        }
+
+        let mut identifiers = self
+            .notes
+            .iter()
+            .map(|note| note.id.as_str().to_owned())
+            .collect::<BTreeSet<_>>();
+        let mut next = 1_u64;
+        let mut notes = Vec::with_capacity(inputs.len());
+        for (input, anchor) in inputs.into_iter().zip(anchors) {
+            let id = loop {
+                let candidate = format!("note-{next}");
+                next = next.checked_add(1).ok_or_else(|| NoteApplyError {
+                    failures: vec![NoteApplyFailure { input_index: 0, error: ReviewError::RevisionOverflow(u64::MAX) }],
+                })?;
+                if identifiers.insert(candidate.clone()) {
+                    break NoteId::new(candidate).map_err(|error| NoteApplyError {
+                        failures: vec![NoteApplyFailure { input_index: 0, error }],
+                    })?;
+                }
+            };
+            let note = ReviewNote::new(
+                id,
+                anchor.expect("all anchors are present after validation"),
+                input.author,
+                input.severity,
+                NoteStatus::Open,
+                input.body,
+                input.provenance,
+            )
+            .map(|note| note.with_annotation_kind(input.annotation_kind))
+            .map_err(|error| NoteApplyError { failures: vec![NoteApplyFailure { input_index: notes.len(), error }] })?;
+            notes.push(note);
+        }
+        self.import_notes(notes).map_err(|error| NoteApplyError {
+            failures: error
+                .failures
+                .into_iter()
+                .enumerate()
+                .map(|(input_index, failure)| NoteApplyFailure { input_index, error: failure.error })
+                .collect(),
+        })
+    }
+
     /// Replaces the editable content of one note and advances the review revision.
     pub fn edit_note(
         &self, note_id: &NoteId, body: String, severity: NoteSeverity, annotation_kind: AnnotationKind,
@@ -875,6 +1025,71 @@ impl<'de> Deserialize<'de> for LineRange {
     }
 }
 
+fn resolve_location(changeset: &Changeset, input: &NoteInput) -> Result<Anchor> {
+    if matches!(input.provenance, Provenance::Human) {
+        return Err(ReviewError::HumanProvenanceForbidden);
+    }
+    let files = changeset
+        .files()
+        .iter()
+        .filter(|file| match input.side {
+            AnchorSide::Old => file.old_side().is_some_and(|side| side.path == input.path),
+            AnchorSide::New => file.new_side().is_some_and(|side| side.path == input.path),
+        })
+        .collect::<Vec<_>>();
+    let file = match files.as_slice() {
+        [] => return Err(ReviewError::LocationNotFound),
+        [file] => *file,
+        _ => return Err(ReviewError::DuplicateLocation),
+    };
+    let FileContent::Text { hunks } = file.content() else {
+        return Err(ReviewError::LocationNotFound);
+    };
+    let expected_count = input
+        .range
+        .end
+        .get()
+        .checked_sub(input.range.start.get())
+        .and_then(|count| count.checked_add(1))
+        .ok_or(ReviewError::LineRangeNotFound {
+            side: input.side,
+            start: input.range.start.get(),
+            end: input.range.end.get(),
+        })?;
+    let matching = hunks
+        .iter()
+        .filter(|hunk| {
+            let selected = hunk
+                .lines()
+                .iter()
+                .filter_map(|line| line_on_side(line, input.side).map(|number| (number, line)))
+                .filter(|(number, _)| *number >= input.range.start && *number <= input.range.end)
+                .collect::<Vec<_>>();
+            selected.len() as u64 == expected_count
+        })
+        .collect::<Vec<_>>();
+    let hunk = match matching.as_slice() {
+        [] => return Err(ReviewError::LocationNotFound),
+        [hunk] => *hunk,
+        _ => return Err(ReviewError::AmbiguousLocation),
+    };
+    let changed = hunk.lines().iter().any(|line| {
+        line_on_side(line, input.side).is_some_and(|number| {
+            number >= input.range.start && number <= input.range.end && line.kind() != crate::LineKind::Context
+        })
+    });
+    if !changed {
+        return Err(ReviewError::ContextOnlyLocation);
+    }
+    Anchor::new(
+        changeset,
+        input.path.clone(),
+        input.side,
+        input.range,
+        hunk.fingerprint(),
+    )
+}
+
 fn anchor_content_fingerprint(
     changeset: &Changeset, path: &BytePath, side: AnchorSide, range: LineRange, hunk_fingerprint: Fingerprint,
 ) -> Result<Fingerprint> {
@@ -909,7 +1124,12 @@ fn anchor_content_fingerprint(
         .filter_map(|line| line_on_side(line, side).map(|number| (number, line)))
         .filter(|(number, _)| *number >= range.start && *number <= range.end)
         .collect::<Vec<_>>();
-    let expected_count = range.end.get() - range.start.get() + 1;
+    let expected_count = range
+        .end
+        .get()
+        .checked_sub(range.start.get())
+        .and_then(|count| count.checked_add(1))
+        .ok_or(ReviewError::LineRangeNotFound { side, start: range.start.get(), end: range.end.get() })?;
     if selected.len() as u64 != expected_count {
         return Err(ReviewError::LineRangeNotFound { side, start: range.start.get(), end: range.end.get() });
     }
@@ -1106,6 +1326,42 @@ mod tests {
 
         let other = changeset_with_new_content("changed");
         assert_eq!(anchor.validate(&other), Err(ReviewError::ContentFingerprintMismatch));
+    }
+
+    #[test]
+    fn location_inputs_create_anchors_and_reject_human_provenance() {
+        let review = empty_review();
+        let path = BytePath::new(b"src/lib.rs".to_vec()).unwrap();
+        let line = LineNumber::new(2).unwrap();
+        let range = LineRange::new(line, line).unwrap();
+        let input = NoteInput::new(
+            path.clone(),
+            AnchorSide::New,
+            range,
+            Author::new("agent", None).unwrap(),
+            Provenance::Agent { producer: "test-agent".to_owned() },
+            NoteSeverity::High,
+            AnnotationKind::Defect,
+            "Finding".to_owned(),
+        )
+        .unwrap();
+        let updated = review.apply_notes(vec![input]).unwrap();
+        assert_eq!(updated.notes()[0].id().as_str(), "note-1");
+        assert!(updated.notes()[0].anchor().validate(updated.changeset()).is_ok());
+
+        let human = NoteInput::new(
+            path,
+            AnchorSide::New,
+            range,
+            Author::new("human", None).unwrap(),
+            Provenance::Human,
+            NoteSeverity::Note,
+            AnnotationKind::Comment,
+            "Claim".to_owned(),
+        )
+        .unwrap();
+        let error = review.apply_notes(vec![human]).unwrap_err();
+        assert_eq!(error.failures()[0].error(), &ReviewError::HumanProvenanceForbidden);
     }
 
     #[test]

@@ -49,8 +49,10 @@ only the latest label.
 Review schemas carry explicit versions and reject unsupported major versions.
 Mire bounds review size, note count, imported payloads, and expanded context.
 
-A note import validates the entire transaction before Mire atomically replaces
-the review file. Failed validation leaves the previous file unchanged.
+A location batch validates the entire transaction before Mire atomically
+replaces the review file. Failed validation leaves the previous file unchanged.
+Every mutation includes the revision its caller read, so a concurrent update
+produces a `revision_conflict` instead of overwriting newer data.
 
 ## Context for agents
 
@@ -59,9 +61,10 @@ the review file. Failed validation leaves the previous file unchanged.
 ```sh
 mire context review.json
 mire context review.json --file src/lib.rs --max-bytes 20000
+mire context review.json --hunk HUNK_FINGERPRINT --max-bytes 20000
 mire context review.json --patch --max-bytes 50000
 ```
 
-The default manifest is compact. Complete file or patch expansion requires an
+The default manifest is compact. File, hunk, and patch expansion requires an
 explicit byte limit so callers choose the amount of code they are prepared to
 consume.

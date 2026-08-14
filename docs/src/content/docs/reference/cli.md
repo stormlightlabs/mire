@@ -63,22 +63,29 @@ Without a structured format, this opens the review in the TUI.
 Export bounded context from a durable review:
 
 ```text
-mire context REVIEW.json [--file PATH | --patch] [--max-bytes BYTES] [--format json]
+mire context REVIEW.json [--file PATH | --hunk FINGERPRINT | --patch] [--max-bytes BYTES] [--format json]
 ```
 
-The compact manifest does not require `--max-bytes`. Complete file or patch
+The compact manifest does not require `--max-bytes`. File, hunk, and patch
 expansion does.
 
 ## Note commands
 
 ```text
-mire notes import REVIEW.json BATCH.json|-
+mire note add REVIEW.json --revision REVISION --file PATH (--old-line LINE | --new-line LINE) [--end-line LINE] --author ID --provenance agent|analyzer|interchange --producer NAME --severity SEVERITY --kind KIND --body BODY
+mire notes apply REVIEW.json --stdin
+mire note resolve|dismiss|accept-risk REVIEW.json NOTE_ID --revision REVISION --author ID
+mire notes import REVIEW.json BATCH.json|- --revision REVISION
 mire notes list REVIEW.json [--format json]
 mire notes export REVIEW.json [--format json|markdown]
 ```
 
-Import validates and appends a schema-versioned note batch atomically. List
-returns deterministic JSON. Export can produce JSON or standalone Markdown.
+`notes apply` accepts location-based findings and creates identifiers and anchor
+fingerprints. It validates the whole batch before writing. Every mutation
+requires the revision returned by `mire context` or `mire notes list`; stale
+writes fail with `revision_conflict`. Full-note import remains available for
+compatible clients. List returns deterministic JSON. Export can produce JSON
+or standalone Markdown.
 
 ## Interactive controls
 

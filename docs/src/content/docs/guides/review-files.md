@@ -62,11 +62,25 @@ mire notes export review.json --format markdown
 mire notes export review.json --format json
 ```
 
-`notes import` accepts a schema-versioned note batch and validates the complete
-transaction before replacing the review file:
+Agents and analyzers should start with the context manifest, then expand only
+the hunk or file they need:
 
 ```sh
-mire notes import review.json findings.json
+mire context review.json
+mire context review.json --hunk HUNK_FINGERPRINT --max-bytes 20000
+mire notes apply review.json --stdin < findings.json
+```
+
+A location batch includes the manifest's `review_revision`. Each request names a
+file, side and inclusive range, author, non-human provenance, severity, kind,
+and body. Mire validates every location and writes none if any request fails.
+It also assigns note identifiers and computes anchor fingerprints.
+
+`notes import` remains available for clients that already construct complete
+notes. It also requires the revision read by the client:
+
+```sh
+mire notes import review.json findings.json --revision 4
 ```
 
 See the [review model](/docs/concepts/review-model/) for anchors, provenance,

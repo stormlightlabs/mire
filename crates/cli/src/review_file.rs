@@ -3,7 +3,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use mire_core::{Review, ReviewError};
+use mire_core::{Review, ReviewError, ReviewRevision};
 use thiserror::Error;
 
 /// Default upper bound for one serialized review file: 128 MiB.
@@ -38,6 +38,12 @@ pub enum ReviewFileError {
     /// A sibling temporary file could not be created or written.
     #[error("cannot prepare atomic review write beside {path:?}: {source}")]
     Prepare { path: PathBuf, source: io::Error },
+    /// The review changed after a caller read it.
+    #[error("review revision conflict: expected {expected}, found {actual}")]
+    RevisionConflict { expected: u64, actual: u64 },
+    /// Another mutation currently owns the review lock.
+    #[error("review file {path:?} is being updated by another process")]
+    Locked { path: PathBuf },
     /// The completed temporary file could not atomically replace the destination.
     #[error("cannot atomically replace review file {path:?}: {source}")]
     Replace { path: PathBuf, source: io::Error },
@@ -93,6 +99,21 @@ pub fn write_review_atomic(path: impl AsRef<Path>, review: &Review) -> Result<()
     sync_directory(parent, path)
 }
 
+/// Atomically replaces a review only when its stored revision matches `expected`.
+pub fn write_review_atomic_if_revision(
+    path: impl AsRef<Path>, expected: ReviewRevision, review: &Review,
+) -> Result<(), ReviewFileError> {
+    let path = path.as_ref();
+    let lock = ReviewLock::acquire(path)?;
+    let current = read_review(path)?;
+    if current.revision() != expected {
+        return Err(ReviewFileError::RevisionConflict { expected: expected.get(), actual: current.revision().get() });
+    }
+    let result = write_review_atomic(path, review);
+    drop(lock);
+    result
+}
+
 /// Creates a validated review atomically and refuses to replace any existing entry.
 ///
 /// The completed sibling file is linked at the destination only after its
@@ -115,6 +136,31 @@ pub fn create_review_atomic(path: impl AsRef<Path>, review: &Review) -> Result<(
     }
     let _ = fs::remove_file(&temporary_path);
     sync_directory(parent, path)
+}
+
+struct ReviewLock {
+    path: PathBuf,
+    _file: File,
+}
+
+impl ReviewLock {
+    fn acquire(review_path: &Path) -> Result<Self, ReviewFileError> {
+        let (parent, file_name) = destination_parts(review_path)?;
+        let path = parent.join(format!(".{}.mire-lock", file_name.to_string_lossy()));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => Ok(Self { path, _file: file }),
+            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
+                Err(ReviewFileError::Locked { path: review_path.to_owned() })
+            }
+            Err(source) => Err(ReviewFileError::Prepare { path: review_path.to_owned(), source }),
+        }
+    }
+}
+
+impl Drop for ReviewLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 fn serialize_review(path: &Path, review: &Review) -> Result<Vec<u8>, ReviewFileError> {

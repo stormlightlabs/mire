@@ -84,7 +84,14 @@ fn mixed_provenance_round_trips_through_json_and_markdown() {
     ]);
     fs::write(&fixture.batch_path, batch).expect("batch fixture can be written");
 
-    let imported = mire(&["notes", "import", fixture.review_str(), fixture.batch_str()]);
+    let imported = mire(&[
+        "notes",
+        "import",
+        fixture.review_str(),
+        fixture.batch_str(),
+        "--revision",
+        "1",
+    ]);
     assert_success(&imported);
     let result: Value = serde_json::from_slice(&imported.stdout).expect("import result is JSON");
     assert_eq!(result["status"], "imported");
@@ -106,7 +113,10 @@ fn mixed_provenance_round_trips_through_json_and_markdown() {
     assert_eq!(kinds, ["agent", "analyzer", "human", "interchange"]);
 
     let round_trip = Fixture::new();
-    let reimported = mire_with_stdin(&["notes", "import", round_trip.review_str(), "-"], &exported.stdout);
+    let reimported = mire_with_stdin(
+        &["notes", "import", round_trip.review_str(), "-", "--revision", "1"],
+        &exported.stdout,
+    );
     assert_success(&reimported);
     assert_eq!(read_review(&round_trip.review_path).unwrap().notes().len(), 4);
 
@@ -138,7 +148,14 @@ fn rejected_batches_report_every_invalid_anchor_without_rewriting_the_review() {
     .expect("invalid batch fixture can be written");
     let before = fs::read(&fixture.review_path).expect("review can be read before import");
 
-    let output = mire(&["notes", "import", fixture.review_str(), fixture.batch_str()]);
+    let output = mire(&[
+        "notes",
+        "import",
+        fixture.review_str(),
+        fixture.batch_str(),
+        "--revision",
+        "1",
+    ]);
     assert_eq!(output.status.code(), Some(8));
     assert!(output.stdout.is_empty());
     let report: Value = serde_json::from_slice(&output.stderr).expect("rejection is structured JSON");

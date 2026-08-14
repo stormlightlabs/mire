@@ -157,7 +157,7 @@ fn render_note_editor(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &
         return;
     };
     let target = match editor.target() {
-        EditorTarget::New(selection) => format!("New note · {}", selection.label()),
+        EditorTarget::New(selection) => format!("New note · {}", app.new_note_location(*selection)),
         EditorTarget::Existing(note_id) => format!("Edit {}", note_id.as_str()),
     };
     let dialog = centered(area, 72, 7);
@@ -560,6 +560,26 @@ mod tests {
         let mut app = App::ready(&changeset);
         app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
         insta::assert_snapshot!("help_90x24", snapshot(app, 90, 24));
+    }
+
+    #[test]
+    fn new_note_editor_shows_the_side_qualified_source_location() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let review = mire_core::Review::new(
+            mire_core::ReviewRevision::new(1).unwrap(),
+            changeset,
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        let mut app = App::review_with_options(&review, crate::AppOptions::default());
+        app.resize(100, 12);
+        for _ in 0..3 {
+            app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+
+        assert!(snapshot(app, 100, 12).contains("New note · b/file.txt:2-2"));
     }
 
     #[test]

@@ -390,7 +390,18 @@ impl<'a> App<'a> {
 
     /// Returns the active range label, if range selection is in progress.
     pub fn selection_label(&self) -> Option<String> {
-        self.line_selection.map(LineSelection::label)
+        let AppState::Ready(stream) = &self.state else {
+            return None;
+        };
+        self.line_selection.map(|selection| selection.label(stream))
+    }
+
+    /// Returns a new note's side-qualified source location.
+    pub fn new_note_location(&self, selection: LineSelection) -> String {
+        let AppState::Ready(stream) = &self.state else {
+            return "<unknown>".to_owned();
+        };
+        selection.label(stream)
     }
 
     /// Returns the active note editor.

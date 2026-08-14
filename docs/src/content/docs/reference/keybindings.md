@@ -14,7 +14,8 @@ precedence over the general controls.
 
 | Key             | Action                                                            |
 | --------------- | ----------------------------------------------------------------- |
-| `q` / `Esc`     | Quit Mire when no editor, filter, or search input is open         |
+| `q`             | Quit Mire                                                         |
+| `Esc`           | Cancel active UI state or return sidebar focus to the review      |
 | `?`             | Show or hide keybinding help                                      |
 | `Tab`           | Switch focus between the file sidebar and review                  |
 | `b`             | Show or hide the file sidebar                                     |

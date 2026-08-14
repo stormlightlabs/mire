@@ -71,10 +71,23 @@ impl LineSelection {
         )
     }
 
-    pub fn label(self) -> String {
+    /// Returns this selection in Git's side-qualified file-location notation.
+    pub fn label(self, stream: &ReviewStream<'_>) -> String {
+        let path = match self.start.side {
+            AnchorSide::Old => stream.file(self.start.file).old_side(),
+            AnchorSide::New => stream.file(self.start.file).new_side(),
+        }
+        .map_or_else(
+            || "<unknown>".to_owned(),
+            |side| String::from_utf8_lossy(side.path.as_bytes()).into_owned(),
+        );
+        let prefix = match self.start.side {
+            AnchorSide::Old => "a",
+            AnchorSide::New => "b",
+        };
         let start = self.start.line.min(self.end.line).get();
         let end = self.start.line.max(self.end.line).get();
-        format!("{} lines {start}-{end}", self.start.side)
+        format!("{prefix}/{path}:{start}-{end}")
     }
 
     /// Reports whether a source location is contained by this active selection.
@@ -180,4 +193,26 @@ fn endpoint(stream: &ReviewStream<'_>, row: RowKey, prefer_old: bool) -> Option<
             .or_else(|| source.old_line().map(|line| (AnchorSide::Old, line)))?
     };
     Some(SelectionEndpoint { file, hunk, side, line })
+}
+
+#[cfg(test)]
+mod tests {
+    use mire_core::{ChangesetSource, PatchLimits, parse_patch};
+
+    use super::*;
+    use crate::stream::ResolvedLayout;
+
+    #[test]
+    fn selection_labels_use_git_side_prefixes_and_relative_paths() {
+        let patch = b"--- a/path/to/source.rs\n+++ b/path/to/target.rs\n@@ -10,2 +20,2 @@\n-old first\n-old second\n+new first\n+new second\n";
+        let changeset = parse_patch(patch, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let stream = ReviewStream::new(&changeset, ResolvedLayout::Unified);
+        let rows = stream.visible_keys(0, stream.len()).collect::<Vec<_>>();
+
+        let old = LineSelection::from_row(&stream, rows[2], true).unwrap();
+        let new = LineSelection::from_row(&stream, rows[4], false).unwrap();
+
+        assert_eq!(old.label(&stream), "a/path/to/source.rs:10-10");
+        assert_eq!(new.label(&stream), "b/path/to/target.rs:20-20");
+    }
 }

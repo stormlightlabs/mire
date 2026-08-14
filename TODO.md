@@ -77,15 +77,13 @@ paths require little command discovery.
 
 ### M8.1 Make actions contextual and `Esc` predictable
 
-Blocked by: None - can start immediately.
-
-- [ ] The footer shows actions for the active mode and item under the cursor,
+- [x] The footer shows actions for the active mode and item under the cursor,
       including source, range selection, finding, search, and editor states.
-- [ ] Narrow terminals retain the most relevant actions without truncating the
+- [x] Narrow terminals retain the most relevant actions without truncating the
       active-mode cue.
-- [ ] `Esc` closes or cancels the active UI state in order: editor, filter,
+- [x] `Esc` closes or cancels the active UI state in order: editor, filter,
       search, range selection, help, then sidebar focus.
-- [ ] `q` remains the quit command and `Esc` does not quit from the base state.
+- [x] `q` remains the quit command and `Esc` does not quit from the base state.
 
 Verification:
 
@@ -97,15 +95,13 @@ Exercise each mode and narrow-width footer in a Herdr pane.
 
 ### M8.2 Make findings and source state spatially distinct
 
-Blocked by: None - can start immediately.
-
-- [ ] Finding rows lead with status, severity, kind, author, and body instead of
+- [x] Finding rows lead with status, severity, kind, author, and body instead of
       rendering every action as persistent toolbar chrome.
-- [ ] Finding actions appear when the finding is selected and remain available
+- [x] Finding actions appear when the finding is selected and remain available
       through keyboard and mouse input.
-- [ ] The gutter gives cursor position, active range, and finding anchors
+- [x] The gutter gives cursor position, active range, and finding anchors
       distinct visual treatments in unified and split layouts.
-- [ ] Open, resolved, dismissed, and accepted-risk findings remain identifiable
+- [x] Open, resolved, dismissed, and accepted-risk findings remain identifiable
       without relying on color alone.
 
 Verification:

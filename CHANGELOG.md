@@ -15,6 +15,8 @@
 - A bundled provider-neutral review skill, installed and located with `mire skill path`.
 - Local live-session controls for inspecting and navigating an open TUI,
   requesting reloads, and coordinating walkthroughs.
+- Side-qualified Git locations in TUI range labels and new-note headers, using
+  `a/` and `b/` to distinguish old and new diff lines.
 
 #### 2026-07
 

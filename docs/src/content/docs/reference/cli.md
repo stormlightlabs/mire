@@ -6,8 +6,9 @@ group: Reference
 order: 8
 ---
 
-The `mire` command requires a subcommand. Pass `--theme` before the subcommand
-to select `auto`, `iceberg`, `eldritch`, or `catppuccin`.
+Run `mire` with no subcommand to open the current worktree diff. Pass `--theme`
+before a subcommand, or on its own with the default diff, to select `auto`,
+`iceberg`, `eldritch`, or `catppuccin`.
 
 ## Git commands
 
@@ -62,12 +63,18 @@ refresh a source-backed review with:
 ```text
 mire review init REVIEW.json [--staged] [REVISION]... [-- PATH]...
 mire review refresh REVIEW.json
+mire review status REVIEW.json [--format json]
 ```
 
 `review refresh` repeats the recorded Git comparison, re-anchors every finding,
 and atomically replaces the file. It prints `status: unchanged` without writing
 when the capture fingerprint has not changed. Reviews without a source binding
 cannot be refreshed.
+
+`review status` reads and validates a review without opening the TUI. Its text
+output reports the captured source, review revision, changes, finding
+dispositions, and re-anchor results. Pass `--format json` for deterministic
+structured output.
 
 ### `mire context`
 

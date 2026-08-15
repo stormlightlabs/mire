@@ -77,6 +77,12 @@ fn default_staged_and_path_filtered_reviews_match_git_boundaries() {
 
     let default = run_mire(&repository.path, [OsString::from("diff")]);
     assert_success(&default);
+    let zero_argument = run_mire(&repository.path, std::iter::empty::<OsString>());
+    assert_success(&zero_argument);
+    assert_eq!(
+        zero_argument.stdout, default.stdout,
+        "mire and mire diff produce the same worktree capture"
+    );
     let default_files = files(&default);
     assert!(default_files.contains_key("tracked.txt"));
     assert!(default_files.contains_key("untracked.txt"));

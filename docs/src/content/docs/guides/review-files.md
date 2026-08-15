@@ -34,6 +34,7 @@ format.
 
 ```sh
 mire review refresh review.json
+mire review status review.json
 mire note resolve review.json note-1 --revision 3 --author reviewer
 mire notes export review.json --format json > review-notes.json
 mire notes export review.json --format markdown > review-notes.md
@@ -41,7 +42,8 @@ mire notes export review.json --format markdown > review-notes.md
 
 The JSON export includes finding authorship, provenance, events, original
 anchors, and re-anchor outcomes. The Markdown export renders those details for
-reading.
+reading. `mire review status review.json` prints a compact progress report; add
+`--format json` for structured output.
 
 ## Create and edit notes
 
@@ -49,13 +51,16 @@ Press `c` on a source row to create a note. To cover a range, press `v`, move
 with `j` or `k`, then press `c`. The editor records the note body, severity, and
 annotation kind.
 
-| Key                 | Action                                     |
-| ------------------- | ------------------------------------------ |
-| `c`                 | Create a note on the row or selected range |
-| `e`                 | Edit the selected note                     |
-| `Enter`             | Save the note                              |
-| `Tab` / `Shift-Tab` | Change severity or kind while editing      |
-| `Ctrl-S`            | Retry a failed save                        |
+| Key                 | Action                                         |
+| ------------------- | ---------------------------------------------- |
+| `c`                 | Create a note on the row or selected range     |
+| `e`                 | Edit the selected note                         |
+| `Enter`             | Insert a newline in the note body              |
+| `Ctrl-Enter`        | Save the note                                  |
+| `Tab` / `Shift-Tab` | Move field focus forward or backward           |
+| `Up` / `Down`       | Change the focused severity or annotation kind |
+| Paste               | Insert text into the focused note body         |
+| `Ctrl-S`            | Retry a failed save                            |
 
 Mire saves changes by atomically replacing the review file. If a write fails,
 the editor remains open with the note text intact.

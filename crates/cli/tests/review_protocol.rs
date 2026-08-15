@@ -14,6 +14,7 @@ use serde_json::{Value, json};
 static TEST_ID: AtomicU64 = AtomicU64::new(0);
 
 const PATCH: &[u8] = b"--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,2 +1,2 @@\n-old value\n+new value\n context\n";
+const PATCH_WITH_EXTRA_FILE: &[u8] = b"--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,2 +1,2 @@\n-old value\n+new value\n context\n--- /dev/null\n+++ b/src/extra.rs\n@@ -0,0 +1 @@\n+extra\n";
 
 #[test]
 fn context_defaults_to_a_compact_manifest_and_bounds_expanded_requests() {
@@ -58,6 +59,84 @@ fn context_defaults_to_a_compact_manifest_and_bounds_expanded_requests() {
             .unwrap()
             .len(),
         3
+    );
+}
+
+#[test]
+fn review_status_reports_changes_findings_and_reanchor_outcomes() {
+    let fixture = Fixture::new();
+    let notes = [
+        note(&fixture.review, "open", Provenance::Human),
+        note(&fixture.review, "resolved", Provenance::Human),
+        note(&fixture.review, "dismissed", Provenance::Human),
+        note(&fixture.review, "accepted-risk", Provenance::Human),
+    ];
+    let mut review = fixture
+        .review
+        .import_notes(notes.to_vec())
+        .expect("notes can be imported");
+    let author = Author::new("reviewer", None).expect("author is valid");
+    for (identifier, status) in [
+        ("resolved", NoteStatus::Resolved),
+        ("dismissed", NoteStatus::Dismissed),
+        ("accepted-risk", NoteStatus::AcceptedRisk),
+    ] {
+        review = review
+            .change_note_status(
+                &NoteId::new(identifier).expect("identifier is valid"),
+                status,
+                author.clone(),
+            )
+            .expect("status can be changed");
+    }
+    let replacement = parse_patch(
+        PATCH_WITH_EXTRA_FILE,
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .expect("replacement patch parses");
+    let review = review.reanchor(replacement).expect("notes re-anchor exactly");
+    write_review_atomic(&fixture.review_path, &review).expect("updated review can be written");
+
+    let human = mire(&["review", "status", fixture.review_str()]);
+    assert_success(&human);
+    assert_eq!(
+        String::from_utf8(human.stdout).expect("status is UTF-8"),
+        format!(
+            "source: patch\nreview revision: {}\nchangeset: {}\nfiles: 2\nchanges: +2 -1\nfindings: 4 (open: 1, resolved: 1, dismissed: 1, accepted-risk: 1)\nre-anchor: original: 0, exact: 4, moved: 0, stale: 0, ambiguous: 0\n",
+            review.revision().get(),
+            review.changeset().fingerprint(),
+        )
+    );
+
+    let structured = mire(&["review", "status", fixture.review_str(), "--format", "json"]);
+    assert_success(&structured);
+    let structured: Value = serde_json::from_slice(&structured.stdout).expect("status is JSON");
+    assert_eq!(structured["schema_version"]["major"], 1);
+    assert_eq!(structured["review_revision"], review.revision().get());
+    assert_eq!(structured["source"]["kind"], "patch");
+    assert_eq!(structured["files"], 2);
+    assert_eq!(structured["additions"], 2);
+    assert_eq!(structured["deletions"], 1);
+    assert_eq!(
+        structured["findings"],
+        json!({
+            "total": 4,
+            "open": 1,
+            "resolved": 1,
+            "dismissed": 1,
+            "accepted_risk": 1,
+        })
+    );
+    assert_eq!(
+        structured["reanchor"],
+        json!({
+            "original": 0,
+            "exact": 4,
+            "moved": 0,
+            "stale": 0,
+            "ambiguous": 0,
+        })
     );
 }
 

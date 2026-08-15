@@ -12,22 +12,22 @@ precedence over the general controls.
 
 ## Navigate the review
 
-| Key             | Action                                                            |
-| --------------- | ----------------------------------------------------------------- |
-| `q`             | Quit Mire                                                         |
-| `Esc`           | Cancel active UI state or return sidebar focus to the review      |
-| `?`             | Show or hide keybinding help                                      |
-| `Tab`           | Switch focus between the file sidebar and review                  |
-| `b`             | Show or hide the file sidebar                                     |
-| `j` / `Down`    | Scroll down, or select the next file when the sidebar has focus   |
-| `k` / `Up`      | Scroll up, or select the previous file when the sidebar has focus |
-| `PgDn` / `PgUp` | Move down or up by one page                                       |
-| `g` / `Home`    | Jump to the first row                                             |
-| `G` / `End`     | Jump to the last row                                              |
-| `]` / `[`       | Jump to the next or previous file                                 |
-| `}` / `{`       | Jump to the next or previous hunk                                 |
-| `Enter` / `Space` | Collapse or expand the file or hunk under the review cursor      |
-| `Ctrl-P`        | Open the changed-file picker                                      |
+| Key               | Action                                                            |
+| ----------------- | ----------------------------------------------------------------- |
+| `q`               | Quit Mire                                                         |
+| `Esc`             | Cancel active UI state or return sidebar focus to the review      |
+| `?`               | Show or hide keybinding help                                      |
+| `Tab`             | Switch focus between the file sidebar and review                  |
+| `b`               | Show or hide the file sidebar                                     |
+| `j` / `Down`      | Scroll down, or select the next file when the sidebar has focus   |
+| `k` / `Up`        | Scroll up, or select the previous file when the sidebar has focus |
+| `PgDn` / `PgUp`   | Move down or up by one page                                       |
+| `g` / `Home`      | Jump to the first row                                             |
+| `G` / `End`       | Jump to the last row                                              |
+| `]` / `[`         | Jump to the next or previous file                                 |
+| `}` / `{`         | Jump to the next or previous hunk                                 |
+| `Enter` / `Space` | Collapse or expand the file or hunk under the review cursor       |
+| `Ctrl-P`          | Open the changed-file picker                                      |
 
 ## Search and display
 
@@ -71,14 +71,16 @@ These controls are available when you open a durable review with
 
 ### Note editor
 
-| Key                     | Action                          |
-| ----------------------- | ------------------------------- |
-| `Enter`                 | Save the note                   |
-| `Esc`                   | Cancel editing                  |
-| `Backspace`             | Delete the previous character   |
-| `Tab`                   | Select the next severity        |
-| `Shift-Tab`             | Select the next annotation kind |
-| Any printable character | Add text to the note body       |
+| Key                     | Action                                         |
+| ----------------------- | ---------------------------------------------- |
+| `Enter`                 | Insert a newline in the note body              |
+| `Ctrl-Enter`            | Save the note                                  |
+| `Esc`                   | Cancel editing                                 |
+| `Backspace`             | Delete the previous character                  |
+| `Tab` / `Shift-Tab`     | Move field focus forward or backward           |
+| `Up` / `Down`           | Change the focused severity or annotation kind |
+| Paste                   | Insert text into the focused note body         |
+| Any printable character | Add text to the focused note body              |
 
 ### Note filters
 

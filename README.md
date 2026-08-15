@@ -34,6 +34,9 @@ Run Mire inside a Git worktree:
 
 ```sh
 # Unstaged and untracked changes
+mire
+
+# Equivalent explicit form
 mire diff
 
 # Staged changes
@@ -68,6 +71,9 @@ mire review review.json --watch
 
 # Refresh without opening the TUI
 mire review refresh review.json
+
+# Report review progress without opening the TUI
+mire review status review.json
 ```
 
 A source-backed review refreshes from its recorded Git comparison. Mire keeps

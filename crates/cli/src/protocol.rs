@@ -2,9 +2,9 @@ use std::ffi::OsStr;
 use std::io::{self, Write};
 
 use mire_core::{
-    AnchorSide, AnnotationKind, Author, BytePath, Changeset, FileContent, FileDiff, Fingerprint, Hunk, LineNumber,
-    LineRange, NoteApplyError, NoteEvent, NoteEventKind, NoteImportError, NoteInput, NoteSeverity, NoteStatus,
-    Provenance, ReanchorEvidence, ReanchorOutcome, Review, ReviewNote, SchemaVersion,
+    AnchorSide, AnnotationKind, Author, BytePath, Changeset, ChangesetSource, FileContent, FileDiff, Fingerprint, Hunk,
+    LineKind, LineNumber, LineRange, NoteApplyError, NoteEvent, NoteEventKind, NoteImportError, NoteInput,
+    NoteSeverity, NoteStatus, Provenance, ReanchorEvidence, ReanchorOutcome, Review, ReviewNote, SchemaVersion,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -290,6 +290,37 @@ struct NoteDocument<'a> {
     events: &'a [NoteEvent],
 }
 
+#[derive(Default, Serialize)]
+struct FindingTotals {
+    total: usize,
+    open: usize,
+    resolved: usize,
+    dismissed: usize,
+    accepted_risk: usize,
+}
+
+#[derive(Default, Serialize)]
+struct ReanchorTotals {
+    original: usize,
+    exact: usize,
+    moved: usize,
+    stale: usize,
+    ambiguous: usize,
+}
+
+#[derive(Serialize)]
+struct ReviewStatusDocument<'a> {
+    schema_version: SchemaVersion,
+    review_revision: u64,
+    source: &'a ChangesetSource,
+    changeset_fingerprint: Fingerprint,
+    files: usize,
+    additions: usize,
+    deletions: usize,
+    findings: FindingTotals,
+    reanchor: ReanchorTotals,
+}
+
 struct BoundedBuffer {
     bytes: Vec<u8>,
     limit: usize,
@@ -384,6 +415,108 @@ pub fn notes_json(review: &Review) -> Result<Vec<u8>> {
     let mut bytes = serde_json::to_vec(&document).map_err(ProtocolError::Serialize)?;
     bytes.push(b'\n');
     Ok(bytes)
+}
+
+/// Serializes deterministic JSON review status for scripts and agents.
+pub fn review_status_json(review: &Review) -> Result<Vec<u8>> {
+    let status = review_status(review);
+    let document = ReviewStatusDocument {
+        schema_version: CURRENT_PROTOCOL_SCHEMA_VERSION,
+        review_revision: review.revision().get(),
+        source: review.changeset().source(),
+        changeset_fingerprint: review.changeset().fingerprint(),
+        files: review.changeset().files().len(),
+        additions: status.additions,
+        deletions: status.deletions,
+        findings: status.findings,
+        reanchor: status.reanchor,
+    };
+    let mut bytes = serde_json::to_vec(&document).map_err(ProtocolError::Serialize)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+/// Renders concise, deterministic review status for terminal use.
+pub fn review_status_text(review: &Review) -> Vec<u8> {
+    let status = review_status(review);
+    format!(
+        "source: {}\nreview revision: {}\nchangeset: {}\nfiles: {}\nchanges: +{} -{}\nfindings: {} (open: {}, resolved: {}, dismissed: {}, accepted-risk: {})\nre-anchor: original: {}, exact: {}, moved: {}, stale: {}, ambiguous: {}\n",
+        source_label(review.changeset().source()),
+        review.revision().get(),
+        review.changeset().fingerprint(),
+        review.changeset().files().len(),
+        status.additions,
+        status.deletions,
+        status.findings.total,
+        status.findings.open,
+        status.findings.resolved,
+        status.findings.dismissed,
+        status.findings.accepted_risk,
+        status.reanchor.original,
+        status.reanchor.exact,
+        status.reanchor.moved,
+        status.reanchor.stale,
+        status.reanchor.ambiguous,
+    )
+    .into_bytes()
+}
+
+struct ReviewStatus {
+    additions: usize,
+    deletions: usize,
+    findings: FindingTotals,
+    reanchor: ReanchorTotals,
+}
+
+fn review_status(review: &Review) -> ReviewStatus {
+    let mut status = ReviewStatus {
+        additions: 0,
+        deletions: 0,
+        findings: FindingTotals::default(),
+        reanchor: ReanchorTotals::default(),
+    };
+    for file in review.changeset().files() {
+        if let FileContent::Text { hunks } = file.content() {
+            for hunk in hunks {
+                for line in hunk.lines() {
+                    match line.kind() {
+                        LineKind::Addition => status.additions += 1,
+                        LineKind::Deletion => status.deletions += 1,
+                        LineKind::Context => {}
+                    }
+                }
+            }
+        }
+    }
+    for note in review.notes() {
+        status.findings.total += 1;
+        match note.status() {
+            NoteStatus::Open => status.findings.open += 1,
+            NoteStatus::Resolved => status.findings.resolved += 1,
+            NoteStatus::Dismissed => status.findings.dismissed += 1,
+            NoteStatus::AcceptedRisk => status.findings.accepted_risk += 1,
+        }
+        match note.reanchor_outcome() {
+            None => status.reanchor.original += 1,
+            Some(ReanchorOutcome::Exact { .. }) => status.reanchor.exact += 1,
+            Some(ReanchorOutcome::Moved { .. }) => status.reanchor.moved += 1,
+            Some(ReanchorOutcome::Stale { .. }) => status.reanchor.stale += 1,
+            Some(ReanchorOutcome::Ambiguous { .. }) => status.reanchor.ambiguous += 1,
+        }
+    }
+    status
+}
+
+fn source_label(source: &ChangesetSource) -> &'static str {
+    match source {
+        ChangesetSource::Patch { .. } => "patch",
+        ChangesetSource::DirectFiles => "direct files",
+        ChangesetSource::Git { operation } => match operation {
+            mire_core::GitOperation::Worktree { .. } => "git worktree",
+            mire_core::GitOperation::Diff { .. } => "git diff",
+            mire_core::GitOperation::Show { .. } => "git show",
+        },
+    }
 }
 
 /// Serializes a machine-readable atomic-import result.

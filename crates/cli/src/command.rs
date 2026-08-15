@@ -17,7 +17,7 @@ use crate::git::{self, DiffRequest, GitError, ShowRequest};
 use crate::live_session::{self, LiveSession, LiveSessionError};
 use crate::protocol::{
     ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, context_json, import_error_json,
-    import_result_json, notes_json, notes_markdown, protocol_error_json,
+    import_result_json, notes_json, notes_markdown, protocol_error_json, review_status_json, review_status_text,
 };
 use crate::review_file::{
     DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, write_review_atomic_if_revision,
@@ -146,7 +146,15 @@ pub fn run(args: impl Iterator<Item = OsString>) -> ExitCode {
 
 fn execute(cli: Cli) -> Result<(), AppError> {
     let theme = ThemeFamily::from(cli.theme);
-    match cli.command {
+    let command = cli.command.unwrap_or(Command::Diff(DiffArgs {
+        staged: false,
+        revisions: Vec::new(),
+        paths: Vec::new(),
+        format: None,
+        language: None,
+        watch: false,
+    }));
+    match command {
         Command::Context(ContextArgs { review, patch, file, hunk, max_bytes, format }) => {
             let _ = format;
             let review = read_review(Path::new(&review)).map_err(AppError::ReviewFile)?;
@@ -185,6 +193,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
         Command::Review(ReviewArgs { input, format, watch, command }) => match command {
             Some(ReviewCommand::Init(arguments)) => initialize_review(arguments),
             Some(ReviewCommand::Refresh(arguments)) => refresh_review(arguments),
+            Some(ReviewCommand::Status(arguments)) => report_review_status(arguments),
             None => open_review(
                 input.expect("clap requires a review path when no review subcommand is present"),
                 format,
@@ -293,6 +302,16 @@ fn write_refresh_result(status: &str, review: &Review) -> Result<(), AppError> {
     writeln!(output, "status: {status}").map_err(AppError::OutputIo)?;
     writeln!(output, "changeset: {}", review.changeset().fingerprint()).map_err(AppError::OutputIo)?;
     writeln!(output, "revision: {}", review.revision().get()).map_err(AppError::OutputIo)
+}
+
+fn report_review_status(arguments: ReviewStatusArgs) -> Result<(), AppError> {
+    let review = read_review(Path::new(&arguments.review)).map_err(AppError::ReviewFile)?;
+    let bytes = match arguments.format {
+        Some(OutputFormat::Json) => review_status_json(&review).map_err(AppError::Protocol)?,
+        Some(OutputFormat::Markdown) => unreachable!("review status only accepts JSON output"),
+        None => review_status_text(&review),
+    };
+    write_bytes(&bytes)
 }
 
 fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme: ThemeFamily) -> Result<(), AppError> {
@@ -752,7 +771,7 @@ mod tests {
     #[test]
     fn clap_accepts_stdin_and_the_json_format() {
         let cli = Cli::try_parse_from(["mire", "patch", "-", "--format", "json"]).unwrap();
-        let Command::Patch(arguments) = cli.command else {
+        let Some(Command::Patch(arguments)) = cli.command else {
             panic!("patch command is parsed");
         };
         assert_eq!(arguments.input, "-");
@@ -760,9 +779,15 @@ mod tests {
     }
 
     #[test]
+    fn clap_defaults_to_the_worktree_diff() {
+        let cli = Cli::try_parse_from(["mire"]).unwrap();
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
     fn clap_separates_revisions_and_paths() {
         let cli = Cli::try_parse_from(["mire", "diff", "main...HEAD", "--", "src/lib.rs"]).unwrap();
-        let Command::Diff(arguments) = cli.command else {
+        let Some(Command::Diff(arguments)) = cli.command else {
             panic!("diff command is parsed");
         };
         assert_eq!(arguments.revisions, ["main...HEAD"]);
@@ -770,9 +795,10 @@ mod tests {
     }
 
     #[test]
-    fn clap_accepts_review_initialization_and_opening() {
+    fn clap_accepts_review_initialization_opening_and_status() {
         let cli = Cli::try_parse_from(["mire", "review", "init", "review.json", "main...HEAD", "--", "src"]).unwrap();
-        let Command::Review(ReviewArgs { command: Some(ReviewCommand::Init(arguments)), .. }) = cli.command else {
+        let Some(Command::Review(ReviewArgs { command: Some(ReviewCommand::Init(arguments)), .. })) = cli.command
+        else {
             panic!("review init command is parsed");
         };
         assert_eq!(arguments.review, "review.json");
@@ -780,24 +806,32 @@ mod tests {
         assert_eq!(arguments.paths, ["src"]);
 
         let cli = Cli::try_parse_from(["mire", "review", "review.json", "--watch"]).unwrap();
-        let Command::Review(arguments) = cli.command else {
+        let Some(Command::Review(arguments)) = cli.command else {
             panic!("review command is parsed");
         };
         assert_eq!(arguments.input.as_deref(), Some(OsStr::new("review.json")));
         assert!(arguments.watch);
+
+        let cli = Cli::try_parse_from(["mire", "review", "status", "review.json", "--format", "json"]).unwrap();
+        let Some(Command::Review(ReviewArgs { command: Some(ReviewCommand::Status(arguments)), .. })) = cli.command
+        else {
+            panic!("review status command is parsed");
+        };
+        assert_eq!(arguments.review, "review.json");
+        assert!(matches!(arguments.format, Some(OutputFormat::Json)));
     }
 
     #[test]
     fn clap_accepts_standalone_and_command_specific_watch_modes() {
         let cli = Cli::try_parse_from(["mire", "watch", "main...HEAD", "--", "src"]).unwrap();
-        let Command::Watch(arguments) = cli.command else {
+        let Some(Command::Watch(arguments)) = cli.command else {
             panic!("watch command is parsed");
         };
         assert_eq!(arguments.revisions, ["main...HEAD"]);
         assert_eq!(arguments.paths, ["src"]);
 
         let cli = Cli::try_parse_from(["mire", "patch", "changes.patch", "--watch"]).unwrap();
-        let Command::Patch(arguments) = cli.command else {
+        let Some(Command::Patch(arguments)) = cli.command else {
             panic!("patch command is parsed");
         };
         assert!(arguments.watch);
@@ -806,7 +840,7 @@ mod tests {
     #[test]
     fn clap_accepts_supported_language_overrides_and_rejects_unknown_ones() {
         let cli = Cli::try_parse_from(["mire", "patch", "-", "--language", "typescript"]).unwrap();
-        let Command::Patch(arguments) = cli.command else {
+        let Some(Command::Patch(arguments)) = cli.command else {
             panic!("patch command is parsed");
         };
         assert_eq!(arguments.language.as_deref(), Some("typescript"));

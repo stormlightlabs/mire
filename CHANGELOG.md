@@ -4,6 +4,20 @@
 
 ### Added
 
+#### 2026-08-15
+
+- Contextual footer actions and predictable `Esc` handling across TUI modes.
+- Distinct cursor, range-selection, and finding-anchor indicators, plus focused
+  finding actions and status-aware rows.
+- Multiline note editing, bracketed paste, field focus controls, and preserved
+  draft content after validation or retry failures.
+- Review progress, open-finding counts, watch and refresh state, and live
+  walkthrough status in the TUI.
+- Collapsible files and hunks, plus a filterable file picker and review-aware
+  sidebar counts.
+- Zero-argument worktree-diff startup, path-aware shell completion hints, and
+  `mire review status` for human-readable and structured review summaries.
+
 #### 2026-08-14
 
 - Reviews initialized from a Git comparison with `mire review init`.

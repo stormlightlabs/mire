@@ -6,11 +6,11 @@ group: Get started
 order: 2
 ---
 
-Run Mire inside a Git worktree. With no revision argument, `diff` opens unstaged
-and untracked worktree changes:
+Run Mire inside a Git worktree. `mire` opens unstaged and untracked worktree
+changes; `mire diff` is the equivalent explicit command:
 
 ```sh
-mire diff
+mire
 ```
 
 ## Choose a changeset

@@ -2,7 +2,7 @@
 
 use std::ffi::OsString;
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum, ValueHint};
 use mire_core::{AnnotationKind, Fingerprint, NoteSeverity};
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -74,6 +74,8 @@ pub enum ReviewCommand {
     Init(ReviewInitArgs),
     /// Refresh a source-backed review and re-anchor its findings.
     Refresh(ReviewRefreshArgs),
+    /// Report review progress without opening the terminal interface.
+    Status(ReviewStatusArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -89,18 +91,25 @@ pub struct Cli {
     #[arg(long, global = true, value_enum, default_value_t)]
     pub theme: ThemeArgument,
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 #[derive(Args, Debug)]
 pub struct ContextArgs {
     /// JSON review file to inspect.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub review: OsString,
     /// Include the complete normalized patch capture.
     #[arg(long, conflicts_with = "file", requires = "max_bytes")]
     pub patch: bool,
     /// Include one complete normalized file diff.
-    #[arg(long, value_name = "PATH", conflicts_with_all = ["patch", "hunk"], requires = "max_bytes")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        value_hint = ValueHint::AnyPath,
+        conflicts_with_all = ["patch", "hunk"],
+        requires = "max_bytes"
+    )]
     pub file: Option<OsString>,
     /// Include one hunk selected from the manifest.
     #[arg(
@@ -128,7 +137,7 @@ pub struct DiffArgs {
     #[arg(value_name = "REVISION")]
     pub revisions: Vec<OsString>,
     /// Repository-relative paths, supplied after --.
-    #[arg(last = true, value_name = "PATH")]
+    #[arg(last = true, value_name = "PATH", value_hint = ValueHint::AnyPath)]
     pub paths: Vec<OsString>,
     /// Structured output format.
     #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
@@ -144,6 +153,7 @@ pub struct DiffArgs {
 #[derive(Args, Debug)]
 pub struct PatchArgs {
     /// Patch file to read, or - for standard input.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub input: OsString,
     /// Structured output format.
     #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
@@ -178,12 +188,13 @@ pub enum ProvenanceArgument {
 #[derive(Args, Debug)]
 pub struct NoteAddArgs {
     /// JSON review file to update.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub review: OsString,
     /// Revision read before creating the finding.
     #[arg(long)]
     pub revision: u64,
     /// Repository-relative source path.
-    #[arg(long)]
+    #[arg(long, value_hint = ValueHint::AnyPath)]
     pub file: OsString,
     /// Line on the old side of the diff.
     #[arg(long, conflicts_with = "new_line", required_unless_present = "new_line")]
@@ -220,6 +231,7 @@ pub struct NoteAddArgs {
 #[derive(Args, Debug)]
 pub struct NoteDispositionArgs {
     /// JSON review file to update.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub review: OsString,
     /// Identifier of the finding to update.
     pub note_id: String,
@@ -237,6 +249,7 @@ pub struct NoteDispositionArgs {
 #[derive(Args, Debug)]
 pub struct NoteApplyArgs {
     /// JSON review file to update.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub review: OsString,
     /// Read the location batch from standard input.
     #[arg(long, required = true)]
@@ -246,8 +259,10 @@ pub struct NoteApplyArgs {
 #[derive(Args, Debug)]
 pub struct NoteImportArgs {
     /// JSON review file to update atomically.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub review: OsString,
     /// Note batch JSON file, or - for standard input.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub input: OsString,
     /// Review revision observed before constructing the batch.
     #[arg(long)]
@@ -257,6 +272,7 @@ pub struct NoteImportArgs {
 #[derive(Args, Debug)]
 pub struct NoteListArgs {
     /// JSON review file to inspect.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub review: OsString,
     /// Structured output format.
     #[arg(long, value_name = "FORMAT", value_parser = parse_json_format, default_value = "json")]
@@ -266,6 +282,7 @@ pub struct NoteListArgs {
 #[derive(Args, Debug)]
 pub struct NoteExportArgs {
     /// JSON review file to export.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub review: OsString,
     /// Export format.
     #[arg(long, value_enum, default_value = "json")]
@@ -279,6 +296,7 @@ pub struct NoteExportArgs {
 )]
 pub struct ReviewArgs {
     /// JSON review file to open.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub input: Option<OsString>,
     /// Structured output format.
     #[arg(long, value_name = "FORMAT", value_parser = parse_json_format, requires = "input")]
@@ -293,12 +311,24 @@ pub struct ReviewArgs {
 #[derive(Args, Debug)]
 pub struct ReviewRefreshArgs {
     /// Existing source-backed review file to refresh.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub review: OsString,
+}
+
+#[derive(Args, Debug)]
+pub struct ReviewStatusArgs {
+    /// JSON review file to inspect.
+    #[arg(value_hint = ValueHint::FilePath)]
+    pub review: OsString,
+    /// Emit deterministic JSON for scripts and agents.
+    #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
+    pub format: Option<OutputFormat>,
 }
 
 #[derive(Args, Debug)]
 pub struct ReviewInitArgs {
     /// New JSON review file to create.
+    #[arg(value_hint = ValueHint::FilePath)]
     pub review: OsString,
     /// Compare the staged index with HEAD.
     #[arg(long, conflicts_with = "revisions")]
@@ -307,7 +337,7 @@ pub struct ReviewInitArgs {
     #[arg(value_name = "REVISION")]
     pub revisions: Vec<OsString>,
     /// Repository-relative paths, supplied after --.
-    #[arg(last = true, value_name = "PATH")]
+    #[arg(last = true, value_name = "PATH", value_hint = ValueHint::AnyPath)]
     pub paths: Vec<OsString>,
 }
 
@@ -361,7 +391,7 @@ pub struct SessionFocusArgs {
     #[arg(long, conflicts_with = "file", required_unless_present = "file")]
     pub note: Option<String>,
     /// Repository-relative source path.
-    #[arg(long, requires_all = ["side", "start_line"])]
+    #[arg(long, value_hint = ValueHint::AnyPath, requires_all = ["side", "start_line"])]
     pub file: Option<OsString>,
     /// Changed-file side for a location request.
     #[arg(long, value_enum, requires = "file")]
@@ -397,7 +427,7 @@ pub struct ShowArgs {
     /// Commit to show; defaults to HEAD.
     pub revision: Option<OsString>,
     /// Repository-relative paths, supplied after --.
-    #[arg(last = true, value_name = "PATH")]
+    #[arg(last = true, value_name = "PATH", value_hint = ValueHint::AnyPath)]
     pub paths: Vec<OsString>,
     /// Structured output format.
     #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
@@ -419,7 +449,7 @@ pub struct WatchArgs {
     #[arg(value_name = "REVISION")]
     pub revisions: Vec<OsString>,
     /// Repository-relative paths, supplied after --.
-    #[arg(last = true, value_name = "PATH")]
+    #[arg(last = true, value_name = "PATH", value_hint = ValueHint::AnyPath)]
     pub paths: Vec<OsString>,
     /// Override syntax detection for the interactive viewer.
     #[arg(long, value_parser = parse_language)]

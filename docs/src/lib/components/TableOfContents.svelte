@@ -22,11 +22,8 @@
 		<ul>
 			{#each headings as heading (heading.slug)}
 				<li class:toc-subitem={heading.level === 3} class:active={heading.slug === activeHeading}>
-					<a
-						href={`#${heading.slug}`}
-						aria-current={heading.slug === activeHeading ? 'location' : undefined}
-						>{heading.title}</a
-					>
+					<a href={`#${heading.slug}`} aria-current={heading.slug === activeHeading ? 'location' : undefined}
+						>{heading.title}</a>
 				</li>
 			{/each}
 		</ul>

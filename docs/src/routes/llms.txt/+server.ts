@@ -4,9 +4,7 @@ import { getDocs } from '$lib/content';
 export const prerender = true;
 
 export function GET(): Response {
-	const pages = getDocs().map(
-		(doc) => `- [${doc.title}](${base}/docs/${doc.slug}.md): ${doc.description}`
-	);
+	const pages = getDocs().map((doc) => `- [${doc.title}](${base}/docs/${doc.slug}.md): ${doc.description}`);
 	const body = [
 		'# Mire',
 		'',

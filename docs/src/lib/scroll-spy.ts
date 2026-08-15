@@ -4,10 +4,7 @@ export type HeadingPosition = { id: string; top: number; scrollMarginTop: number
 
 export type ViewportPosition = { scrollY: number; height: number; documentHeight: number };
 
-export function findActiveHeading(
-	headings: HeadingPosition[],
-	viewport: ViewportPosition
-): string | null {
+export function findActiveHeading(headings: HeadingPosition[], viewport: ViewportPosition): string | null {
 	if (headings.length === 0) return null;
 	if (viewport.scrollY < 1) return null;
 
@@ -26,10 +23,7 @@ export function findActiveHeading(
 	return activeHeading;
 }
 
-export function startScrollSpy(
-	headings: HTMLElement[],
-	onChange: (activeHeading: string | null) => void
-): () => void {
+export function startScrollSpy(headings: HTMLElement[], onChange: (activeHeading: string | null) => void): () => void {
 	let animationFrame: number | undefined;
 	let previousHeading: string | null | undefined;
 

@@ -17,9 +17,7 @@
 		return currentSlug === slug || currentSlug.startsWith(`${slug}/`);
 	}
 
-	const skipHref = $derived(
-		currentSlug ? resolve(`/docs/${currentSlug}/#main-content`) : resolve('/#main-content')
-	);
+	const skipHref = $derived(currentSlug ? resolve(`/docs/${currentSlug}/#main-content`) : resolve('/#main-content'));
 </script>
 
 <a class="skip-link" href={skipHref}>Skip to content</a>
@@ -58,9 +56,7 @@
 					</nav>
 					<div class="mobile-doc-links">
 						{#each docs as doc (doc.slug)}
-							<a class:active={doc.slug === currentSlug} href={resolve(`/docs/${doc.slug}/`)}
-								>{doc.title}</a
-							>
+							<a class:active={doc.slug === currentSlug} href={resolve(`/docs/${doc.slug}/`)}>{doc.title}</a>
 						{/each}
 					</div>
 				</div>

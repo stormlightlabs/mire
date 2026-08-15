@@ -17,12 +17,7 @@
 	}
 </script>
 
-<a
-	class="copy-markdown"
-	href={resolve('/docs/[...slug].md', { slug })}
-	onclick={copy}
-	aria-live="polite"
->
+<a class="copy-markdown" href={resolve('/docs/[...slug].md', { slug })} onclick={copy} aria-live="polite">
 	<span class="i-ri-file-copy-line" aria-hidden="true"></span>
 	<span>{label}</span>
 </a>

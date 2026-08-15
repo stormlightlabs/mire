@@ -69,9 +69,7 @@ export function validateFrontmatter(value: unknown, source: string): DocFrontmat
 
 	const section = requiredString(value, 'section', source);
 	if (!sectionSet.has(section)) {
-		throw new Error(
-			`Invalid frontmatter in ${source}: section must be one of ${docSections.join(', ')}`
-		);
+		throw new Error(`Invalid frontmatter in ${source}: section must be one of ${docSections.join(', ')}`);
 	}
 
 	const frontmatter: DocFrontmatter = {

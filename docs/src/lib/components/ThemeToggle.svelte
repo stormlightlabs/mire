@@ -63,13 +63,9 @@
 	aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
 	aria-pressed={isDark}
 	title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-	onclick={toggleTheme}
->
+	onclick={toggleTheme}>
 	<span class="theme-toggle__label">{isDark ? 'Light' : 'Dark'}</span>
-	<span
-		class={isDark ? 'theme-toggle__icon i-bi-sun' : 'theme-toggle__icon i-bi-moon'}
-		aria-hidden="true"
-	></span>
+	<span class={isDark ? 'theme-toggle__icon i-bi-sun' : 'theme-toggle__icon i-bi-moon'} aria-hidden="true"></span>
 </button>
 
 <style>

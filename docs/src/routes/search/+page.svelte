@@ -1,11 +1,9 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import Seo from '$lib/components/Seo.svelte';
 </script>
 
-<svelte:head>
-	<title>Search · Mire</title>
-	<meta name="description" content="Search the Mire documentation." />
-</svelte:head>
+<Seo title="Search · Mire" description="Search the Mire documentation." pathname="/search/" index={false} />
 
 <main class="fallback-page" data-pagefind-ignore>
 	<a class="skip-link" href="#fallback-content">Skip to content</a>
@@ -13,12 +11,10 @@
 		<p class="eyebrow">Mire documentation</p>
 		<h1>Search</h1>
 		<p>
-			Search uses the local Pagefind index in the production build. Use the navigation to browse
-			these static pages when JavaScript is disabled.
+			Search uses the local Pagefind index in the production build. Use the navigation to browse these static pages when
+			JavaScript is disabled.
 		</p>
-		<a class="button-link" href={resolve('/docs/getting-started/installation/')}
-			>Start with installation</a
-		>
+		<a class="button-link" href={resolve('/docs/getting-started/installation/')}>Start with installation</a>
 	</div>
 </main>
 

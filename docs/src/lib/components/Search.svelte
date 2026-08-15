@@ -18,8 +18,7 @@
 		aria-controls={dialogId}
 		aria-expanded="false"
 		aria-haspopup="dialog"
-		aria-label="Open documentation search (Ctrl+K or Cmd+K)"
-	>
+		aria-label="Open documentation search (Ctrl+K or Cmd+K)">
 		<span class="i-ri-search-line search-icon" aria-hidden="true"></span>
 		<span class="search-trigger-label">Search docs</span>
 		<span class="shortcut-hint" aria-hidden="true">
@@ -40,8 +39,7 @@
 		data-search-dialog
 		aria-labelledby={titleId}
 		aria-describedby={descriptionId}
-		id={dialogId}
-	>
+		id={dialogId}>
 		<div class="dialog-inner">
 			<header class="dialog-header">
 				<div>
@@ -72,8 +70,7 @@
 						aria-autocomplete="list"
 						aria-expanded="false"
 						aria-haspopup="listbox"
-						aria-controls={resultsId}
-					/>
+						aria-controls={resultsId} />
 					<button type="submit" aria-label="Search documentation">
 						<span class="i-ri-search-line" aria-hidden="true"></span>
 					</button>

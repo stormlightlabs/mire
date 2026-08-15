@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import Seo from '$lib/components/Seo.svelte';
 	import SiteHeader from '$lib/components/SiteHeader.svelte';
 	import TermShot from '$lib/components/TermShot.svelte';
 	import { getDocs } from '$lib/content';
+	import { site } from '$lib/site';
 
 	const docs = getDocs();
 	const entryPoints = [
@@ -24,13 +26,7 @@
 	] as const;
 </script>
 
-<svelte:head>
-	<title>Mire</title>
-	<meta
-		name="description"
-		content="Documentation for Mire, the terminal difftool for humans and agents."
-	/>
-</svelte:head>
+<Seo title={site.title} description={site.description} pathname="/" />
 
 <SiteHeader {docs} />
 
@@ -46,8 +42,7 @@
 				src="/screencap.png"
 				command="mire diff HEAD..bf30007 --theme eldritch"
 				alt="Mire showing a unified Rust diff with a changed-files sidebar."
-				loading="eager"
-			/>
+				loading="eager" />
 		</div>
 		<p class="landing-lede">
 			Inspect changes, leave anchored feedback, and keep the review intact as the code evolves.
@@ -71,22 +66,18 @@
 				<TermShot
 					src="/screencap_split.png"
 					command="mire diff HEAD..bf30007 --theme catppuccin"
-					alt="Mire comparing a Rust file's source and changes side by side."
-				/>
+					alt="Mire comparing a Rust file's source and changes side by side." />
 			</li>
 			<li>
 				<div class="review-step-copy">
 					<h3>Share the review</h3>
 					<p>Humans, agents, and tools attach feedback to the same anchored notes.</p>
-					<p>
-						As code changes, Mire preserves review state instead of throwing the conversation away.
-					</p>
+					<p>As code changes, Mire preserves review state instead of throwing the conversation away.</p>
 				</div>
 				<TermShot
 					src="/screencap_range.png"
 					command="mire review range.json"
-					alt="Mire creating a review note on a selected range of Rust code."
-				/>
+					alt="Mire creating a review note on a selected range of Rust code." />
 			</li>
 		</ol>
 	</section>

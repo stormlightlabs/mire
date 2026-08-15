@@ -37,8 +37,7 @@ export default defineConfig({
 		sveltekit({
 			// Force runes mode for the project, except for libraries. Can be removed in svelte 6.
 			compilerOptions: {
-				runes: ({ filename }) =>
-					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
+				runes: ({ filename }) => (filename.split(/[/\\]/).includes('node_modules') ? undefined : true)
 			},
 			adapter: adapter(),
 			preprocess: [

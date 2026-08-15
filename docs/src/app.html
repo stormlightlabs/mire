@@ -5,10 +5,6 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="text-scale" content="scale" />
 		<meta name="theme-color" content="#f5f7f8" />
-		<meta
-			name="description"
-			content="Documentation for Mire, the terminal difftool for humans and agents."
-		/>
 		<script>
 			(() => {
 				const storageKey = 'mire-theme';
@@ -24,9 +20,7 @@
 				document.documentElement.classList.add('js');
 				if (storedTheme) document.documentElement.dataset.theme = storedTheme;
 
-				const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
-					? 'dark'
-					: 'light';
+				const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 				const theme = storedTheme ?? systemTheme;
 				document
 					.querySelector('meta[name="theme-color"]')

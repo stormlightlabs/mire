@@ -16,8 +16,7 @@
 					<a
 						class:active={doc.slug === currentSlug}
 						href={resolve(`/docs/${doc.slug}/`)}
-						aria-current={doc.slug === currentSlug ? 'page' : undefined}
-					>
+						aria-current={doc.slug === currentSlug ? 'page' : undefined}>
 						{doc.title}
 					</a>
 				{/each}

@@ -13,6 +13,17 @@ pub enum EditorTarget {
     Existing(NoteId),
 }
 
+/// The note-editor field that receives keyboard input.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EditorField {
+    /// The multiline note body.
+    Body,
+    /// The note severity.
+    Severity,
+    /// The note classification.
+    Kind,
+}
+
 /// One contiguous source range selected for a new note.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LineSelection {
@@ -27,6 +38,7 @@ pub struct NoteEditor {
     body: String,
     severity: NoteSeverity,
     annotation_kind: AnnotationKind,
+    focused_field: EditorField,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -107,6 +119,7 @@ impl NoteEditor {
             body: String::new(),
             severity: NoteSeverity::Note,
             annotation_kind: AnnotationKind::Comment,
+            focused_field: EditorField::Body,
         }
     }
 
@@ -116,6 +129,7 @@ impl NoteEditor {
             body: note.body().to_owned(),
             severity: note.severity(),
             annotation_kind: note.annotation_kind(),
+            focused_field: EditorField::Body,
         }
     }
 
@@ -127,6 +141,11 @@ impl NoteEditor {
     /// Returns the complete unsaved note text.
     pub fn body(&self) -> &str {
         &self.body
+    }
+
+    /// Returns the field that receives keyboard input.
+    pub const fn focused_field(&self) -> EditorField {
+        self.focused_field
     }
 
     /// Returns the severity selected in the editor.
@@ -143,8 +162,28 @@ impl NoteEditor {
         self.body.push(character);
     }
 
+    pub fn push_str(&mut self, text: &str) {
+        self.body.push_str(text);
+    }
+
     pub fn backspace(&mut self) {
         self.body.pop();
+    }
+
+    pub fn focus_next_field(&mut self) {
+        self.focused_field = match self.focused_field {
+            EditorField::Body => EditorField::Severity,
+            EditorField::Severity => EditorField::Kind,
+            EditorField::Kind => EditorField::Body,
+        };
+    }
+
+    pub fn focus_previous_field(&mut self) {
+        self.focused_field = match self.focused_field {
+            EditorField::Body => EditorField::Kind,
+            EditorField::Severity => EditorField::Body,
+            EditorField::Kind => EditorField::Severity,
+        };
     }
 
     pub fn cycle_annotation_kind(&mut self) {
@@ -156,6 +195,15 @@ impl NoteEditor {
         };
     }
 
+    pub fn cycle_annotation_kind_backward(&mut self) {
+        self.annotation_kind = match self.annotation_kind {
+            AnnotationKind::Comment => AnnotationKind::Question,
+            AnnotationKind::Defect => AnnotationKind::Comment,
+            AnnotationKind::Suggestion => AnnotationKind::Defect,
+            AnnotationKind::Question => AnnotationKind::Suggestion,
+        };
+    }
+
     pub fn cycle_severity(&mut self) {
         self.severity = match self.severity {
             NoteSeverity::Note => NoteSeverity::Low,
@@ -163,6 +211,16 @@ impl NoteEditor {
             NoteSeverity::Medium => NoteSeverity::High,
             NoteSeverity::High => NoteSeverity::Critical,
             NoteSeverity::Critical => NoteSeverity::Note,
+        };
+    }
+
+    pub fn cycle_severity_backward(&mut self) {
+        self.severity = match self.severity {
+            NoteSeverity::Note => NoteSeverity::Critical,
+            NoteSeverity::Low => NoteSeverity::Note,
+            NoteSeverity::Medium => NoteSeverity::Low,
+            NoteSeverity::High => NoteSeverity::Medium,
+            NoteSeverity::Critical => NoteSeverity::High,
         };
     }
 

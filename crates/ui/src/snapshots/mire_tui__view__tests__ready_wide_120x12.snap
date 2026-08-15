@@ -1,8 +1,9 @@
 ---
 source: crates/ui/src/view.rs
+assertion_line: 602
 expression: "snapshot(App::ready(&changeset), 120, 12)"
 ---
- Mire review │ split │ focus review │ context 3 │ wrap off
+ Mire review │ split │ focus review │ context 3 │ wrap off │ file 1/2 · 1/7
  Files                1/2 │ file.txt                                                                     modified +1 -1
 ▌ M file.txt         +1 -1│ ▾ @@ -1,2 +1,2 @@ heading
   M image.bin             │    1 -old                                    │     1 +new

@@ -96,11 +96,6 @@ fn patch_watch_reloads_and_recovers_after_rename_delete_and_recreate() {
         String::from_utf8_lossy(&output)
     );
     assert!(
-        contains(&output, b"Unable to display review"),
-        "{}",
-        String::from_utf8_lossy(&output)
-    );
-    assert!(
         contains(&output, b"recovered-watch-value"),
         "{}",
         String::from_utf8_lossy(&output)

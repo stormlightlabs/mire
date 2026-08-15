@@ -43,7 +43,9 @@ fn pty_notes_create_disposition_save_and_reload_without_touching_source_files() 
     drop(pair.slave);
 
     thread::sleep(Duration::from_secs(1));
-    writer.write_all(b"jjcNeeds a guard\r").unwrap();
+    writer
+        .write_all(b"jjc\x1b[200~Needs a guard\nwith detail\x1b[201~\x1b[13;5u")
+        .unwrap();
     writer.flush().unwrap();
     thread::sleep(Duration::from_millis(200));
     writer.write_all(b"pr").unwrap();
@@ -74,7 +76,7 @@ fn pty_notes_create_disposition_save_and_reload_without_touching_source_files() 
     let saved = read_review(&review_path).expect("saved review reloads");
     assert_eq!(saved.revision().get(), 3);
     assert_eq!(saved.notes().len(), 1);
-    assert_eq!(saved.notes()[0].body(), "Needs a guard");
+    assert_eq!(saved.notes()[0].body(), "Needs a guard\nwith detail");
     assert_eq!(saved.notes()[0].status(), NoteStatus::Resolved);
     assert_eq!(saved.notes()[0].author().id(), "pty-reviewer");
 

@@ -8,7 +8,7 @@ use crate::layout::UiAreas;
 use crate::live::{LiveAction, PresentationKind, PresentationState};
 use crate::navigation::{Action, Focus, action_for};
 use crate::note_filter::NoteFilter;
-use crate::notes::{EditorTarget, LineSelection, NoteEditor};
+use crate::notes::{EditorField, EditorTarget, LineSelection, NoteEditor};
 use crate::stream::{LayoutMode, ReviewStream, RowAnchor, RowKey};
 use crate::syntax::SyntaxCache;
 use crate::theme::ThemeFamily;
@@ -19,6 +19,17 @@ const DEFAULT_CONTEXT_LINES: usize = 3;
 const MAX_CONTEXT_LINES: usize = 100;
 const MAX_SEARCH_MATCHES: usize = 100_000;
 const NOTE_ACTIONS_WIDTH: u16 = 16;
+
+/// The UI state that determines the currently relevant keyboard actions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WatchState {
+    /// The source is being watched for changes.
+    Watching,
+    /// A watched source was refreshed successfully.
+    Refreshed,
+    /// The latest watched refresh failed while the displayed review remains available.
+    Failed,
+}
 
 /// The UI state that determines the currently relevant keyboard actions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,6 +140,9 @@ pub struct App<'a> {
     close_editor_after_save: bool,
     dirty: bool,
     quit_after_save: bool,
+    watch_state: Option<WatchState>,
+    watch_error: Option<String>,
+    walkthrough_active: bool,
     syntax_cache: RefCell<SyntaxCache>,
     should_quit: bool,
 }
@@ -439,8 +453,64 @@ impl<'a> App<'a> {
         self.dirty || self.save_requested || self.editor.is_some() || self.filter_visible || self.search_input
     }
 
+    /// Returns the state of the active filesystem watch, if this session is watched.
+    pub const fn watch_state(&self) -> Option<WatchState> {
+        self.watch_state
+    }
+
+    /// Returns the latest nonfatal watched-refresh failure.
+    pub fn watch_error(&self) -> Option<&str> {
+        self.watch_error.as_deref()
+    }
+
+    /// Updates the visible state of a filesystem watch without replacing the current review.
+    pub fn set_watch_state(&mut self, state: WatchState, error: Option<String>) {
+        self.watch_state = Some(state);
+        self.watch_error = error;
+    }
+
+    /// Returns the active walkthrough's finding position and total finding count.
+    pub fn walkthrough_progress(&self) -> Option<(usize, usize)> {
+        if !self.walkthrough_active {
+            return None;
+        }
+        let AppState::Ready(stream) = &self.state else {
+            return None;
+        };
+        let positions = stream
+            .visible_keys(0, stream.len())
+            .enumerate()
+            .filter_map(|(row, key)| matches!(key, RowKey::Note { .. }).then_some(row))
+            .collect::<Vec<_>>();
+        let current = positions
+            .iter()
+            .position(|row| *row == self.current_row_index(stream))?;
+        Some((current + 1, positions.len()))
+    }
+
+    /// Returns compact current-file and overall stream positions.
+    pub fn review_progress(&self) -> Option<(usize, usize, usize, usize)> {
+        let AppState::Ready(stream) = &self.state else {
+            return None;
+        };
+        let row = self.current_row_index(stream);
+        let file = stream.file_at(row)?;
+        Some((file + 1, stream.changeset().files().len(), row + 1, stream.len()))
+    }
+
+    /// Returns the count of unresolved findings in an editable review.
+    pub fn open_finding_count(&self) -> Option<usize> {
+        self.review.as_ref().map(|review| {
+            review
+                .notes()
+                .iter()
+                .filter(|note| note.status() == NoteStatus::Open)
+                .count()
+        })
+    }
+
     /// Returns a bounded state snapshot for the live-session protocol.
-    pub fn live_state(&self, walkthrough_active: bool) -> PresentationState {
+    pub fn live_state(&self) -> PresentationState {
         let selected_path = match &self.state {
             AppState::Ready(stream) => stream
                 .changeset()
@@ -469,8 +539,24 @@ impl<'a> App<'a> {
             layout: layout.to_owned(),
             filter: self.filter_summary(),
             review_revision: self.review.as_ref().map(|review| review.revision().get()),
-            walkthrough_active,
+            walkthrough_active: self.walkthrough_active,
+            walkthrough_progress: self.walkthrough_progress(),
         }
+    }
+
+    /// Starts a walkthrough and focuses its first visible finding.
+    pub fn start_walkthrough(&mut self) -> Result<(), &'static str> {
+        if self.live_control_busy() {
+            return Err("interaction_busy");
+        }
+        self.move_walkthrough(true)?;
+        self.walkthrough_active = true;
+        Ok(())
+    }
+
+    /// Ends a walkthrough and returns navigation control to the local user.
+    pub fn stop_walkthrough(&mut self) {
+        self.walkthrough_active = false;
     }
 
     /// Applies a live presentation action without changing review data.
@@ -478,13 +564,16 @@ impl<'a> App<'a> {
         if self.live_control_busy() {
             return Err("interaction_busy");
         }
+        if self.walkthrough_active && matches!(action, LiveAction::Next | LiveAction::Previous) {
+            return Err("walkthrough_active");
+        }
         match action {
             LiveAction::FocusNote { note_id } => self.focus_live_note(note_id)?,
             LiveAction::FocusLocation { path, side, start_line, end_line } => {
                 self.focus_live_location(path, *side, *start_line, *end_line)?
             }
-            LiveAction::Next => self.focus_live_note_direction(true)?,
-            LiveAction::Previous => self.focus_live_note_direction(false)?,
+            LiveAction::Next => self.move_walkthrough(true)?,
+            LiveAction::Previous => self.move_walkthrough(false)?,
             LiveAction::Inspect | LiveAction::Reload | LiveAction::Walkthrough { .. } => return Err("invalid_request"),
         }
         Ok(())
@@ -645,6 +734,19 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Inserts text delivered by a bracketed-paste terminal event into the note body.
+    pub fn handle_paste(&mut self, text: &str) {
+        let Some(editor) = &mut self.editor else {
+            return;
+        };
+        if editor.focused_field() != EditorField::Body {
+            return;
+        }
+        self.save_error = None;
+        self.close_editor_after_save = false;
+        editor.push_str(text);
+    }
+
     /// Applies mouse scrolling and selection using the same navigation state as keyboard input.
     pub fn handle_mouse(&mut self, mouse: MouseEvent) {
         let areas = self.areas();
@@ -705,6 +807,9 @@ impl<'a> App<'a> {
             close_editor_after_save: false,
             dirty: false,
             quit_after_save: false,
+            watch_state: None,
+            watch_error: None,
+            walkthrough_active: false,
             syntax_cache,
             should_quit: false,
         }
@@ -832,44 +937,57 @@ impl<'a> App<'a> {
 
     fn handle_editor_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Enter if self.dirty && self.save_error.is_some() && self.close_editor_after_save => {
-                self.save_requested = true;
-            }
-            KeyCode::Enter => self.commit_editor(),
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => self.commit_editor(),
+            KeyCode::Enter => self.edit_body(|editor| editor.push('\n')),
             KeyCode::Esc => {
                 self.editor = None;
                 self.close_editor_after_save = false;
                 self.interaction_error = None;
             }
-            KeyCode::Backspace => {
-                self.save_error = None;
-                self.close_editor_after_save = false;
-                if let Some(editor) = &mut self.editor {
-                    editor.backspace();
-                }
-            }
+            KeyCode::Backspace => self.edit_body(NoteEditor::backspace),
             KeyCode::Tab => {
-                self.save_error = None;
-                self.close_editor_after_save = false;
                 if let Some(editor) = &mut self.editor {
-                    editor.cycle_severity();
+                    editor.focus_next_field();
                 }
             }
             KeyCode::BackTab => {
-                self.save_error = None;
-                self.close_editor_after_save = false;
                 if let Some(editor) = &mut self.editor {
-                    editor.cycle_annotation_kind();
+                    editor.focus_previous_field();
                 }
             }
+            KeyCode::Up => self.cycle_editor_field(false),
+            KeyCode::Down => self.cycle_editor_field(true),
             KeyCode::Char(character) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
-                self.save_error = None;
-                self.close_editor_after_save = false;
-                if let Some(editor) = &mut self.editor {
-                    editor.push(character);
-                }
+                self.edit_body(|editor| editor.push(character));
             }
             _ => {}
+        }
+    }
+
+    fn edit_body(&mut self, edit: impl FnOnce(&mut NoteEditor)) {
+        let Some(editor) = &mut self.editor else {
+            return;
+        };
+        if editor.focused_field() != EditorField::Body {
+            return;
+        }
+        self.save_error = None;
+        self.close_editor_after_save = false;
+        edit(editor);
+    }
+
+    fn cycle_editor_field(&mut self, forward: bool) {
+        let Some(editor) = &mut self.editor else {
+            return;
+        };
+        self.save_error = None;
+        self.close_editor_after_save = false;
+        match (editor.focused_field(), forward) {
+            (EditorField::Severity, true) => editor.cycle_severity(),
+            (EditorField::Severity, false) => editor.cycle_severity_backward(),
+            (EditorField::Kind, true) => editor.cycle_annotation_kind(),
+            (EditorField::Kind, false) => editor.cycle_annotation_kind_backward(),
+            (EditorField::Body, _) => {}
         }
     }
 
@@ -1107,7 +1225,8 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    fn focus_live_note_direction(&mut self, forward: bool) -> Result<(), &'static str> {
+    /// Moves a live walkthrough to its next or previous visible finding.
+    pub fn move_walkthrough(&mut self, forward: bool) -> Result<(), &'static str> {
         let has_notes = matches!(&self.state, AppState::Ready(stream) if stream.visible_keys(0, stream.len()).any(|key| matches!(key, RowKey::Note { .. })));
         if !has_notes {
             return Err("not_found");
@@ -1825,8 +1944,10 @@ mod tests {
             app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
         }
         app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
-        app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
 
         assert!(app.save_requested());
         assert_eq!(app.review().unwrap().notes().len(), 1);
@@ -1841,7 +1962,7 @@ mod tests {
         app.finish_save(Err("disk full".to_owned()));
         assert_eq!(app.editor().unwrap().body(), "Needs a guard");
         assert_eq!(app.note_error(), Some("disk full"));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
         app.finish_save(Ok(()));
         assert!(app.editor().is_none());
 
@@ -1865,7 +1986,7 @@ mod tests {
         app.finish_save(Ok(()));
         app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Char('!'), KeyModifiers::NONE));
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
         app.finish_save(Ok(()));
         assert_eq!(app.review().unwrap().notes()[0].body(), "Needs a guard!");
 
@@ -1913,7 +2034,7 @@ mod tests {
         for character in "Mouse note".chars() {
             app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
         }
-        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
         app.finish_save(Ok(()));
         app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
 
@@ -1986,6 +2107,31 @@ mod tests {
             rows[note - 1],
             RowKey::UnifiedLine { line: 8, .. } | RowKey::SplitLine { new: Some(8), .. }
         ));
+    }
+
+    #[test]
+    fn editor_keeps_multiline_paste_and_classification_across_focus_changes() {
+        let review = review();
+        let mut app = App::review_with_options(&review, AppOptions::default());
+        for _ in 0..3 {
+            app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+        app.handle_paste("First line\nSecond line");
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.handle_paste(" ignored");
+
+        let editor = app.editor().unwrap();
+        assert_eq!(editor.body(), "First line\nSecond line\n");
+        assert_eq!(editor.severity(), NoteSeverity::Low);
+        assert_eq!(editor.annotation_kind(), mire_core::AnnotationKind::Defect);
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+        assert!(app.save_requested());
     }
 
     fn review() -> Review {

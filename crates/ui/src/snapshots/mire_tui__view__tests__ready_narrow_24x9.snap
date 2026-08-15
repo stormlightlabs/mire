@@ -1,13 +1,14 @@
 ---
 source: crates/ui/src/view.rs
+assertion_line: 600
 expression: "snapshot(App::ready(&changeset), 24, 9)"
 ---
- Mire review │ unified
- Files │ file.txt
-▌ M …xt│@@ -1,2 +1,2 @@
-  M …in│    1       -old
-       │          1 +new
-       │    2     2  con
-       │            \ No
-       │ image.bin
+ Mire review │ unified │
+ Files │ file.txt      █
+▌ M …xt│@@ -1,2 +1,2 @@█
+  M …in│    1       -ol█
+       │          1 +ne█
+       │    2     2  co█
+       │            \ N█
+       │ image.bin     █
  source  j/k move

@@ -3,7 +3,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
+use crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event,
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
 use mire_core::{Changeset, Review};
@@ -22,7 +25,17 @@ impl TerminalSession {
     fn enter() -> io::Result<Self> {
         enable_raw_mode()?;
         let mut output = stdout();
-        if let Err(error) = execute!(output, EnterAlternateScreen, EnableMouseCapture) {
+        if let Err(error) = execute!(
+            output,
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableBracketedPaste,
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES,
+            ),
+        ) {
             let _ = disable_raw_mode();
             return Err(error);
         }
@@ -30,7 +43,13 @@ impl TerminalSession {
             Ok(terminal) => Ok(Self { terminal }),
             Err(error) => {
                 let mut output = stdout();
-                let _ = execute!(output, DisableMouseCapture, LeaveAlternateScreen);
+                let _ = execute!(
+                    output,
+                    PopKeyboardEnhancementFlags,
+                    DisableBracketedPaste,
+                    DisableMouseCapture,
+                    LeaveAlternateScreen
+                );
                 let _ = disable_raw_mode();
                 Err(error)
             }
@@ -41,7 +60,13 @@ impl TerminalSession {
 impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), DisableMouseCapture, LeaveAlternateScreen);
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            PopKeyboardEnhancementFlags,
+            DisableBracketedPaste,
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
         let _ = self.terminal.show_cursor();
     }
 }
@@ -146,10 +171,9 @@ fn run_loop(
     let mut app = App::ready_with_options(changeset, options);
     let size = terminal.size()?;
     app.resize(size.width, size.height);
-    let mut walkthrough_active = false;
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        let _ = handle_terminal_event(&mut app, control, &mut walkthrough_active, false)?;
+        let _ = handle_terminal_event(&mut app, control, false)?;
     }
     Ok(())
 }
@@ -166,10 +190,10 @@ where
     let size = terminal.size()?;
     app.resize(size.width, size.height);
     let mut position = app.position();
-    let mut walkthrough_active = false;
+    app.set_watch_state(crate::WatchState::Watching, None);
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        let requested_reload = handle_terminal_event(&mut app, control, &mut walkthrough_active, true)?;
+        let requested_reload = handle_terminal_event(&mut app, control, true)?;
         match reload(requested_reload) {
             WatchUpdate::Unchanged => {}
             WatchUpdate::Loaded(updated) => {
@@ -182,16 +206,9 @@ where
                 let size = terminal.size()?;
                 app.resize(size.width, size.height);
                 app.restore_position(&position);
+                app.set_watch_state(crate::WatchState::Refreshed, None);
             }
-            WatchUpdate::Failed(error) => {
-                if matches!(app.state(), crate::AppState::Ready(_)) {
-                    position = app.position();
-                }
-                drop(app);
-                app = App::error_with_options(error, options.clone());
-                let size = terminal.size()?;
-                app.resize(size.width, size.height);
-            }
+            WatchUpdate::Failed(error) => app.set_watch_state(crate::WatchState::Failed, Some(error)),
             WatchUpdate::Fatal(error) => return Err(io::Error::other(error)),
         }
     }
@@ -210,10 +227,9 @@ where
     let mut app = App::review_with_options(review, options);
     let size = terminal.size()?;
     app.resize(size.width, size.height);
-    let mut walkthrough_active = false;
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        let _ = handle_terminal_event(&mut app, control, &mut walkthrough_active, false)?;
+        let _ = handle_terminal_event(&mut app, control, false)?;
         finish_requested_save(&mut app, save);
     }
     Ok(())
@@ -234,10 +250,10 @@ where
     app.resize(size.width, size.height);
     let mut position = app.position();
     let mut pending = WatchUpdate::Unchanged;
-    let mut walkthrough_active = false;
+    app.set_watch_state(crate::WatchState::Watching, None);
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        let requested_reload = handle_terminal_event(&mut app, control, &mut walkthrough_active, true)?;
+        let requested_reload = handle_terminal_event(&mut app, control, true)?;
         finish_requested_save(&mut app, save);
         if requested_reload || matches!(pending, WatchUpdate::Unchanged) {
             pending = reload(requested_reload);
@@ -257,39 +273,29 @@ where
                 let size = terminal.size()?;
                 app.resize(size.width, size.height);
                 app.restore_position(&position);
+                app.set_watch_state(crate::WatchState::Refreshed, None);
             }
-            WatchUpdate::Failed(error) => {
-                if matches!(app.state(), crate::AppState::Ready(_)) {
-                    position = app.position();
-                }
-                drop(app);
-                app = App::error_with_options(error, options.clone());
-                let size = terminal.size()?;
-                app.resize(size.width, size.height);
-            }
+            WatchUpdate::Failed(error) => app.set_watch_state(crate::WatchState::Failed, Some(error)),
             WatchUpdate::Fatal(error) => return Err(io::Error::other(error)),
         }
     }
     Ok(())
 }
 
-fn handle_terminal_event(
-    app: &mut App<'_>, control: Option<&LiveControl>, walkthrough_active: &mut bool, reload_available: bool,
-) -> io::Result<bool> {
+fn handle_terminal_event(app: &mut App<'_>, control: Option<&LiveControl>, reload_available: bool) -> io::Result<bool> {
     if event::poll(EVENT_POLL_INTERVAL)? {
         match event::read()? {
             Event::Key(key) => app.handle_key(key),
             Event::Mouse(mouse) => app.handle_mouse(mouse),
             Event::Resize(width, height) => app.resize(width, height),
-            Event::FocusGained | Event::FocusLost | Event::Paste(_) => {}
+            Event::Paste(text) => app.handle_paste(&text),
+            Event::FocusGained | Event::FocusLost => {}
         }
     }
-    Ok(handle_live_requests(app, control, walkthrough_active, reload_available))
+    Ok(handle_live_requests(app, control, reload_available))
 }
 
-fn handle_live_requests(
-    app: &mut App<'_>, control: Option<&LiveControl>, walkthrough_active: &mut bool, reload_available: bool,
-) -> bool {
+fn handle_live_requests(app: &mut App<'_>, control: Option<&LiveControl>, reload_available: bool) -> bool {
     let Some(control) = control else {
         return false;
     };
@@ -300,7 +306,7 @@ fn handle_live_requests(
             Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
         };
         let response = match request.action {
-            LiveAction::Inspect => LiveResponse::State(app.live_state(*walkthrough_active)),
+            LiveAction::Inspect => LiveResponse::State(app.live_state()),
             LiveAction::Reload if reload_available && !app.live_control_busy() => {
                 reload_requested = true;
                 LiveResponse::ReloadRequested
@@ -308,26 +314,25 @@ fn handle_live_requests(
             LiveAction::Reload if app.live_control_busy() => LiveResponse::Error { code: "interaction_busy" },
             LiveAction::Reload => LiveResponse::Error { code: "reload_unavailable" },
             LiveAction::Walkthrough { action } => match action {
-                WalkthroughAction::Start if app.live_control_busy() => LiveResponse::Error { code: "interaction_busy" },
-                WalkthroughAction::Start => {
-                    *walkthrough_active = true;
-                    LiveResponse::State(app.live_state(*walkthrough_active))
-                }
-                WalkthroughAction::Stop => {
-                    *walkthrough_active = false;
-                    LiveResponse::State(app.live_state(*walkthrough_active))
-                }
-                WalkthroughAction::Next => match app.apply_live_action(&LiveAction::Next) {
-                    Ok(()) => LiveResponse::State(app.live_state(*walkthrough_active)),
+                WalkthroughAction::Start => match app.start_walkthrough() {
+                    Ok(()) => LiveResponse::State(app.live_state()),
                     Err(code) => LiveResponse::Error { code },
                 },
-                WalkthroughAction::Previous => match app.apply_live_action(&LiveAction::Previous) {
-                    Ok(()) => LiveResponse::State(app.live_state(*walkthrough_active)),
+                WalkthroughAction::Stop => {
+                    app.stop_walkthrough();
+                    LiveResponse::State(app.live_state())
+                }
+                WalkthroughAction::Next => match app.move_walkthrough(true) {
+                    Ok(()) => LiveResponse::State(app.live_state()),
+                    Err(code) => LiveResponse::Error { code },
+                },
+                WalkthroughAction::Previous => match app.move_walkthrough(false) {
+                    Ok(()) => LiveResponse::State(app.live_state()),
                     Err(code) => LiveResponse::Error { code },
                 },
             },
             action => match app.apply_live_action(&action) {
-                Ok(()) => LiveResponse::State(app.live_state(*walkthrough_active)),
+                Ok(()) => LiveResponse::State(app.live_state()),
                 Err(code) => LiveResponse::Error { code },
             },
         };

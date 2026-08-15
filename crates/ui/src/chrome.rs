@@ -7,15 +7,16 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::app::{App, AppState, InteractionMode};
+use crate::app::{App, AppState, InteractionMode, WatchState};
 use crate::navigation::{Focus, help_entries};
 use crate::stream::ReviewStream;
 use crate::theme::Theme;
 
 const EDITOR_FOOTER: &[(&str, &str)] = &[
-    ("Enter", "save"),
-    ("Tab", "severity"),
-    ("Shift-Tab", "kind"),
+    ("Enter", "newline"),
+    ("Ctrl-Enter", "save"),
+    ("Tab", "field"),
+    ("↑↓", "change"),
     ("Esc", "cancel"),
 ];
 const FILTER_FOOTER: &[(&str, &str)] = &[("a/s/v/k/i", "filter"), ("c", "clear"), ("Esc", "close")];
@@ -52,6 +53,14 @@ pub fn render_title(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Th
     };
     let mut spans = vec![Span::styled(" Mire review", theme.accent)];
     push_title_segment(&mut spans, layout.to_owned(), theme.muted, theme);
+    if let Some(state) = app.watch_state() {
+        let (label, style) = match state {
+            WatchState::Watching => ("watching", theme.muted),
+            WatchState::Refreshed => ("refreshed", theme.accent),
+            WatchState::Failed => ("refresh failed", theme.error),
+        };
+        push_title_segment(&mut spans, label.to_owned(), style, theme);
+    }
     if let Some(error) = app.note_error() {
         push_title_segment(&mut spans, format!("unsaved: {error}"), theme.error, theme);
     } else if app.filter_visible() {
@@ -89,6 +98,25 @@ pub fn render_title(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Th
                 theme,
             );
         }
+    }
+    if let Some((file, files, row, rows)) = app.review_progress() {
+        push_title_segment(
+            &mut spans,
+            format!("file {file}/{files} · {row}/{rows}"),
+            theme.muted,
+            theme,
+        );
+    }
+    if let Some(open) = app.open_finding_count() {
+        push_title_segment(&mut spans, format!("{open} open"), theme.accent, theme);
+    }
+    if let Some((current, total)) = app.walkthrough_progress() {
+        push_title_segment(
+            &mut spans,
+            format!("walkthrough {current}/{total} · session stop"),
+            theme.accent,
+            theme,
+        );
     }
     frame.render_widget(Paragraph::new(Line::from(spans)).style(theme.title), area);
 }

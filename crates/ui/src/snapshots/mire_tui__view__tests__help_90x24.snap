@@ -1,8 +1,9 @@
 ---
 source: crates/ui/src/view.rs
+assertion_line: 610
 expression: "snapshot(app, 90, 24)"
 ---
- Mire review │ unified │ focus review │ context 3 │ wrap off
+ Mire review │ unified │ focus review │ context 3 │ wrap off │ file 1/2 · 1/8
  Files         1/2 │ Navigation and layout
 ▌ M file.txt  +1 -1│ q            quit
   M image.bin      │ ?            toggle help

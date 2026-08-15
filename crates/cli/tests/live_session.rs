@@ -132,6 +132,7 @@ fn live_session_inspects_and_navigates_an_open_review_without_writing_it() {
     let walkthrough = session_command(&directory.0, &["walkthrough", "start", &session]);
     assert_eq!(walkthrough["status"], "ok");
     assert_eq!(walkthrough["result"]["walkthrough_active"], true);
+    assert_eq!(walkthrough["result"]["walkthrough_progress"], serde_json::json!([1, 1]));
     let previous = session_command(&directory.0, &["walkthrough", "previous", &session]);
     assert_eq!(previous["status"], "ok");
     let stopped = session_command(&directory.0, &["walkthrough", "stop", &session]);

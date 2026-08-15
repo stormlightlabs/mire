@@ -22,6 +22,8 @@ pub struct PresentationState {
     pub review_revision: Option<u64>,
     /// Whether a local client has started a walkthrough.
     pub walkthrough_active: bool,
+    /// The current one-based finding position and total findings under walkthrough control.
+    pub walkthrough_progress: Option<(usize, usize)>,
 }
 
 /// The high-level state displayed by a Mire terminal session.

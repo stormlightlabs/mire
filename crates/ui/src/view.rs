@@ -85,16 +85,54 @@ pub fn render(frame: &mut Frame<'_>, app: &App<'_>, theme: &Theme) {
 fn render_stream(
     frame: &mut Frame<'_>, area: ratatui::layout::Rect, stream: &ReviewStream<'_>, app: &App<'_>, theme: &Theme,
 ) {
+    let show_scroll = stream.len() > usize::from(area.height) && area.width > 1;
+    let content_area = if show_scroll {
+        Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height)
+    } else {
+        area
+    };
     let visible = stream
-        .visible_keys(app.scroll(), usize::from(area.height))
+        .visible_keys(app.scroll(), usize::from(content_area.height))
         .enumerate()
         .map(|(offset, key)| {
             let selected = app.row_selected(app.scroll().saturating_add(offset));
-            let line = row_line(stream, key, area.width, selected, app, theme);
+            let line = row_line(stream, key, content_area.width, selected, app, theme);
             if selected { line.patch_style(theme.selected) } else { line }
         })
         .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(visible), area);
+    frame.render_widget(Paragraph::new(visible), content_area);
+    if show_scroll {
+        render_scroll_indicator(frame, area, stream.len(), app.scroll(), theme);
+    }
+}
+
+fn render_scroll_indicator(frame: &mut Frame<'_>, area: Rect, total_rows: usize, offset: usize, theme: &Theme) {
+    let height = usize::from(area.height);
+    let thumb_height = height
+        .saturating_mul(height)
+        .saturating_add(total_rows.saturating_sub(1))
+        .checked_div(total_rows)
+        .unwrap_or(1)
+        .clamp(1, height);
+    let travel = height.saturating_sub(thumb_height);
+    let maximum_offset = total_rows.saturating_sub(height);
+    let thumb_start = if maximum_offset == 0 {
+        0
+    } else {
+        offset.min(maximum_offset).saturating_mul(travel) / maximum_offset
+    };
+    let lines = (0..height)
+        .map(|row| {
+            Line::styled(
+                if row >= thumb_start && row < thumb_start + thumb_height { "█" } else { "│" },
+                theme.muted,
+            )
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(
+        Paragraph::new(lines),
+        Rect::new(area.right().saturating_sub(1), area.y, 1, area.height),
+    );
 }
 
 fn row_line<'a>(
@@ -160,16 +198,26 @@ fn render_note_editor(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &
         EditorTarget::New(selection) => format!("New note · {}", app.new_note_location(*selection)),
         EditorTarget::Existing(note_id) => format!("Edit {}", note_id.as_str()),
     };
-    let dialog = centered(area, 72, 7);
+    let body_label = if editor.focused_field() == crate::EditorField::Body { "› Body" } else { "  Body" };
+    let severity_label =
+        if editor.focused_field() == crate::EditorField::Severity { "› Severity" } else { "  Severity" };
+    let kind_label = if editor.focused_field() == crate::EditorField::Kind { "› Kind" } else { "  Kind" };
+    let body_lines = editor.body().lines().count().max(1);
+    let dialog = centered(
+        area,
+        72,
+        (body_lines.saturating_add(8)).min(usize::from(area.height)) as u16,
+    );
     frame.render_widget(Clear, dialog);
     let error = app
         .note_error()
         .map_or(String::new(), |error| format!("\nError: {error}"));
+    let cursor = if editor.focused_field() == crate::EditorField::Body { "█" } else { "" };
     let text = format!(
-        "{target}\nSeverity: {} · Kind: {}\n\n{}█{error}\n\nEnter save · Esc cancel · Tab severity · Shift-Tab kind",
+        "{target}\n{body_label}:\n{}{cursor}\n{severity_label}: {}\n{kind_label}: {}{error}\n\nEnter newline · Ctrl-Enter save · Tab focus · ↑↓ change field · Esc cancel",
+        editor.body(),
         editor.severity(),
         editor.annotation_kind(),
-        editor.body()
     );
     frame.render_widget(
         Paragraph::new(text)

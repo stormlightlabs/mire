@@ -117,12 +117,12 @@ a Herdr pane.
 
 Blocked by: None - can start immediately.
 
-- [ ] `Enter` inserts a newline and `Ctrl-Enter` saves the note.
-- [ ] Bracketed paste inserts the complete pasted text without interpreting it
+- [x] `Enter` inserts a newline and `Ctrl-Enter` saves the note.
+- [x] Bracketed paste inserts the complete pasted text without interpreting it
       as key commands.
-- [ ] `Tab` and `Shift-Tab` move focus among the body, severity, and kind fields;
+- [x] `Tab` and `Shift-Tab` move focus among the body, severity, and kind fields;
       field controls change only the focused value.
-- [ ] Editing, validation failures, retry, and cancellation preserve the user's
+- [x] Editing, validation failures, retry, and cancellation preserve the user's
       full text and classification choices.
 
 Verification:
@@ -138,12 +138,12 @@ Paste a multiline comment and edit every field in a Herdr pane.
 
 Blocked by: None - can start immediately.
 
-- [ ] The review stream shows a proportional scroll indicator and a compact
+- [x] The review stream shows a proportional scroll indicator and a compact
       position summary for the current file and overall review.
-- [ ] Durable reviews show the number of open findings.
-- [ ] Watch mode distinguishes watching, successful refresh, and refresh failure
+- [x] Durable reviews show the number of open findings.
+- [x] Watch mode distinguishes watching, successful refresh, and refresh failure
       without discarding the preserved review position.
-- [ ] Live walkthroughs show that they control navigation, current walkthrough
+- [x] Live walkthroughs show that they control navigation, current walkthrough
       progress, and the action that returns control to the user.
 
 Verification:

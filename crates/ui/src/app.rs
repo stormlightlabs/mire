@@ -1,7 +1,11 @@
 use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use mire_core::{AnchorSide, Author, Changeset, FileContent, NoteId, NoteStatus, Provenance, Review, ReviewNote};
+use mire_core::{
+    AnchorSide, Author, Changeset, FileContent, FileStatus, Fingerprint, NoteId, NoteSeverity, NoteStatus, Provenance,
+    Review, ReviewNote,
+};
 use ratatui::layout::{Position, Rect};
 
 use crate::layout::UiAreas;
@@ -9,7 +13,7 @@ use crate::live::{LiveAction, PresentationKind, PresentationState};
 use crate::navigation::{Action, Focus, action_for};
 use crate::note_filter::NoteFilter;
 use crate::notes::{EditorField, EditorTarget, LineSelection, NoteEditor};
-use crate::stream::{LayoutMode, ReviewStream, RowAnchor, RowKey};
+use crate::stream::{CollapseState, LayoutMode, ReviewStream, RowAnchor, RowKey};
 use crate::syntax::SyntaxCache;
 use crate::theme::ThemeFamily;
 
@@ -40,6 +44,8 @@ pub enum InteractionMode {
     Filter,
     /// A search query is being entered.
     Search,
+    /// A changed-file picker is filtering and selecting files.
+    FilePicker,
     /// A source range is being selected for a new finding.
     RangeSelection,
     /// The keyboard reference is visible.
@@ -70,6 +76,8 @@ pub enum GutterMark {
 #[derive(Clone, Debug)]
 /// Presentation state retained while watched content is unavailable or replaced.
 pub struct AppPosition {
+    collapsed_files: BTreeSet<Vec<u8>>,
+    collapsed_hunks: BTreeSet<CollapsedHunk>,
     context_lines: usize,
     focus: Focus,
     help_visible: bool,
@@ -95,8 +103,46 @@ pub struct AppOptions {
     pub human_author: Option<Author>,
 }
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct CollapsedHunk {
+    path: Vec<u8>,
+    fingerprint: Fingerprint,
+}
+
+#[derive(Clone, Debug, Default)]
+struct FilePicker {
+    query: String,
+    selected: usize,
+    offset: usize,
+}
+
+/// Counts the review findings anchored to one changed file.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct FileFindingSummary {
+    /// Findings that still need a decision or source change.
+    pub open: usize,
+    /// Findings with a non-open disposition.
+    pub completed: usize,
+    /// The most severe open finding, if one is present.
+    pub highest_open_severity: Option<NoteSeverity>,
+}
+
+/// A changed file shown by the keyboard file picker.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FilePickerEntry {
+    /// Stable index in the current changeset.
+    pub file: usize,
+    /// Lossy display text for the repository-relative changed path.
+    pub path: String,
+    /// The normalized change status.
+    pub status: FileStatus,
+    /// Added and deleted line counts, when the file is textual.
+    pub changes: Option<(usize, usize)>,
+    /// Review progress for findings anchored to this file.
+    pub findings: FileFindingSummary,
+}
+
 /// The deterministic content state shown by the review application.
-#[derive(Debug)]
 pub enum AppState<'a> {
     /// The changeset is being prepared for display.
     Loading,
@@ -126,6 +172,9 @@ pub struct App<'a> {
     search_query: String,
     search_matches: Vec<RowAnchor>,
     search_match: Option<usize>,
+    file_picker: Option<FilePicker>,
+    collapsed_files: BTreeSet<Vec<u8>>,
+    collapsed_hunks: BTreeSet<CollapsedHunk>,
     context_lines: usize,
     wrap_lines: bool,
     review: Option<Review>,
@@ -231,6 +280,107 @@ impl<'a> App<'a> {
         self.focus
     }
 
+    /// Reports whether a file's source rows are collapsed.
+    pub fn file_collapsed(&self, file: usize) -> bool {
+        let AppState::Ready(stream) = &self.state else {
+            return false;
+        };
+        file_path_bytes(stream.file(file)).is_some_and(|path| self.collapsed_files.contains(&path))
+    }
+
+    /// Reports whether a hunk's source rows are collapsed.
+    pub fn hunk_collapsed(&self, file: usize, hunk: usize) -> bool {
+        let AppState::Ready(stream) = &self.state else {
+            return false;
+        };
+        let Some(path) = file_path_bytes(stream.file(file)) else {
+            return false;
+        };
+        self.collapsed_hunks
+            .contains(&CollapsedHunk { path, fingerprint: stream.hunk(file, hunk).fingerprint() })
+    }
+
+    /// Returns the number of source rows hidden by a collapsed file.
+    pub fn collapsed_file_line_count(&self, file: usize) -> usize {
+        let AppState::Ready(stream) = &self.state else {
+            return 0;
+        };
+        hidden_file_line_count(stream.file(file))
+    }
+
+    /// Returns the number of source rows hidden by a collapsed hunk.
+    pub fn collapsed_hunk_line_count(&self, file: usize, hunk: usize) -> usize {
+        let AppState::Ready(stream) = &self.state else {
+            return 0;
+        };
+        stream.hunk(file, hunk).lines().len()
+    }
+
+    /// Returns aggregate finding state for one changed file.
+    pub fn file_finding_summary(&self, file: usize) -> FileFindingSummary {
+        self.file_finding_summaries().get(file).copied().unwrap_or_default()
+    }
+
+    /// Reports whether the keyboard file picker is open.
+    pub const fn file_picker_visible(&self) -> bool {
+        self.file_picker.is_some()
+    }
+
+    /// Returns the current incremental file-picker filter.
+    pub fn file_picker_query(&self) -> Option<&str> {
+        self.file_picker.as_ref().map(|picker| picker.query.as_str())
+    }
+
+    /// Returns the selected result index in the filtered file picker.
+    pub fn file_picker_selected(&self) -> Option<usize> {
+        self.file_picker.as_ref().map(|picker| picker.selected)
+    }
+
+    /// Returns the first visible result index in the filtered file picker.
+    pub fn file_picker_offset(&self) -> Option<usize> {
+        self.file_picker.as_ref().map(|picker| picker.offset)
+    }
+
+    /// Returns matching changed files and their review progress for the file picker.
+    pub fn file_picker_entries(&self) -> Vec<FilePickerEntry> {
+        let Some(picker) = &self.file_picker else {
+            return Vec::new();
+        };
+        let AppState::Ready(stream) = &self.state else {
+            return Vec::new();
+        };
+        let summaries = self.file_finding_summaries();
+        stream
+            .changeset()
+            .files()
+            .iter()
+            .enumerate()
+            .filter_map(|(file, diff)| {
+                let path = file_path_display(diff);
+                contains_query(&path, &picker.query).then_some(FilePickerEntry {
+                    file,
+                    path,
+                    status: diff.status(),
+                    changes: file_change_counts(diff),
+                    findings: summaries.get(file).copied().unwrap_or_default(),
+                })
+            })
+            .collect()
+    }
+
+    /// Returns the screen area occupied by the file-picker dialog.
+    pub fn file_picker_area(&self) -> Rect {
+        let area = self.areas().body;
+        let width = area.width.clamp(1, 80);
+        let height = area.height.clamp(1, 16);
+        Rect::new(
+            area.x + area.width.saturating_sub(width) / 2,
+            area.y + area.height.saturating_sub(height) / 2,
+            width,
+            height,
+        )
+    }
+
     /// Returns the requested unified, split, or automatic layout.
     pub const fn layout_mode(&self) -> LayoutMode {
         self.layout_mode
@@ -264,6 +414,8 @@ impl<'a> App<'a> {
             InteractionMode::Filter
         } else if self.search_input {
             InteractionMode::Search
+        } else if self.file_picker.is_some() {
+            InteractionMode::FilePicker
         } else if self.line_selection.is_some() {
             InteractionMode::RangeSelection
         } else if self.help_visible {
@@ -610,6 +762,8 @@ impl<'a> App<'a> {
             _ => None,
         };
         AppPosition {
+            collapsed_files: self.collapsed_files.clone(),
+            collapsed_hunks: self.collapsed_hunks.clone(),
             context_lines: self.context_lines,
             focus: self.focus,
             help_visible: self.help_visible,
@@ -627,6 +781,8 @@ impl<'a> App<'a> {
 
     /// Restores captured state by file identity and logical row offset when possible.
     pub fn restore_position(&mut self, position: &AppPosition) {
+        self.collapsed_files = position.collapsed_files.clone();
+        self.collapsed_hunks = position.collapsed_hunks.clone();
         self.context_lines = position.context_lines;
         self.focus = position.focus;
         self.help_visible = position.help_visible;
@@ -653,6 +809,7 @@ impl<'a> App<'a> {
         self.note_filter.set_file(remapped_filter);
         self.selected_file = selected_file;
         self.rebuild_stream(None);
+        self.prune_collapsed_state();
 
         let AppState::Ready(stream) = &self.state else {
             return;
@@ -728,6 +885,8 @@ impl<'a> App<'a> {
             self.handle_filter_key(key);
         } else if self.search_input {
             self.handle_search_key(key);
+        } else if self.file_picker.is_some() {
+            self.handle_file_picker_key(key);
         } else if self.handle_note_key(key) {
         } else if let Some(action) = action_for(key) {
             self.apply(action);
@@ -749,6 +908,10 @@ impl<'a> App<'a> {
 
     /// Applies mouse scrolling and selection using the same navigation state as keyboard input.
     pub fn handle_mouse(&mut self, mouse: MouseEvent) {
+        if self.file_picker.is_some() {
+            self.handle_file_picker_mouse(mouse);
+            return;
+        }
         let areas = self.areas();
         let position = Position::new(mouse.column, mouse.row);
         match mouse.kind {
@@ -761,7 +924,11 @@ impl<'a> App<'a> {
             }
             MouseEventKind::Down(MouseButton::Left) if areas.review.contains(position) => {
                 self.select_review_row(mouse.row.saturating_sub(areas.review.y));
-                self.apply_note_mouse_action(mouse.column.saturating_sub(areas.review.x));
+                if mouse.column.saturating_sub(areas.review.x) < 3 {
+                    self.toggle_current_structure();
+                } else {
+                    self.apply_note_mouse_action(mouse.column.saturating_sub(areas.review.x));
+                }
             }
             MouseEventKind::Down(MouseButton::Right) if areas.review.contains(position) => {
                 self.select_review_row(mouse.row.saturating_sub(areas.review.y));
@@ -793,6 +960,9 @@ impl<'a> App<'a> {
             search_query: String::new(),
             search_matches: Vec::new(),
             search_match: None,
+            file_picker: None,
+            collapsed_files: BTreeSet::new(),
+            collapsed_hunks: BTreeSet::new(),
             context_lines: DEFAULT_CONTEXT_LINES,
             wrap_lines: false,
             review: None,
@@ -831,6 +1001,10 @@ impl<'a> App<'a> {
             self.search_query.clear();
             self.search_matches.clear();
             self.search_match = None;
+            return true;
+        }
+        if self.file_picker.is_some() {
+            self.file_picker = None;
             return true;
         }
         if self.line_selection.is_some() {
@@ -876,6 +1050,8 @@ impl<'a> App<'a> {
             Action::PreviousFile => self.select_file_by(-1),
             Action::NextHunk => self.jump_hunk(true),
             Action::PreviousHunk => self.jump_hunk(false),
+            Action::ToggleCollapse => self.toggle_current_structure(),
+            Action::OpenFilePicker => self.open_file_picker(),
             Action::StartSearch => {
                 self.search_input = true;
                 self.search_query.clear();
@@ -909,6 +1085,136 @@ impl<'a> App<'a> {
         self.ensure_sidebar_selection_visible();
     }
 
+    fn toggle_current_structure(&mut self) {
+        if !matches!(self.focus, Focus::Review) {
+            return;
+        }
+        let structural = match &self.state {
+            AppState::Ready(stream) => stream.row(self.current_row_index(stream)).and_then(|row| match row {
+                RowKey::File { file } => {
+                    file_path_bytes(stream.file(file)).map(|path| (RowAnchor::File { file }, path, None))
+                }
+                RowKey::Hunk { file, hunk } => file_path_bytes(stream.file(file)).map(|path| {
+                    (
+                        RowAnchor::Hunk { file, hunk },
+                        path,
+                        Some(CollapsedHunk { path: Vec::new(), fingerprint: stream.hunk(file, hunk).fingerprint() }),
+                    )
+                }),
+                _ => None,
+            }),
+            AppState::Loading | AppState::Empty | AppState::Error(_) => None,
+        };
+        let Some((anchor, path, hunk)) = structural else {
+            return;
+        };
+        match hunk {
+            Some(mut hunk) => {
+                hunk.path = path;
+                if !self.collapsed_hunks.remove(&hunk) {
+                    self.collapsed_hunks.insert(hunk);
+                }
+            }
+            None => {
+                if !self.collapsed_files.remove(&path) {
+                    self.collapsed_files.insert(path);
+                }
+            }
+        }
+        self.rebuild_stream(Some(anchor));
+        self.clamp_scroll();
+        self.ensure_sidebar_selection_visible();
+    }
+
+    fn open_file_picker(&mut self) {
+        if matches!(&self.state, AppState::Ready(_)) {
+            self.file_picker = Some(FilePicker::default());
+        }
+    }
+
+    fn handle_file_picker_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Enter => self.select_file_picker_entry(),
+            KeyCode::Down | KeyCode::Char('j') => self.move_file_picker_selection(1),
+            KeyCode::Up | KeyCode::Char('k') => self.move_file_picker_selection(-1),
+            KeyCode::PageDown => self.move_file_picker_selection(self.file_picker_result_height() as isize),
+            KeyCode::PageUp => self.move_file_picker_selection(-(self.file_picker_result_height() as isize)),
+            KeyCode::Backspace => {
+                if let Some(picker) = &mut self.file_picker {
+                    picker.query.pop();
+                    picker.selected = 0;
+                    picker.offset = 0;
+                }
+            }
+            KeyCode::Char(character) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+                if let Some(picker) = &mut self.file_picker {
+                    picker.query.push(character);
+                    picker.selected = 0;
+                    picker.offset = 0;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_file_picker_mouse(&mut self, mouse: MouseEvent) {
+        let area = self.file_picker_area();
+        let position = Position::new(mouse.column, mouse.row);
+        if !area.contains(position) {
+            return;
+        }
+        match mouse.kind {
+            MouseEventKind::ScrollDown => self.move_file_picker_selection(1),
+            MouseEventKind::ScrollUp => self.move_file_picker_selection(-1),
+            MouseEventKind::Down(MouseButton::Left) => {
+                let first_result = area.y.saturating_add(4);
+                if mouse.row >= first_result && mouse.row < area.bottom().saturating_sub(1) {
+                    let offset = self.file_picker.as_ref().map_or(0, |picker| picker.offset);
+                    let selected = offset.saturating_add(usize::from(mouse.row.saturating_sub(first_result)));
+                    if selected < self.file_picker_entries().len() {
+                        if let Some(picker) = &mut self.file_picker {
+                            picker.selected = selected;
+                        }
+                        self.select_file_picker_entry();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn move_file_picker_selection(&mut self, delta: isize) {
+        let count = self.file_picker_entries().len();
+        let height = self.file_picker_result_height();
+        let Some(picker) = &mut self.file_picker else {
+            return;
+        };
+        picker.selected = picker
+            .selected
+            .saturating_add_signed(delta)
+            .min(count.saturating_sub(1));
+        if picker.selected < picker.offset {
+            picker.offset = picker.selected;
+        } else if picker.selected >= picker.offset.saturating_add(height) {
+            picker.offset = picker.selected.saturating_add(1).saturating_sub(height);
+        }
+    }
+
+    fn select_file_picker_entry(&mut self) {
+        let selected = self.file_picker.as_ref().map_or(0, |picker| picker.selected);
+        let Some(entry) = self.file_picker_entries().get(selected).cloned() else {
+            return;
+        };
+        self.file_picker = None;
+        self.selected_file = entry.file;
+        self.focus = Focus::Review;
+        self.jump_to_selected_file();
+    }
+
+    fn file_picker_result_height(&self) -> usize {
+        usize::from(self.file_picker_area().height.saturating_sub(5)).max(1)
+    }
+
     fn handle_note_key(&mut self, key: KeyEvent) -> bool {
         if self.review.is_none() {
             return false;
@@ -918,6 +1224,9 @@ impl<'a> App<'a> {
                 self.save_requested = true;
             }
             return true;
+        }
+        if key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
+            return false;
         }
         match key.code {
             KeyCode::Char('v') => self.toggle_line_selection(),
@@ -1333,20 +1642,30 @@ impl<'a> App<'a> {
             return;
         };
         let changeset = stream.changeset();
+        let (collapsed_files, collapsed_hunks) =
+            collapsed_row_indices(changeset, &self.collapsed_files, &self.collapsed_hunks);
         let layout = self.layout_mode.resolve(self.areas().review.width);
         let wrap_width = self.wrap_lines.then_some(self.areas().review.width);
         let replacement = if let Some(review) = &self.review {
             let visible = visible_note_indices(review, self.note_filter);
-            ReviewStream::with_notes_presentation(
+            ReviewStream::with_notes_presentation_collapsed(
                 changeset,
                 review.notes(),
                 &visible,
                 layout,
                 self.context_lines,
                 wrap_width,
+                CollapseState::new(&collapsed_files, &collapsed_hunks),
             )
         } else {
-            ReviewStream::with_presentation(changeset, layout, self.context_lines, wrap_width)
+            ReviewStream::with_presentation_collapsed(
+                changeset,
+                layout,
+                self.context_lines,
+                wrap_width,
+                &collapsed_files,
+                &collapsed_hunks,
+            )
         };
         let target = anchor
             .and_then(|value| replacement.index_of_anchor(value))
@@ -1466,7 +1785,11 @@ impl<'a> App<'a> {
             self.ensure_sidebar_selection_visible();
         } else {
             let selected_file = anchor_file(anchor);
-            self.set_context(MAX_CONTEXT_LINES);
+            if self.expand_for_anchor(anchor) {
+                self.rebuild_stream(Some(anchor));
+            } else {
+                self.set_context(MAX_CONTEXT_LINES);
+            }
             let AppState::Ready(stream) = &self.state else {
                 return;
             };
@@ -1618,6 +1941,178 @@ impl<'a> App<'a> {
         } else if self.selected_file >= self.sidebar_offset.saturating_add(height) {
             self.sidebar_offset = self.selected_file.saturating_add(1).saturating_sub(height);
         }
+    }
+
+    fn expand_for_anchor(&mut self, anchor: RowAnchor) -> bool {
+        let (file, hunk) = match anchor {
+            RowAnchor::File { file } | RowAnchor::Binary { file } => (file, None),
+            RowAnchor::Hunk { file, hunk }
+            | RowAnchor::Line { file, hunk, .. }
+            | RowAnchor::MissingNewline { file, hunk, .. } => (file, Some(hunk)),
+            RowAnchor::Note { .. } => return false,
+        };
+        let collapsed = match &self.state {
+            AppState::Ready(stream) => file_path_bytes(stream.file(file)).map(|path| {
+                let hunk = hunk.map(|hunk| CollapsedHunk {
+                    path: path.clone(),
+                    fingerprint: stream.hunk(file, hunk).fingerprint(),
+                });
+                (path, hunk)
+            }),
+            AppState::Loading | AppState::Empty | AppState::Error(_) => None,
+        };
+        let Some((path, hunk)) = collapsed else {
+            return false;
+        };
+        let mut changed = self.collapsed_files.remove(&path);
+        if let Some(hunk) = hunk {
+            changed |= self.collapsed_hunks.remove(&hunk);
+        }
+        changed
+    }
+
+    fn prune_collapsed_state(&mut self) {
+        let AppState::Ready(stream) = &self.state else {
+            self.collapsed_files.clear();
+            self.collapsed_hunks.clear();
+            return;
+        };
+        let file_paths = stream
+            .changeset()
+            .files()
+            .iter()
+            .filter_map(file_path_bytes)
+            .collect::<BTreeSet<_>>();
+        let hunks = stream
+            .changeset()
+            .files()
+            .iter()
+            .flat_map(|diff| {
+                let path = file_path_bytes(diff);
+                match diff.content() {
+                    FileContent::Text { hunks } => hunks
+                        .iter()
+                        .filter_map(move |hunk| {
+                            path.clone()
+                                .map(|path| CollapsedHunk { path, fingerprint: hunk.fingerprint() })
+                        })
+                        .collect::<Vec<_>>(),
+                    FileContent::Binary => Vec::new(),
+                }
+            })
+            .collect::<BTreeSet<_>>();
+        self.collapsed_files.retain(|path| file_paths.contains(path));
+        self.collapsed_hunks.retain(|hunk| hunks.contains(hunk));
+    }
+
+    fn file_finding_summaries(&self) -> Vec<FileFindingSummary> {
+        let AppState::Ready(stream) = &self.state else {
+            return Vec::new();
+        };
+        let mut files = BTreeMap::new();
+        for (index, file) in stream.changeset().files().iter().enumerate() {
+            if let Some(side) = file.old_side() {
+                files.insert(side.path.as_bytes().to_vec(), index);
+            }
+            if let Some(side) = file.new_side() {
+                files.insert(side.path.as_bytes().to_vec(), index);
+            }
+        }
+        let mut summaries = vec![FileFindingSummary::default(); stream.changeset().files().len()];
+        for note in self.review.as_ref().into_iter().flat_map(|review| review.notes()) {
+            let anchor = note.current_anchor().unwrap_or_else(|| note.anchor());
+            let Some(summary) = files
+                .get(anchor.path().as_bytes())
+                .and_then(|file| summaries.get_mut(*file))
+            else {
+                continue;
+            };
+            if note.status() == NoteStatus::Open {
+                summary.open += 1;
+                if summary
+                    .highest_open_severity
+                    .is_none_or(|current| severity_rank(note.severity()) > severity_rank(current))
+                {
+                    summary.highest_open_severity = Some(note.severity());
+                }
+            } else {
+                summary.completed += 1;
+            }
+        }
+        summaries
+    }
+}
+
+fn collapsed_row_indices(
+    changeset: &Changeset, collapsed_files: &BTreeSet<Vec<u8>>, collapsed_hunks: &BTreeSet<CollapsedHunk>,
+) -> (BTreeSet<usize>, BTreeSet<(usize, usize)>) {
+    let mut files = BTreeSet::new();
+    let mut hunks = BTreeSet::new();
+    for (file_index, file) in changeset.files().iter().enumerate() {
+        let Some(path) = file_path_bytes(file) else {
+            continue;
+        };
+        if collapsed_files.contains(&path) {
+            files.insert(file_index);
+            continue;
+        }
+        let FileContent::Text { hunks: source_hunks } = file.content() else {
+            continue;
+        };
+        for (hunk_index, hunk) in source_hunks.iter().enumerate() {
+            if collapsed_hunks.contains(&CollapsedHunk { path: path.clone(), fingerprint: hunk.fingerprint() }) {
+                hunks.insert((file_index, hunk_index));
+            }
+        }
+    }
+    (files, hunks)
+}
+
+fn hidden_file_line_count(file: &mire_core::FileDiff) -> usize {
+    match file.content() {
+        FileContent::Text { hunks } => hunks.iter().map(|hunk| hunk.lines().len()).sum(),
+        FileContent::Binary => 1,
+    }
+}
+
+fn file_path_display(file: &mire_core::FileDiff) -> String {
+    let old = file
+        .old_side()
+        .map(|side| String::from_utf8_lossy(side.path.as_bytes()));
+    let new = file
+        .new_side()
+        .map(|side| String::from_utf8_lossy(side.path.as_bytes()));
+    match (old, new) {
+        (Some(old), Some(new)) if old != new => format!("{old} -> {new}"),
+        (_, Some(new)) => new.into_owned(),
+        (Some(old), None) => old.into_owned(),
+        (None, None) => "<unknown>".to_owned(),
+    }
+}
+
+fn file_change_counts(file: &mire_core::FileDiff) -> Option<(usize, usize)> {
+    let FileContent::Text { hunks } = file.content() else {
+        return None;
+    };
+    let mut additions = 0;
+    let mut deletions = 0;
+    for line in hunks.iter().flat_map(|hunk| hunk.lines()) {
+        match line.kind() {
+            mire_core::LineKind::Addition => additions += 1,
+            mire_core::LineKind::Deletion => deletions += 1,
+            mire_core::LineKind::Context => {}
+        }
+    }
+    Some((additions, deletions))
+}
+
+const fn severity_rank(severity: NoteSeverity) -> u8 {
+    match severity {
+        NoteSeverity::Note => 0,
+        NoteSeverity::Low => 1,
+        NoteSeverity::Medium => 2,
+        NoteSeverity::High => 3,
+        NoteSeverity::Critical => 4,
     }
 }
 
@@ -1844,6 +2339,81 @@ mod tests {
         assert_eq!(keyboard.selected_file(), 1);
         assert_eq!(mouse.selected_file(), keyboard.selected_file());
         assert_eq!(mouse.scroll(), keyboard.scroll());
+    }
+
+    #[test]
+    fn collapse_controls_hide_source_rows_and_restore_by_file_and_hunk_identity() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let mut app = App::ready(&changeset);
+        app.resize(80, 6);
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(app.file_collapsed(0));
+        let AppState::Ready(stream) = app.state() else {
+            panic!("review stream is ready");
+        };
+        assert!(
+            !stream
+                .visible_keys(0, stream.len())
+                .any(|row| matches!(row, RowKey::Hunk { file: 0, .. }))
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert!(!app.file_collapsed(0));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+        assert!(app.hunk_collapsed(0, 0));
+        let position = app.position();
+
+        let mut reloaded = App::ready(&changeset);
+        reloaded.resize(120, 12);
+        reloaded.restore_position(&position);
+        assert!(reloaded.hunk_collapsed(0, 0));
+        let AppState::Ready(stream) = reloaded.state() else {
+            panic!("reloaded review stream is ready");
+        };
+        assert!(!stream.visible_keys(0, stream.len()).any(|row| matches!(
+            row,
+            RowKey::UnifiedLine { file: 0, hunk: 0, .. } | RowKey::SplitLine { file: 0, hunk: 0, .. }
+        )));
+
+        let mut mouse = App::ready(&changeset);
+        let review = mouse.areas().review;
+        mouse.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: review.x,
+            row: review.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(mouse.file_collapsed(0));
+    }
+
+    #[test]
+    fn file_picker_filters_incrementally_and_jumps_with_keyboard_and_mouse() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let mut app = App::ready(&changeset);
+        app.resize(80, 16);
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        assert!(app.file_picker_visible());
+        for character in "second".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
+        }
+        assert_eq!(app.file_picker_entries().len(), 1);
+        assert_eq!(app.file_picker_entries()[0].file, 1);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(!app.file_picker_visible());
+        assert_eq!(app.selected_file(), 1);
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        let picker = app.file_picker_area();
+        app.handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: picker.x.saturating_add(1),
+            row: picker.y.saturating_add(4),
+            modifiers: KeyModifiers::NONE,
+        });
+        assert!(!app.file_picker_visible());
+        assert_eq!(app.selected_file(), 0);
     }
 
     #[test]

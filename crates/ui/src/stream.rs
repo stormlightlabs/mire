@@ -126,6 +126,20 @@ impl Default for StreamOptions {
     }
 }
 
+/// Structural rows omitted from the visible review stream.
+#[derive(Clone, Copy, Debug)]
+pub struct CollapseState<'a> {
+    collapsed_files: &'a BTreeSet<usize>,
+    collapsed_hunks: &'a BTreeSet<(usize, usize)>,
+}
+
+impl<'a> CollapseState<'a> {
+    /// Creates collapse state from file and hunk stream coordinates.
+    pub const fn new(collapsed_files: &'a BTreeSet<usize>, collapsed_hunks: &'a BTreeSet<(usize, usize)>) -> Self {
+        Self { collapsed_files, collapsed_hunks }
+    }
+}
+
 impl LayoutMode {
     /// Resolves automatic layout from the width available to diff content.
     pub const fn resolve(self, content_width: u16) -> ResolvedLayout {
@@ -215,7 +229,29 @@ impl<'a> ReviewStream<'a> {
     pub fn with_presentation(
         changeset: &'a Changeset, layout: ResolvedLayout, context_lines: usize, wrap_width: Option<u16>,
     ) -> Self {
-        Self::with_options(changeset, layout, StreamOptions { context_lines, wrap_width })
+        Self::with_presentation_collapsed(
+            changeset,
+            layout,
+            context_lines,
+            wrap_width,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        )
+    }
+
+    /// Indexes code with file and hunk disclosure state applied before rendering.
+    pub fn with_presentation_collapsed(
+        changeset: &'a Changeset, layout: ResolvedLayout, context_lines: usize, wrap_width: Option<u16>,
+        collapsed_files: &BTreeSet<usize>, collapsed_hunks: &BTreeSet<(usize, usize)>,
+    ) -> Self {
+        Self::with_options_and_expanded_hunks(
+            changeset,
+            layout,
+            StreamOptions { context_lines, wrap_width },
+            &BTreeSet::new(),
+            collapsed_files,
+            collapsed_hunks,
+        )
     }
 
     /// Indexes code and the selected review notes as one adjacent stream.
@@ -223,33 +259,81 @@ impl<'a> ReviewStream<'a> {
         changeset: &'a Changeset, notes: &[ReviewNote], visible_notes: &[usize], layout: ResolvedLayout,
         context_lines: usize, wrap_width: Option<u16>,
     ) -> Self {
+        Self::with_notes_presentation_collapsed(
+            changeset,
+            notes,
+            visible_notes,
+            layout,
+            context_lines,
+            wrap_width,
+            CollapseState::new(&BTreeSet::new(), &BTreeSet::new()),
+        )
+    }
+
+    /// Indexes review notes while retaining collapsed file and hunk boundaries.
+    pub fn with_notes_presentation_collapsed(
+        changeset: &'a Changeset, notes: &[ReviewNote], visible_notes: &[usize], layout: ResolvedLayout,
+        context_lines: usize, wrap_width: Option<u16>, collapse: CollapseState<'_>,
+    ) -> Self {
         let expanded_hunks = note_hunks(changeset, notes, visible_notes);
         let mut stream = Self::with_options_and_expanded_hunks(
             changeset,
             layout,
             StreamOptions { context_lines, wrap_width },
             &expanded_hunks,
+            collapse.collapsed_files,
+            collapse.collapsed_hunks,
         );
-        attach_notes(&mut stream.rows, changeset, notes, visible_notes);
+        let rendered_notes = visible_notes
+            .iter()
+            .copied()
+            .filter(|note| {
+                !note_is_collapsed(
+                    changeset,
+                    notes,
+                    *note,
+                    collapse.collapsed_files,
+                    collapse.collapsed_hunks,
+                )
+            })
+            .collect::<Vec<_>>();
+        attach_notes(&mut stream.rows, changeset, notes, &rendered_notes);
         stream
     }
 
     fn with_options(changeset: &'a Changeset, layout: ResolvedLayout, options: StreamOptions) -> Self {
-        Self::with_options_and_expanded_hunks(changeset, layout, options, &BTreeSet::new())
+        Self::with_options_and_expanded_hunks(
+            changeset,
+            layout,
+            options,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        )
     }
 
     fn with_options_and_expanded_hunks(
         changeset: &'a Changeset, layout: ResolvedLayout, options: StreamOptions,
-        expanded_hunks: &BTreeSet<(usize, usize)>,
+        expanded_hunks: &BTreeSet<(usize, usize)>, collapsed_files: &BTreeSet<usize>,
+        collapsed_hunks: &BTreeSet<(usize, usize)>,
     ) -> Self {
         let mut rows = Vec::new();
         for (file_index, file) in changeset.files().iter().enumerate() {
             rows.push(RowKey::File { file: file_index });
+            if collapsed_files.contains(&file_index) {
+                continue;
+            }
             match file.content() {
                 FileContent::Binary => rows.push(RowKey::Binary { file: file_index }),
-                FileContent::Text { hunks } => {
-                    index_hunks(&mut rows, file_index, hunks, layout, options, expanded_hunks)
-                }
+                FileContent::Text { hunks } => index_hunks(
+                    &mut rows,
+                    file_index,
+                    hunks,
+                    layout,
+                    options,
+                    expanded_hunks,
+                    collapsed_hunks,
+                ),
             }
         }
         Self { changeset, layout, rows }
@@ -449,10 +533,13 @@ fn note_placement(path: &[u8], side: AnchorSide, hunk: &Hunk, line: u64) -> Note
 
 fn index_hunks(
     rows: &mut Vec<RowKey>, file: usize, hunks: &[Hunk], layout: ResolvedLayout, options: StreamOptions,
-    expanded_hunks: &BTreeSet<(usize, usize)>,
+    expanded_hunks: &BTreeSet<(usize, usize)>, collapsed_hunks: &BTreeSet<(usize, usize)>,
 ) {
     for (hunk_index, hunk) in hunks.iter().enumerate() {
         rows.push(RowKey::Hunk { file, hunk: hunk_index });
+        if collapsed_hunks.contains(&(file, hunk_index)) {
+            continue;
+        }
         let options = if expanded_hunks.contains(&(file, hunk_index)) {
             StreamOptions { context_lines: usize::MAX, ..options }
         } else {
@@ -463,6 +550,32 @@ fn index_hunks(
             ResolvedLayout::Split => index_split_hunk(rows, file, hunk_index, hunk, options),
         }
     }
+}
+
+fn note_is_collapsed(
+    changeset: &Changeset, notes: &[ReviewNote], note_index: usize, collapsed_files: &BTreeSet<usize>,
+    collapsed_hunks: &BTreeSet<(usize, usize)>,
+) -> bool {
+    let Some(note) = notes.get(note_index) else {
+        return true;
+    };
+    let anchor = note.current_anchor().unwrap_or_else(|| note.anchor());
+    changeset.files().iter().enumerate().any(|(file_index, file)| {
+        let path_matches = file.old_side().is_some_and(|side| side.path == *anchor.path())
+            || file.new_side().is_some_and(|side| side.path == *anchor.path());
+        if !path_matches {
+            return false;
+        }
+        if collapsed_files.contains(&file_index) {
+            return true;
+        }
+        let FileContent::Text { hunks } = file.content() else {
+            return false;
+        };
+        hunks.iter().enumerate().any(|(hunk_index, hunk)| {
+            hunk.fingerprint() == anchor.hunk_fingerprint() && collapsed_hunks.contains(&(file_index, hunk_index))
+        })
+    })
 }
 
 fn note_hunks(changeset: &Changeset, notes: &[ReviewNote], visible_notes: &[usize]) -> BTreeSet<(usize, usize)> {

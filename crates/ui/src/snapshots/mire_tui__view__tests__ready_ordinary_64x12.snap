@@ -1,16 +1,15 @@
 ---
 source: crates/ui/src/view.rs
-assertion_line: 601
 expression: "snapshot(App::ready(&changeset), 64, 12)"
 ---
  Mire review │ unified │ focus review │ context 3 │ file 1/2 · 1
- Files      1/2 │ file.txt                       modified +1 -1
+ Files      1/2 │ ▾ file.txt                      modified +1 -1
 ▌ M file.txt    │ ▾ @@ -1,2 +1,2 @@ heading
   M image.bin   │    1       -old
                 │          1 +new
                 │    2     2  context
                 │            \ No newline at end of both files
-                │ image.bin                            modified
+                │ ▾ image.bin                           modified
                 │     Binary files differ
                 │
                 │

@@ -21,6 +21,12 @@ const EDITOR_FOOTER: &[(&str, &str)] = &[
 ];
 const FILTER_FOOTER: &[(&str, &str)] = &[("a/s/v/k/i", "filter"), ("c", "clear"), ("Esc", "close")];
 const SEARCH_FOOTER: &[(&str, &str)] = &[("Enter", "find"), ("Esc", "cancel")];
+const FILE_PICKER_FOOTER: &[(&str, &str)] = &[
+    ("type", "filter"),
+    ("↑↓", "select"),
+    ("Enter", "jump"),
+    ("Esc", "close"),
+];
 const RANGE_FOOTER: &[(&str, &str)] = &[("j/k", "extend"), ("c", "note"), ("v / Esc", "cancel")];
 const HELP_FOOTER: &[(&str, &str)] = &[("? / Esc", "close"), ("q", "quit")];
 const REVIEW_FOOTER: &[(&str, &str)] = &[("?", "help"), ("q", "quit")];
@@ -147,6 +153,7 @@ fn footer_context(mode: InteractionMode) -> (&'static str, &'static [(&'static s
         InteractionMode::Editor => ("editor", EDITOR_FOOTER),
         InteractionMode::Filter => ("filter", FILTER_FOOTER),
         InteractionMode::Search => ("search", SEARCH_FOOTER),
+        InteractionMode::FilePicker => ("file jump", FILE_PICKER_FOOTER),
         InteractionMode::RangeSelection => ("range", RANGE_FOOTER),
         InteractionMode::Help => ("help", HELP_FOOTER),
         InteractionMode::Review => ("", REVIEW_FOOTER),
@@ -169,6 +176,7 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, stream: &ReviewStream<'
     for file in app.sidebar_offset()..end {
         lines.push(sidebar_file_line(
             stream.file(file),
+            app.file_finding_summary(file),
             area.width,
             file == app.selected_file(),
             theme,
@@ -298,22 +306,52 @@ fn sidebar_header(width: u16, position: usize, total: usize, theme: &Theme) -> L
     fit_line(spans, available, theme.panel)
 }
 
-fn sidebar_file_line(file: &FileDiff, width: u16, selected: bool, theme: &Theme) -> Line<'static> {
+fn sidebar_file_line(
+    file: &FileDiff, findings: crate::app::FileFindingSummary, width: u16, selected: bool, theme: &Theme,
+) -> Line<'static> {
     let available = usize::from(width);
-    let mut metadata = Vec::new();
+    let mut progress = Vec::new();
+    if findings.open > 0 {
+        progress.push(Span::styled(format!("!{}", findings.open), theme.error));
+    }
+    if findings.completed > 0 {
+        if !progress.is_empty() {
+            progress.push(Span::raw(" "));
+        }
+        progress.push(Span::styled(format!("✓{}", findings.completed), theme.muted));
+    }
+    let mut changes = Vec::new();
     if let Some((additions, deletions)) = diff_stats(file) {
         if additions > 0 {
-            metadata.push(Span::styled(format!("+{additions}"), theme.addition_meta));
+            changes.push(Span::styled(format!("+{additions}"), theme.addition_meta));
         }
         if deletions > 0 {
-            if !metadata.is_empty() {
-                metadata.push(Span::raw(" "));
+            if !changes.is_empty() {
+                changes.push(Span::raw(" "));
             }
-            metadata.push(Span::styled(format!("-{deletions}"), theme.deletion_meta));
+            changes.push(Span::styled(format!("-{deletions}"), theme.deletion_meta));
         }
     }
+    let mut metadata = progress.clone();
+    if let Some(severity) = findings.highest_open_severity
+        && available >= spans_width(&metadata).saturating_add(22)
+    {
+        metadata.push(Span::raw(" "));
+        metadata.push(Span::styled(severity.to_string(), theme.error));
+    }
+    if !changes.is_empty()
+        && available
+            >= spans_width(&metadata)
+                .saturating_add(spans_width(&changes))
+                .saturating_add(15)
+    {
+        if !metadata.is_empty() {
+            metadata.push(Span::raw(" "));
+        }
+        metadata.extend(changes);
+    }
     let metadata_width = spans_width(&metadata);
-    let show_metadata = metadata_width > 0 && available >= metadata_width.saturating_add(13);
+    let show_metadata = metadata_width > 0 && available >= metadata_width.saturating_add(10);
     if !show_metadata {
         metadata.clear();
     }

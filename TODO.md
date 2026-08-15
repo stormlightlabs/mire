@@ -160,11 +160,11 @@ Observe refresh and walkthrough transitions in a Herdr pane.
 
 Blocked by: None - can start immediately.
 
-- [ ] File and hunk disclosure glyphs reflect expanded and collapsed state.
-- [ ] `Enter`, `Space`, and the disclosure hit target toggle the structural row
+- [x] File and hunk disclosure glyphs reflect expanded and collapsed state.
+- [x] `Enter`, `Space`, and the disclosure hit target toggle the structural row
       under the cursor.
-- [ ] Collapsed rows report hidden lines and preserve anchored findings.
-- [ ] Navigation, search, filters, reload, and layout changes preserve collapse
+- [x] Collapsed rows report hidden lines and preserve anchored findings.
+- [x] Navigation, search, filters, reload, and layout changes preserve collapse
       state where the underlying file or hunk still exists.
 
 Verification:
@@ -180,12 +180,12 @@ review in a Herdr pane.
 
 Blocked by: None - can start immediately.
 
-- [ ] A keyboard-opened file picker filters changed paths incrementally and
+- [x] A keyboard-opened file picker filters changed paths incrementally and
       jumps to the selected file.
-- [ ] Picker results show file status, change counts, and open-finding counts.
-- [ ] Sidebar rows show open and completed finding counts, with the highest open
+- [x] Picker results show file status, change counts, and open-finding counts.
+- [x] Sidebar rows show open and completed finding counts, with the highest open
       severity visible when space permits.
-- [ ] The picker and sidebar remain usable with non-UTF-8 paths, large file
+- [x] The picker and sidebar remain usable with non-UTF-8 paths, large file
       counts, narrow terminals, and mouse input.
 
 Verification:

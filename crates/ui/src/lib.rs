@@ -17,12 +17,14 @@ use std::io;
 
 use mire_core::{Changeset, Review};
 
-pub use app::{App, AppOptions, AppState, GutterMark, InteractionMode, WatchState};
+pub use app::{
+    App, AppOptions, AppState, FileFindingSummary, FilePickerEntry, GutterMark, InteractionMode, WatchState,
+};
 pub use live::{
     LiveAction, LiveControl, LiveRequest, LiveResponse, PresentationKind, PresentationState, WalkthroughAction,
 };
 pub use notes::{EditorField, EditorTarget, LineSelection, NoteEditor};
-pub use stream::{LayoutMode, ReviewStream, RowKind};
+pub use stream::{CollapseState, LayoutMode, ReviewStream, RowKind};
 pub use theme::{ColorMode, ParseThemeFamilyError, Theme, ThemeFamily, ThemeVariant};
 pub use view::render;
 

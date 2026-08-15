@@ -1,11 +1,10 @@
 ---
 source: crates/ui/src/view.rs
-assertion_line: 610
 expression: "snapshot(app, 90, 24)"
 ---
  Mire review │ unified │ focus review │ context 3 │ wrap off │ file 1/2 · 1/8
  Files         1/2 │ Navigation and layout
-▌ M file.txt  +1 -1│ q            quit
+▌ M file.txt       │ q            quit
   M image.bin      │ ?            toggle help
                    │ Tab          switch sidebar/review focus
                    │ b            toggle sidebar
@@ -19,11 +18,11 @@ expression: "snapshot(app, 90, 24)"
                    │ [            previous file
                    │ }            next hunk
                    │ {            previous hunk
+                   │ Enter / Space collapse or expand file/hunk
+                   │ Ctrl-P       jump to file
                    │ /            search
                    │ n            next search match
                    │ N            previous search match
                    │ +            show more context
                    │ -            show less context
-                   │ w            toggle line wrapping
-                   │ 1            unified layout
  help  ? / Esc close  q quit

@@ -76,6 +76,9 @@ pub fn render(frame: &mut Frame<'_>, app: &App<'_>, theme: &Theme) {
     if app.filter_visible() {
         render_filter_dialog(frame, areas.review, app, theme);
     }
+    if app.file_picker_visible() {
+        render_file_picker(frame, app, theme);
+    }
     if app.editor().is_some() {
         render_note_editor(frame, areas.review, app, theme);
     }
@@ -140,9 +143,23 @@ fn row_line<'a>(
 ) -> Line<'static> {
     let context = RenderContext { stream, app, theme };
     match key {
-        RowKey::File { file } => file_line(stream.file(file), width, theme),
+        RowKey::File { file } => file_line(
+            stream.file(file),
+            width,
+            app.file_collapsed(file),
+            app.collapsed_file_line_count(file),
+            theme,
+        ),
         RowKey::Binary { .. } => Line::styled("     Binary files differ", theme.marker),
-        RowKey::Hunk { file, hunk } => hunk_line(stream, file, hunk, width, theme),
+        RowKey::Hunk { file, hunk } => hunk_line(
+            stream,
+            file,
+            hunk,
+            width,
+            app.hunk_collapsed(file, hunk),
+            app.collapsed_hunk_line_count(file, hunk),
+            theme,
+        ),
         RowKey::UnifiedLine { file, hunk, line, range } => {
             context.unified_line(SourcePosition { file, hunk, line }, range, width)
         }
@@ -242,6 +259,59 @@ fn render_filter_dialog(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme:
     );
 }
 
+fn render_file_picker(frame: &mut Frame<'_>, app: &App<'_>, theme: &Theme) {
+    let dialog = app.file_picker_area();
+    let entries = app.file_picker_entries();
+    let selected = app.file_picker_selected().unwrap_or_default();
+    let offset = app.file_picker_offset().unwrap_or_default();
+    let query = app.file_picker_query().unwrap_or_default();
+    let height = usize::from(dialog.height.saturating_sub(5));
+    let mut lines = vec![
+        Line::styled(" File jump", theme.accent),
+        Line::styled(format!(" > {query}█"), theme.panel),
+        Line::styled(format!(" {} changed files", entries.len()), theme.muted),
+    ];
+    for (index, entry) in entries.iter().enumerate().skip(offset).take(height) {
+        let changes = entry
+            .changes
+            .map(|(additions, deletions)| format!(" +{additions} -{deletions}"))
+            .unwrap_or_default();
+        let findings = if entry.findings.open == 0 && entry.findings.completed == 0 {
+            String::new()
+        } else {
+            let severity = entry
+                .findings
+                .highest_open_severity
+                .map(|severity| format!(" {severity}"))
+                .unwrap_or_default();
+            format!(" !{} ✓{}{}", entry.findings.open, entry.findings.completed, severity)
+        };
+        let line = format!(
+            " {} {} {}{}{}",
+            if index == selected { "▌" } else { " " },
+            file_status_code(entry.status),
+            entry.path,
+            changes,
+            findings
+        );
+        lines.push(fit_line(
+            vec![Span::styled(
+                truncate_text(&line, usize::from(dialog.width.saturating_sub(2))),
+                if index == selected { theme.selected } else { theme.panel },
+            )],
+            usize::from(dialog.width.saturating_sub(2)),
+            if index == selected { theme.selected } else { theme.panel },
+        ));
+    }
+    frame.render_widget(Clear, dialog);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .style(theme.panel)
+            .block(Block::new().borders(Borders::ALL).border_style(theme.accent)),
+        dialog,
+    );
+}
+
 fn centered(area: Rect, maximum_width: u16, height: u16) -> Rect {
     let width = area.width.min(maximum_width).max(1);
     let height = area.height.min(height).max(1);
@@ -253,20 +323,25 @@ fn centered(area: Rect, maximum_width: u16, height: u16) -> Rect {
     )
 }
 
-fn hunk_line(stream: &ReviewStream<'_>, file: usize, hunk: usize, width: u16, theme: &Theme) -> Line<'static> {
+fn hunk_line(
+    stream: &ReviewStream<'_>, file: usize, hunk: usize, width: u16, collapsed: bool, hidden_lines: usize,
+    theme: &Theme,
+) -> Line<'static> {
     let hunk = stream.hunk(file, hunk);
     let section = String::from_utf8_lossy(hunk.section());
-    let prefix = if width >= 32 { " ▾ " } else { "" };
+    let disclosure = if collapsed { "▸" } else { "▾" };
+    let hidden = if collapsed { format!(" · {hidden_lines} lines hidden") } else { String::new() };
     fit_line(
         vec![Span::styled(
             format!(
-                "{prefix}@@ -{},{} +{},{} @@{}{}",
+                " {disclosure} @@ -{},{} +{},{} @@{}{}{}",
                 hunk.old_start(),
                 hunk.old_line_count(),
                 hunk.new_start(),
                 hunk.new_line_count(),
                 if section.is_empty() { "" } else { " " },
-                section
+                section,
+                hidden,
             ),
             theme.hunk,
         )],
@@ -523,7 +598,7 @@ fn match_ranges(source: &str, query: &str) -> Vec<(usize, usize)> {
         .collect()
 }
 
-fn file_line(file: &FileDiff, width: u16, theme: &Theme) -> Line<'static> {
+fn file_line(file: &FileDiff, width: u16, collapsed: bool, hidden_lines: usize, theme: &Theme) -> Line<'static> {
     let available = usize::from(width);
     let mut metadata = vec![Span::styled(file_status_label(file.status()), theme.muted)];
     if let Some((additions, deletions)) = diff_stats(file) {
@@ -540,17 +615,31 @@ fn file_line(file: &FileDiff, width: u16, theme: &Theme) -> Line<'static> {
         metadata.clear();
     }
     let metadata_width = metadata.iter().map(Span::width).sum::<usize>();
-    let path_width = available.saturating_sub(metadata_width.saturating_add(3));
-    let path = truncate_text(&file_path(file), path_width);
+    let disclosure = if collapsed { "▸" } else { "▾" };
+    let hidden = if collapsed { format!(" · {hidden_lines} lines hidden") } else { String::new() };
+    let path_width = available.saturating_sub(metadata_width.saturating_add(5));
+    let path = truncate_text(&format!("{}{}", file_path(file), hidden), path_width);
     let path_width = Span::raw(&path).width();
-    let gap = available.saturating_sub(path_width + metadata_width + 2);
+    let gap = available.saturating_sub(path_width + metadata_width + 3);
     let mut spans = vec![
         Span::raw(" "),
+        Span::styled(disclosure, theme.accent),
+        Span::raw(" "),
         Span::styled(path, theme.accent),
-        Span::raw(" ".repeat(gap.max(1))),
+        Span::raw(" ".repeat(gap)),
     ];
     spans.extend(metadata);
     fit_line(spans, available, theme.file)
+}
+
+fn file_status_code(status: FileStatus) -> &'static str {
+    match status {
+        FileStatus::Added => "A",
+        FileStatus::Deleted => "D",
+        FileStatus::Modified => "M",
+        FileStatus::Renamed => "R",
+        FileStatus::Copied => "C",
+    }
 }
 
 fn file_status_label(status: FileStatus) -> &'static str {

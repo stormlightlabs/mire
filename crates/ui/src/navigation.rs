@@ -26,6 +26,8 @@ pub enum Action {
     PreviousFile,
     NextHunk,
     PreviousHunk,
+    ToggleCollapse,
+    OpenFilePicker,
     StartSearch,
     NextMatch,
     PreviousMatch,
@@ -40,7 +42,9 @@ pub enum Action {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum KeyPattern {
     Char(char),
+    ControlChar(char),
     Down,
+    Enter,
     End,
     Home,
     PageDown,
@@ -112,6 +116,18 @@ const BINDINGS: &[Binding] = &[
         keys: &[KeyPattern::Char('{')],
         labels: "{",
     },
+    Binding {
+        action: Action::ToggleCollapse,
+        description: "collapse or expand file/hunk",
+        keys: &[KeyPattern::Enter, KeyPattern::Char(' ')],
+        labels: "Enter / Space",
+    },
+    Binding {
+        action: Action::OpenFilePicker,
+        description: "jump to file",
+        keys: &[KeyPattern::ControlChar('p')],
+        labels: "Ctrl-P",
+    },
     Binding { action: Action::StartSearch, description: "search", keys: &[KeyPattern::Char('/')], labels: "/" },
     Binding {
         action: Action::NextMatch,
@@ -164,7 +180,7 @@ const BINDINGS: &[Binding] = &[
 ];
 
 pub fn action_for(key: KeyEvent) -> Option<Action> {
-    let pattern = KeyPattern::from_code(key.code)?;
+    let pattern = KeyPattern::from_key(key)?;
     BINDINGS
         .iter()
         .find(|binding| binding.keys.contains(&pattern))
@@ -183,6 +199,7 @@ pub fn help_entries() -> impl Iterator<Item = (&'static str, &'static str)> {
             ("e", "edit selected note"),
             ("r / d / o / a", "resolve / dismiss / reopen / accept risk"),
             ("f", "filter notes"),
+            ("left disclosure", "collapse or expand a file or hunk"),
             ("right click", "create or edit a note"),
             ("note buttons", "edit or change note status"),
         ])
@@ -198,11 +215,15 @@ impl Focus {
 }
 
 impl KeyPattern {
-    fn from_code(code: KeyCode) -> Option<Self> {
-        match code {
+    fn from_key(key: KeyEvent) -> Option<Self> {
+        match key.code {
+            KeyCode::Char(character) if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                Some(Self::ControlChar(character))
+            }
             KeyCode::Char(character) => Some(Self::Char(character)),
             KeyCode::Down => Some(Self::Down),
             KeyCode::End => Some(Self::End),
+            KeyCode::Enter => Some(Self::Enter),
             KeyCode::Home => Some(Self::Home),
             KeyCode::PageDown => Some(Self::PageDown),
             KeyCode::PageUp => Some(Self::PageUp),

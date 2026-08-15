@@ -26,6 +26,8 @@ precedence over the general controls.
 | `G` / `End`     | Jump to the last row                                              |
 | `]` / `[`       | Jump to the next or previous file                                 |
 | `}` / `{`       | Jump to the next or previous hunk                                 |
+| `Enter` / `Space` | Collapse or expand the file or hunk under the review cursor      |
+| `Ctrl-P`        | Open the changed-file picker                                      |
 
 ## Search and display
 
@@ -41,6 +43,13 @@ precedence over the general controls.
 
 While entering a search, type to update the query. `Backspace` removes the
 previous character, `Enter` runs the search, and `Esc` cancels input.
+
+## Jump to a changed file
+
+Press `Ctrl-P` to filter changed paths as you type. Results show the file
+status, changed-line counts, and finding progress. Use `j`/`k`, the arrow keys,
+or the mouse to select a result, then press `Enter` or click it to jump. `Esc`
+closes the picker.
 
 ## Work with review notes
 
@@ -86,6 +95,7 @@ These controls are available when you open a durable review with
 ## Using the mouse
 
 Scroll the wheel over the review or sidebar to move through it. Left-click a
-file or review row to select it. In review files, right-click a source row to
+file or review row to select it. Click a file or hunk disclosure glyph to
+collapse or expand its source rows. In review files, right-click a source row to
 create or edit a note, and use the buttons on a note row to edit it or change
 its status.

@@ -60,21 +60,21 @@ Several controls need explicit product semantics before implementation:
 - **Finish review:** Present a readiness summary and export choices. Do not write
   a new global status or imply a remote approval.
 - **Reply:** The review model has editable findings and decision events, not
-  discussion threads. Replace Reply with Edit in the first release; add threads
-  only after a durable event model is designed for CLI and web consumers together.
+  discussion threads. Replace Reply with Edit in the first release. Add threads
+  only after designing a durable event model for CLI and web consumers together.
 - **Category:** Use Mire's annotation intent (`comment`, `defect`, `suggestion`,
   or `question`) rather than introducing a web-only category taxonomy.
 - **Reviewed:** Derive this label from browser-local viewed state and open finding
-  counts; do not persist a second file status.
+  counts. Do not persist a second file status.
 
 The implementation must also cover these states:
 
-- initial loading, no files, no findings, binary files, and invalid review files;
-- missing or unsupported source bindings and refresh failures;
-- stale or ambiguous anchors that cannot scroll to a current line;
-- revision conflicts caused by another CLI, agent, or browser tab;
-- disconnected event streams and server shutdown;
-- narrow-screen file and finding drawers rather than hidden sidebars;
+- initial loading, no files, no findings, binary files, and invalid review files
+- missing or unsupported source bindings and refresh failures
+- stale or ambiguous anchors that cannot scroll to a current line
+- revision conflicts caused by another CLI, agent, or browser tab
+- disconnected event streams and server shutdown
+- narrow-screen file and finding drawers rather than hidden sidebars
 - visible focus, disabled, pending, success, and error states that do not rely on
   color alone.
 
@@ -129,7 +129,7 @@ derive them honestly rather than presenting guesses as review facts.
 - Generate the production web bundle into a dedicated CLI asset directory and
   embed it in the binary. Release and CI checks must prove the checked-in bundle
   matches the frontend source so `cargo install` never requires Node.
-- Build a Tokio runtime only for `mire serve`; existing synchronous commands do
+- Build a Tokio runtime only for `mire serve`. Existing synchronous commands do
   not need to become async.
 - Run Git and review-file blocking work through an owned blocking boundary. Every
   watcher task must have shutdown, error reporting, and a joined owner.
@@ -146,17 +146,17 @@ Initial grammar:
 mire serve <REVIEW> [--port <PORT>] [--open]
 ```
 
-- Bind only `127.0.0.1`; do not add a public host flag.
+- Bind only `127.0.0.1`. Do not add a public host flag.
 - Default to port `0` so the operating system chooses a free port.
 - Print the URL after the listener and review are ready.
-- Keep browser launching opt-in with `--open`; printing the URL remains reliable
-  in headless environments.
+- Keep browser launching opt-in with `--open`. Print the URL for headless
+  environments.
 - Exit cleanly on Ctrl-C, stop watchers, and allow in-flight writes to finish.
 
 ### HTTP and asset stack
 
 - Axum handles routing and extraction.
-- `utoipa` and `utoipa-axum` define schemas while registering routes; serve the
+- `utoipa` and `utoipa-axum` define schemas while registering routes. Serve the
   generated document at `/api/v1/openapi.json`. A bundled Swagger UI is not
   required for the product.
 - `tower-http` provides request tracing and response headers. Traces include a
@@ -180,7 +180,7 @@ requests to local services.
 - Reject unexpected `Host` values, do not enable CORS, and require the exact
   server origin for state-changing requests.
 - Use JSON request bodies and size limits. Never accept filesystem paths from API
-  requests; the review path is fixed when the process starts.
+  requests. The review path is fixed when the process starts.
 - Do not put the secret in query parameters, cookies, logs, DOM content, or
   persisted browser storage.
 
@@ -216,13 +216,13 @@ file response, not an empty text diff.
 
 Use one SvelteKit route and small components around explicit state modules:
 
-- review shell and top bar;
-- file navigator and mobile file drawer;
-- review overview/readiness panel;
-- unified/split diff with context gaps;
-- inline finding card and finding editor;
-- finding queue and mobile finding drawer;
-- conflict, refresh, export, empty, and error dialogs.
+- review shell and top bar
+- file navigator and mobile file drawer
+- review overview/readiness panel
+- unified/split diff with context gaps
+- inline finding card and finding editor
+- finding queue and mobile finding drawer
+- conflict, refresh, export, empty, and error dialogs
 
 Keep server data separate from ephemeral UI state. The server revision, files,
 findings, and anchors come from API responses. Active panes, filters, diff mode,

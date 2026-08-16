@@ -16,6 +16,6 @@ Type "unset NO_COLOR; TERM=xterm-256color COLORTERM=truecolor CLICOLOR_FORCE=1 m
 Enter
 Wait+Screen /Mire review/
 Sleep 500ms
-Screenshot docs/static/screencap.png
+Screenshot packages/docs/static/screencap.png
 Sleep 1s
 Type "q"

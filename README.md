@@ -4,7 +4,7 @@
 
 Mire is a terminal-based diffing and collaborative code review tool for humans and agents.
 
-![Mire showing a split review](docs/static/screencap.png)
+![Mire showing a split review](packages/docs/static/screencap.png)
 
 ## Features
 
@@ -25,7 +25,7 @@ cd mire
 cargo install --path crates/cli --locked
 ```
 
-See the [installation guide](docs/src/content/docs/getting-started/installation.md)
+See the [installation guide](packages/docs/src/content/docs/getting-started/installation.md)
 for verification, updates, and uninstall instructions.
 
 ## Quick start
@@ -59,7 +59,7 @@ mire diff main...HEAD -- src tests
 ```
 
 Press `?` in the TUI for the current keybindings. See
-[quick start](docs/src/content/docs/getting-started/quick-start.md) for more information.
+[quick start](packages/docs/src/content/docs/getting-started/quick-start.md) for more information.
 
 ## Reviews
 
@@ -82,9 +82,8 @@ other findings stale or ambiguous. Mire assigns note identifiers and anchor
 fingerprints. Mutations include the review revision the caller read, so stale
 writes do not replace newer changes.
 
-See [Review Notes](docs/src/content/docs/guides/review-files.md) for the
-complete initialization, agent handoff, refresh, disposition, and export
-workflow.
+See [Review Notes](packages/docs/src/content/docs/guides/review-files.md) for the
+complete initialization, agent handoff, refresh, disposition, and export workflow.
 
 ## Agent Skill
 
@@ -100,15 +99,15 @@ within a byte limit, and apply location-based findings.
 
 ## Documentation
 
-- [Installation](docs/src/content/docs/getting-started/installation.md)
-- [Quick start](docs/src/content/docs/getting-started/quick-start.md)
-- [Reviewing changes](docs/src/content/docs/guides/review-changes.md)
-- [Review notes](docs/src/content/docs/guides/review-files.md)
-- [Watch mode](docs/src/content/docs/guides/watch-mode.md)
-- [CLI manual](docs/src/content/docs/reference/cli.md)
-- [Keybindings](docs/src/content/docs/reference/keybindings.md)
-- [Review model](docs/src/content/docs/concepts/review-model.md)
-- [Live-session protocol](docs/src/content/docs/reference/live-session-protocol.md)
+- [Installation](packages/docs/src/content/docs/getting-started/installation.md)
+- [Quick start](packages/docs/src/content/docs/getting-started/quick-start.md)
+- [Reviewing changes](packages/docs/src/content/docs/guides/review-changes.md)
+- [Review notes](packages/docs/src/content/docs/guides/review-files.md)
+- [Watch mode](packages/docs/src/content/docs/guides/watch-mode.md)
+- [CLI manual](packages/docs/src/content/docs/reference/cli.md)
+- [Keybindings](packages/docs/src/content/docs/reference/keybindings.md)
+- [Review model](packages/docs/src/content/docs/concepts/review-model.md)
+- [Live-session protocol](packages/docs/src/content/docs/reference/live-session-protocol.md)
 
 ## License
 

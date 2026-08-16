@@ -19,6 +19,6 @@ Type "b"
 Type "2"
 Wait+Screen /split/
 Sleep 500ms
-Screenshot docs/static/screencap_split.png
+Screenshot packages/docs/static/screencap_split.png
 Sleep 1s
 Type "q"

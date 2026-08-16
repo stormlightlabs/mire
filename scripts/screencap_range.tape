@@ -33,7 +33,7 @@ Type "c"
 Wait+Screen /New note/
 Type "The sidebar state should follow the resolved layout."
 Sleep 500ms
-Screenshot docs/static/screencap_range.png
+Screenshot packages/docs/static/screencap_range.png
 Sleep 1s
 Escape
 Type "q"

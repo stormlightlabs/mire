@@ -5,14 +5,14 @@ Work from top to bottom unless dependencies allow otherwise.
 
 ## Secure review shell
 
-- [ ] Add `mire serve <REVIEW> [--port <PORT>] [--open]`.
-- [ ] Add the loopback Axum server and clean shutdown.
-- [ ] Add bearer authentication, host/origin checks, request limits, and security
+- [x] Add `mire serve <REVIEW> [--port <PORT>] [--open]`.
+- [x] Add the loopback Axum server and clean shutdown.
+- [x] Add bearer authentication, host/origin checks, request limits, and security
       headers.
-- [ ] Register the REST API and OpenAPI schemas with Utoipa.
-- [ ] Add redacted HTTP tracing.
-- [ ] Create the static SvelteKit SPA and embed its production assets in the CLI.
-- [ ] Load the review overview from the API.
+- [x] Register the REST API and OpenAPI schemas with Utoipa.
+- [x] Add redacted HTTP tracing.
+- [x] Create the static SvelteKit SPA and embed its production assets in the CLI.
+- [x] Load the review overview from the API.
 
 ## Files and findings
 

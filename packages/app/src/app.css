@@ -1,0 +1,82 @@
+@font-face {
+	font-family: 'Google Sans Variable';
+	font-style: normal;
+	font-weight: 400 700;
+	src: url('@fontsource-variable/google-sans/files/google-sans-latin-wght-normal.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'Google Sans Code Variable';
+	font-style: normal;
+	font-weight: 400 700;
+	src: url('@fontsource-variable/google-sans-code/files/google-sans-code-latin-wght-normal.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'IBM Plex Sans Variable';
+	font-style: normal;
+	font-weight: 400 700;
+	src: url('@fontsource-variable/ibm-plex-sans/files/ibm-plex-sans-latin-wght-normal.woff2') format('woff2');
+}
+
+:root {
+	color-scheme: light;
+	font-family: 'IBM Plex Sans Variable', 'IBM Plex Sans', sans-serif;
+	font-synthesis: none;
+	--ink: #111111;
+	--muted: #6b6b67;
+	--faint: #9a9a94;
+	--line: #d9d9d4;
+	--line-strong: #b7b7b0;
+	--paper: #f7f7f5;
+	--paper-deep: #f1f1ef;
+	--surface: #ffffff;
+	--add: #eeeeea;
+	--del: #e5e5e0;
+	--selected: #111111;
+	--selected-ink: #ffffff;
+	--code-line: #efefec;
+	--focus: rgb(17 17 17 / 22%);
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	min-width: 20rem;
+	min-height: 100%;
+	margin: 0;
+	background: var(--paper);
+	color: var(--ink);
+}
+
+body,
+button {
+	font: inherit;
+}
+
+button {
+	color: inherit;
+}
+
+:focus-visible {
+	outline: 3px solid var(--ink);
+	outline-offset: 3px;
+}
+
+.skip-link {
+	position: fixed;
+	top: 0.75rem;
+	left: 1rem;
+	z-index: 10;
+	padding: 0.5rem 0.75rem;
+	background: var(--selected);
+	color: var(--selected-ink);
+	transform: translateY(-180%);
+}
+
+.skip-link:focus {
+	transform: translateY(0);
+}

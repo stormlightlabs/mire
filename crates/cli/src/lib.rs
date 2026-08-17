@@ -6,6 +6,7 @@ mod git;
 mod live_session;
 mod protocol;
 mod review_file;
+mod serve;
 mod skill;
 mod watch;
 

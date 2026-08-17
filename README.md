@@ -97,6 +97,27 @@ Mire installs the bundled `SKILL.md` when needed and prints its path. The skill
 tells the agent to inspect the compact manifest, expand only named context
 within a byte limit, and apply location-based findings.
 
+## Local development
+
+The embedded review app lives in `packages/app`.
+
+To develop the app against the example review, start Mire on the development
+proxy port from the repository root:
+
+```sh
+cargo run -p mire -- serve examples/de47985-847ffe1.json --port 3737
+```
+
+Copy the session secret after `#` in the printed URL. In another terminal, run:
+
+```sh
+pnpm --filter @stormlightlabs/mire-app run dev
+```
+
+Open `http://localhost:5173/#<session-secret>`. Vite reloads frontend changes and
+proxies API requests to Mire. Set `MIRE_SERVER_ORIGIN` when Mire uses another
+port.
+
 ## Documentation
 
 - [Installation](packages/docs/src/content/docs/getting-started/installation.md)

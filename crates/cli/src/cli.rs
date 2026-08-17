@@ -34,6 +34,8 @@ pub enum Command {
     Notes(NotesArgs),
     /// Open, create, or refresh a review file.
     Review(ReviewArgs),
+    /// Serve a review in a local browser.
+    Serve(ServeArgs),
     /// Review a Git commit.
     Show(ShowArgs),
     /// Install and print the bundled agent skill path.
@@ -323,6 +325,19 @@ pub struct ReviewStatusArgs {
     /// Emit deterministic JSON for scripts and agents.
     #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
     pub format: Option<OutputFormat>,
+}
+
+#[derive(Args, Debug)]
+pub struct ServeArgs {
+    /// JSON review file to serve.
+    #[arg(value_hint = ValueHint::FilePath)]
+    pub review: OsString,
+    /// Loopback port to listen on.
+    #[arg(long)]
+    pub port: Option<u16>,
+    /// Open the session URL in the default browser.
+    #[arg(long)]
+    pub open: bool,
 }
 
 #[derive(Args, Debug)]

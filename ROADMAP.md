@@ -82,14 +82,14 @@ The implementation must also cover these states:
 
 CodeRabbit is most useful here as interaction research, not as a feature target.
 
-| Idea | Mire adaptation | Timing |
-| --- | --- | --- |
-| Structured overview before inline findings | Deterministic source, change, finding, and re-anchor summary | First complete review loop |
-| Finding types and severity | Existing annotation intent and severity, with filters and accessible labels | Initial finding experience |
-| Incremental review of new pushes | Source-backed refresh plus durable note re-anchoring | Refresh/watch phase |
-| Review status and pre-merge checks | Local readiness summary for open findings, unsafe anchors, and unviewed files | Completion phase |
-| Guided change order instead of alphabetical files | Optional logical file groups when Mire has real relationship metadata | Later exploration |
-| Contextual navigation from summary to line | Finding queue selects the file, scrolls to the anchor, and focuses the inline card | Initial finding experience |
+| Idea                                              | Mire adaptation                                                                    | Timing                     |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------- |
+| Structured overview before inline findings        | Deterministic source, change, finding, and re-anchor summary                       | First complete review loop |
+| Finding types and severity                        | Existing annotation intent and severity, with filters and accessible labels        | Initial finding experience |
+| Incremental review of new pushes                  | Source-backed refresh plus durable note re-anchoring                               | Refresh/watch phase        |
+| Review status and pre-merge checks                | Local readiness summary for open findings, unsafe anchors, and unviewed files      | Completion phase           |
+| Guided change order instead of alphabetical files | Optional logical file groups when Mire has real relationship metadata              | Later exploration          |
+| Contextual navigation from summary to line        | Finding queue selects the file, scrolls to the anchor, and focuses the inline card | Initial finding experience |
 
 Ideas not to copy now include PR automation, reviewer assignment, generated
 labels, chat, one-click fixes, AI summaries, and model-selected review profiles.
@@ -123,12 +123,13 @@ derive them honestly rather than presenting guesses as review facts.
   authentication, API DTOs, handlers, event watching, and embedded assets. This
   reuses the CLI's existing review-file and Git boundaries without exposing new
   workspace-wide APIs prematurely.
-- Add the SvelteKit source under `crates/cli/web/`. Use SvelteKit's static adapter,
+- Keep the SvelteKit source under `packages/app/`. Use SvelteKit's static adapter,
   disable SSR at the root layout, and emit `200.html` as the SPA fallback for
   Axum.
-- Generate the production web bundle into a dedicated CLI asset directory and
-  embed it in the binary. Release and CI checks must prove the checked-in bundle
-  matches the frontend source so `cargo install` never requires Node.
+- Generate the production web bundle into `crates/cli/assets/web/` and embed it
+  in the binary. Keep the generated directory out of version control. Build it
+  before packaging and include it explicitly in the published crate so
+  `cargo install` never requires Node.
 - Build a Tokio runtime only for `mire serve`. Existing synchronous commands do
   not need to become async.
 - Run Git and review-file blocking work through an owned blocking boundary. Every
@@ -189,18 +190,18 @@ requests to local services.
 The API is versioned under `/api/v1`. DTOs are explicit web contracts rather
 than serialized `Review` internals.
 
-| Method and path | Purpose |
-| --- | --- |
-| `GET /review` | Review identity, revision, source summary, totals, readiness, and file/finding summaries |
-| `GET /files/{file_id}` | One file's metadata, semantic hunks and lines, and anchored finding summaries |
-| `GET /findings/{note_id}` | Complete finding detail, provenance, decision state, and anchor outcome |
-| `PATCH /findings/{note_id}` | Edit body, severity, and annotation intent at an expected revision |
-| `POST /findings/{note_id}/decision` | Resolve, reopen, dismiss, or accept risk at an expected revision |
-| `POST /refresh` | Refresh a source-backed review and return the resulting revision and re-anchor summary |
-| `GET /events` | Authenticated server-sent events for review changes, refresh results, and shutdown |
-| `GET /exports/notes.{json,md}` | Download the existing deterministic note exports |
-| `GET /exports/context.json` | Download bounded agent context using existing export rules |
-| `GET /openapi.json` | Download the generated OpenAPI document |
+| Method and path                     | Purpose                                                                                  |
+| ----------------------------------- | ---------------------------------------------------------------------------------------- |
+| `GET /review`                       | Review identity, revision, source summary, totals, readiness, and file/finding summaries |
+| `GET /files/{file_id}`              | One file's metadata, semantic hunks and lines, and anchored finding summaries            |
+| `GET /findings/{note_id}`           | Complete finding detail, provenance, decision state, and anchor outcome                  |
+| `PATCH /findings/{note_id}`         | Edit body, severity, and annotation intent at an expected revision                       |
+| `POST /findings/{note_id}/decision` | Resolve, reopen, dismiss, or accept risk at an expected revision                         |
+| `POST /refresh`                     | Refresh a source-backed review and return the resulting revision and re-anchor summary   |
+| `GET /events`                       | Authenticated server-sent events for review changes, refresh results, and shutdown       |
+| `GET /exports/notes.{json,md}`      | Download the existing deterministic note exports                                         |
+| `GET /exports/context.json`         | Download bounded agent context using existing export rules                               |
+| `GET /openapi.json`                 | Download the generated OpenAPI document                                                  |
 
 Every successful mutation returns the new revision and the changed resource.
 Expected conflicts return HTTP 409 with the actual revision. Validation, missing

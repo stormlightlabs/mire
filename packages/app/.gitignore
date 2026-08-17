@@ -1,5 +1,7 @@
 node_modules
 
+# Local SvelteKit output. The production bundle is written to and tracked at
+# ../../crates/cli/assets/web for embedding in the Mire binary.
 # Output
 .output
 .vercel

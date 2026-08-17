@@ -22,6 +22,7 @@ use crate::protocol::{
 use crate::review_file::{
     DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, write_review_atomic_if_revision,
 };
+use crate::serve::{self, ServeError};
 use crate::skill::{self, SkillError};
 use crate::watch::{WatchError, WatchSet};
 
@@ -73,6 +74,10 @@ enum AppError {
     WatchRequiresTerminal,
     #[error("watch mode cannot read a patch from standard input")]
     WatchStdin,
+    #[error("cannot create web review runtime: {0}")]
+    WebReviewRuntime(io::Error),
+    #[error("cannot serve review: {0}")]
+    Serve(ServeError),
     #[error("cannot start watch mode: {0}")]
     Watch(WatchError),
 }
@@ -93,6 +98,8 @@ impl AppError {
             | Self::Skill(_)
             | Self::LiveSession(_)
             | Self::Terminal(_)
+            | Self::WebReviewRuntime(_)
+            | Self::Serve(_)
             | Self::WatchRequiresTerminal
             | Self::WatchStdin
             | Self::Watch(_) => 5,
@@ -201,6 +208,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
                 theme,
             ),
         },
+        Command::Serve(arguments) => serve_review(arguments),
         Command::Show(ShowArgs { revision, paths, format, language, watch }) => {
             let request = ShowRequest { revision, paths };
             let changeset = git::load_show(request.clone()).map_err(AppError::Git)?;
@@ -229,6 +237,14 @@ fn execute(cli: Cli) -> Result<(), AppError> {
             )
         }
     }
+}
+
+fn serve_review(arguments: ServeArgs) -> Result<(), AppError> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_io()
+        .build()
+        .map_err(AppError::WebReviewRuntime)?;
+    runtime.block_on(serve::run(arguments)).map_err(AppError::Serve)
 }
 
 fn initialize_review(arguments: ReviewInitArgs) -> Result<(), AppError> {
@@ -795,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn clap_accepts_review_initialization_opening_and_status() {
+    fn clap_accepts_review_initialization_opening_status_and_serving() {
         let cli = Cli::try_parse_from(["mire", "review", "init", "review.json", "main...HEAD", "--", "src"]).unwrap();
         let Some(Command::Review(ReviewArgs { command: Some(ReviewCommand::Init(arguments)), .. })) = cli.command
         else {
@@ -819,6 +835,14 @@ mod tests {
         };
         assert_eq!(arguments.review, "review.json");
         assert!(matches!(arguments.format, Some(OutputFormat::Json)));
+
+        let cli = Cli::try_parse_from(["mire", "serve", "review.json", "--port", "3737", "--open"]).unwrap();
+        let Some(Command::Serve(arguments)) = cli.command else {
+            panic!("serve command is parsed");
+        };
+        assert_eq!(arguments.review, "review.json");
+        assert_eq!(arguments.port, Some(3737));
+        assert!(arguments.open);
     }
 
     #[test]

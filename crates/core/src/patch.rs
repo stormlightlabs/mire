@@ -3,6 +3,7 @@ use thiserror::Error;
 use crate::{Changeset, ChangesetSource};
 
 mod parser;
+mod writer;
 
 /// Default upper bound for one raw patch: 64 MiB.
 pub const DEFAULT_MAX_PATCH_BYTES: usize = 64 * 1024 * 1024;
@@ -82,6 +83,8 @@ impl<'a> PatchInput<'a> {
 }
 
 /// Parses bounded UTF-8 patch bytes into Mire's normalized changeset model.
+pub use writer::{PatchWriteError, write_patch};
+
 pub fn parse_patch(bytes: &[u8], source: ChangesetSource, limits: PatchLimits) -> Result<Changeset> {
     let input = PatchInput::new(bytes, limits)?;
     parser::parse(input.as_utf8()?, source)

@@ -54,12 +54,12 @@ Work from top to bottom unless dependencies allow otherwise.
 
 ## Portable patch export
 
-- [ ] Add a deterministic Git-compatible changeset writer.
-- [ ] Preserve text changes, modes, renames, copies, path bytes, and newline state.
-- [ ] Add `mire review export REVIEW.json --format patch [--output PATH]`.
-- [ ] Reject binary exports before writing partial output.
-- [ ] Add normalized round-trip and `git apply --check` coverage.
-- [ ] Document patch fidelity and unsupported binary payloads.
+- [x] Add a deterministic Git-compatible changeset writer.
+- [x] Preserve text changes, modes, renames, copies, path bytes, and newline state.
+- [x] Add `mire review export REVIEW.json --format patch [--output PATH]`.
+- [x] Reject binary exports before writing partial output.
+- [x] Add normalized round-trip and `git apply --check` coverage.
+- [x] Document patch fidelity and unsupported binary payloads.
 
 ## Verification and release
 

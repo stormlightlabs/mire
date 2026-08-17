@@ -64,6 +64,7 @@ refresh a source-backed review with:
 mire review init REVIEW.json [--staged] [REVISION]... [-- PATH]...
 mire review refresh REVIEW.json
 mire review status REVIEW.json [--format json]
+mire review export REVIEW.json --format patch [--output PATH]
 ```
 
 `review refresh` repeats the recorded Git comparison, re-anchors every finding,
@@ -75,6 +76,13 @@ cannot be refreshed.
 output reports the captured source, review revision, changes, finding
 dispositions, and re-anchor results. Pass `--format json` for deterministic
 structured output.
+
+`review export --format patch` writes the captured text changeset without review
+notes or decisions. It writes to standard output by default, or atomically
+replaces `PATH` with `--output`. The patch preserves normalized text changes,
+modes, renames, copies, byte paths, CRLF content, and missing-final-newline
+markers. It does not preserve the original diff byte stream or Git blob IDs.
+Binary changes fail before any output is written.
 
 ### `mire context`
 

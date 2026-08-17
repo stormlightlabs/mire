@@ -78,6 +78,8 @@ pub enum ReviewCommand {
     Refresh(ReviewRefreshArgs),
     /// Report review progress without opening the terminal interface.
     Status(ReviewStatusArgs),
+    /// Export the captured changeset without review metadata.
+    Export(ReviewExportArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -325,6 +327,24 @@ pub struct ReviewStatusArgs {
     /// Emit deterministic JSON for scripts and agents.
     #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
     pub format: Option<OutputFormat>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum ReviewExportFormat {
+    Patch,
+}
+
+#[derive(Args, Debug)]
+pub struct ReviewExportArgs {
+    /// JSON review file to export.
+    #[arg(value_hint = ValueHint::FilePath)]
+    pub review: OsString,
+    /// Export format.
+    #[arg(long, value_enum)]
+    pub format: ReviewExportFormat,
+    /// Write the complete export by atomically replacing this file.
+    #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath)]
+    pub output: Option<OsString>,
 }
 
 #[derive(Args, Debug)]

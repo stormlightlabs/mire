@@ -9,7 +9,9 @@ pub use model::{
     FileDiff, FileMode, FileSide, FileStatus, Fingerprint, GitOperation, Hunk, LineKind, LineNumber, MissingNewline,
     ModelError, SchemaVersion,
 };
-pub use patch::{DEFAULT_MAX_PATCH_BYTES, PatchError, PatchInput, PatchLimits, parse_patch};
+pub use patch::{
+    DEFAULT_MAX_PATCH_BYTES, PatchError, PatchInput, PatchLimits, PatchWriteError, parse_patch, write_patch,
+};
 pub use review::{
     Anchor, AnchorSide, AnnotationKind, Author, AuthorKind, CURRENT_REVIEW_SCHEMA_VERSION, FilesystemIdentity,
     LineRange, MAX_NOTE_BODY_BYTES, MAX_REVIEW_NOTES, NoteApplyError, NoteApplyFailure, NoteEvent, NoteEventKind,

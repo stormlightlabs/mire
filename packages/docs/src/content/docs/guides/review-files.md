@@ -45,6 +45,26 @@ anchors, and re-anchor outcomes. The Markdown export renders those details for
 reading. `mire review status review.json` prints a compact progress report; add
 `--format json` for structured output.
 
+## Export the captured patch
+
+Write the captured changeset as a Git-compatible patch for a tool or another
+worktree:
+
+```sh
+mire review export review.json --format patch --output changes.patch
+git apply --check changes.patch
+```
+
+Omit `--output` to write the patch to standard output. Mire serializes files and
+hunks in its normalized order. The export preserves text changes, modes,
+renames, copies, byte paths, CRLF content, and missing-final-newline markers.
+It cannot reproduce the original diff byte stream, header spelling, or Git blob
+IDs.
+
+Mire does not retain binary payloads. If a review includes a binary change,
+patch export names the affected files and fails before writing standard output
+or replacing `--output`.
+
 ## Create and edit notes
 
 Press `c` on a source row to create a note. To cover a range, press `v`, move
@@ -133,6 +153,7 @@ List or export notes without opening the TUI:
 mire notes list review.json
 mire notes export review.json --format markdown
 mire notes export review.json --format json
+mire review export review.json --format patch
 ```
 
 Agents and analyzers should start with the context manifest, then expand only

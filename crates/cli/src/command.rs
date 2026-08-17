@@ -7,14 +7,15 @@ use std::process::ExitCode;
 use clap::Parser;
 use mire_core::{
     AnchorSide, Author, BytePath, BytePathError, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, LineNumber,
-    LineRange, NoteId, NoteInput, NoteStatus, PatchError, PatchLimits, Provenance, Review, ReviewError, ReviewRevision,
-    parse_patch,
+    LineRange, NoteId, NoteInput, NoteStatus, PatchError, PatchLimits, PatchWriteError, Provenance, Review,
+    ReviewError, ReviewRevision, parse_patch, write_patch,
 };
 use mire_tui::ThemeFamily;
 use thiserror::Error;
 
 use crate::git::{self, DiffRequest, GitError, ShowRequest};
 use crate::live_session::{self, LiveSession, LiveSessionError};
+use crate::output_file::{OutputFileError, write_output_atomic};
 use crate::protocol::{
     ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, context_json, import_error_json,
     import_result_json, notes_json, notes_markdown, protocol_error_json, review_status_json, review_status_text,
@@ -64,6 +65,10 @@ enum AppError {
     Output(serde_json::Error),
     #[error("cannot write command output: {0}")]
     OutputIo(io::Error),
+    #[error("cannot export patch: {0}")]
+    PatchExport(PatchWriteError),
+    #[error("cannot write export output: {0}")]
+    ExportOutput(OutputFileError),
     #[error("cannot locate bundled skill: {0}")]
     Skill(SkillError),
     #[error("live-session operation failed: {0}")]
@@ -95,6 +100,8 @@ impl AppError {
             Self::Patch(_) => 4,
             Self::Output(_)
             | Self::OutputIo(_)
+            | Self::PatchExport(_)
+            | Self::ExportOutput(_)
             | Self::Skill(_)
             | Self::LiveSession(_)
             | Self::Terminal(_)
@@ -201,6 +208,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
             Some(ReviewCommand::Init(arguments)) => initialize_review(arguments),
             Some(ReviewCommand::Refresh(arguments)) => refresh_review(arguments),
             Some(ReviewCommand::Status(arguments)) => report_review_status(arguments),
+            Some(ReviewCommand::Export(arguments)) => export_review_patch(arguments),
             None => open_review(
                 input.expect("clap requires a review path when no review subcommand is present"),
                 format,
@@ -328,6 +336,17 @@ fn report_review_status(arguments: ReviewStatusArgs) -> Result<(), AppError> {
         None => review_status_text(&review),
     };
     write_bytes(&bytes)
+}
+
+fn export_review_patch(arguments: ReviewExportArgs) -> Result<(), AppError> {
+    let ReviewExportArgs { review, format: ReviewExportFormat::Patch, output } = arguments;
+    let review = read_review(Path::new(&review)).map_err(AppError::ReviewFile)?;
+    let bytes = write_patch(review.changeset()).map_err(AppError::PatchExport)?;
+    if let Some(output) = output {
+        write_output_atomic(Path::new(&output), &bytes).map_err(AppError::ExportOutput)
+    } else {
+        write_bytes(&bytes)
+    }
 }
 
 fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme: ThemeFamily) -> Result<(), AppError> {
@@ -835,6 +854,25 @@ mod tests {
         };
         assert_eq!(arguments.review, "review.json");
         assert!(matches!(arguments.format, Some(OutputFormat::Json)));
+
+        let cli = Cli::try_parse_from([
+            "mire",
+            "review",
+            "export",
+            "review.json",
+            "--format",
+            "patch",
+            "--output",
+            "review.patch",
+        ])
+        .unwrap();
+        let Some(Command::Review(ReviewArgs { command: Some(ReviewCommand::Export(arguments)), .. })) = cli.command
+        else {
+            panic!("review export command is parsed");
+        };
+        assert_eq!(arguments.review, "review.json");
+        assert!(matches!(arguments.format, ReviewExportFormat::Patch));
+        assert_eq!(arguments.output.as_deref(), Some(OsStr::new("review.patch")));
 
         let cli = Cli::try_parse_from(["mire", "serve", "review.json", "--port", "3737", "--open"]).unwrap();
         let Some(Command::Serve(arguments)) = cli.command else {

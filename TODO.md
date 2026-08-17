@@ -16,13 +16,13 @@ Work from top to bottom unless dependencies allow otherwise.
 
 ## Files and findings
 
-- [ ] Add file summaries and semantic diff responses.
-- [ ] Build file search, filtering, and navigation.
-- [ ] Render unified text diffs and binary, empty, and error states.
-- [ ] Add finding summaries and detail responses.
-- [ ] Render inline findings and the finding queue.
-- [ ] Navigate exact and moved findings to their anchors.
-- [ ] Handle stale and ambiguous findings.
+- [x] Add file summaries and semantic diff responses.
+- [x] Build file search, filtering, and navigation.
+- [x] Render unified text diffs and binary, empty, and error states.
+- [x] Add finding summaries and detail responses.
+- [x] Render inline findings and the finding queue.
+- [x] Navigate exact and moved findings to their anchors.
+- [x] Handle stale and ambiguous findings.
 
 ## Review actions
 
@@ -51,6 +51,15 @@ Work from top to bottom unless dependencies allow otherwise.
 - [ ] Complete keyboard, focus, screen-reader, contrast, and reduced-motion
       behavior.
 - [ ] Measure large-review rendering before adding highlighting or virtualization.
+
+## Portable patch export
+
+- [ ] Add a deterministic Git-compatible changeset writer.
+- [ ] Preserve text changes, modes, renames, copies, path bytes, and newline state.
+- [ ] Add `mire review export REVIEW.json --format patch [--output PATH]`.
+- [ ] Reject binary exports before writing partial output.
+- [ ] Add normalized round-trip and `git apply --check` coverage.
+- [ ] Document patch fidelity and unsupported binary payloads.
 
 ## Verification and release
 

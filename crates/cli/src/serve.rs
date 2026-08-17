@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::extract::{DefaultBodyLimit, Path as AxumPath, Request, State};
 use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, ORIGIN};
 use axum::http::{HeaderMap, HeaderValue, Method, Response, StatusCode, Uri};
 use axum::middleware::{self, Next};
@@ -16,7 +16,7 @@ use axum::routing::get;
 use axum::{Router, extract::MatchedPath};
 use base64::Engine;
 use include_dir::{Dir, include_dir};
-use mire_core::{ChangesetSource, FileDiff, NoteStatus, Review};
+use mire_core::{ChangesetSource, FileContent, FileDiff, Hunk, NoteStatus, Review, ReviewNote};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -67,24 +67,95 @@ struct ReviewOverview {
 #[serde(rename_all = "camelCase")]
 struct FileSummary {
     id: String,
-    path: DisplayPath,
+    path: DisplayText,
     status: String,
+    content_kind: String,
     open_findings: usize,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct FileDetail {
+    id: String,
+    path: DisplayText,
+    old_path: Option<DisplayText>,
+    status: String,
+    content: SemanticFileContent,
+    findings: Vec<FindingSummary>,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum SemanticFileContent {
+    Text { hunks: Vec<SemanticHunk> },
+    Binary,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct SemanticHunk {
+    old_start: u64,
+    old_line_count: u64,
+    new_start: u64,
+    new_line_count: u64,
+    section: DisplayText,
+    lines: Vec<SemanticLine>,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct SemanticLine {
+    kind: String,
+    old_line: Option<u64>,
+    new_line: Option<u64>,
+    content: DisplayText,
+    missing_newline: String,
 }
 
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct FindingSummary {
     id: String,
-    path: DisplayPath,
+    path: DisplayText,
+    side: String,
+    start_line: u64,
+    end_line: u64,
+    anchor_state: String,
+    navigable: bool,
     severity: String,
+    annotation_kind: String,
     status: String,
     body: String,
 }
 
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct DisplayPath {
+struct FindingDetail {
+    id: String,
+    path: DisplayText,
+    side: String,
+    start_line: u64,
+    end_line: u64,
+    anchor_state: String,
+    navigable: bool,
+    severity: String,
+    annotation_kind: String,
+    status: String,
+    body: String,
+    author: FindingAuthor,
+    provenance: String,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct FindingAuthor {
+    id: String,
+    display_name: Option<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct DisplayText {
     display: String,
     lossy: bool,
 }
@@ -108,8 +179,21 @@ struct Problem {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_review, get_openapi),
-    components(schemas(ReviewOverview, FileSummary, FindingSummary, DisplayPath, ReviewTotals, Problem))
+    paths(get_review, get_file, get_finding, get_openapi),
+    components(schemas(
+        ReviewOverview,
+        FileSummary,
+        FileDetail,
+        SemanticFileContent,
+        SemanticHunk,
+        SemanticLine,
+        FindingSummary,
+        FindingDetail,
+        FindingAuthor,
+        DisplayText,
+        ReviewTotals,
+        Problem
+    ))
 )]
 struct ApiDocument;
 
@@ -147,6 +231,8 @@ pub async fn run(arguments: ServeArgs) -> Result<(), ServeError> {
 fn app(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/review", get(get_review))
+        .route("/api/v1/files/{file_id}", get(get_file))
+        .route("/api/v1/findings/{note_id}", get(get_finding))
         .route("/api/v1/openapi.json", get(get_openapi))
         .fallback(get(static_asset))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
@@ -222,23 +308,83 @@ async fn secure_request(State(state): State<AppState>, request: Request, next: N
     )
 )]
 async fn get_review(State(state): State<AppState>) -> Response<Body> {
+    match load_current_review(&state).await {
+        Ok(review) => Json(review_overview(&state.review_identity, &review)).into_response(),
+        Err(response) => response,
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/files/{file_id}",
+    params(("file_id" = String, Path, description = "Opaque file fingerprint")),
+    responses(
+        (status = 200, description = "One semantic file diff and its anchored findings", body = FileDetail),
+        (status = 404, description = "No file has this identity", body = Problem)
+    )
+)]
+async fn get_file(State(state): State<AppState>, AxumPath(file_id): AxumPath<String>) -> Response<Body> {
+    match load_current_review(&state).await {
+        Ok(review) => review
+            .changeset()
+            .files()
+            .iter()
+            .find(|file| file.fingerprint().to_string() == file_id)
+            .map(|file| Json(FileDetail::from_file(file, &review)).into_response())
+            .unwrap_or_else(|| {
+                problem(
+                    StatusCode::NOT_FOUND,
+                    "file_not_found",
+                    "This file is not part of the review.",
+                )
+            }),
+        Err(response) => response,
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/findings/{note_id}",
+    params(("note_id" = String, Path, description = "Stable finding identifier")),
+    responses(
+        (status = 200, description = "Complete finding detail", body = FindingDetail),
+        (status = 404, description = "No finding has this identity", body = Problem)
+    )
+)]
+async fn get_finding(State(state): State<AppState>, AxumPath(note_id): AxumPath<String>) -> Response<Body> {
+    match load_current_review(&state).await {
+        Ok(review) => review
+            .notes()
+            .iter()
+            .find(|note| note.id().as_str() == note_id)
+            .map(|note| Json(FindingDetail::from_note(note)).into_response())
+            .unwrap_or_else(|| {
+                problem(
+                    StatusCode::NOT_FOUND,
+                    "finding_not_found",
+                    "This finding is not part of the review.",
+                )
+            }),
+        Err(response) => response,
+    }
+}
+
+async fn load_current_review(state: &AppState) -> Result<Review, Response<Body>> {
     let path = state.review_path.clone();
     match tokio::task::spawn_blocking(move || read_review(&path)).await {
-        Ok(Ok(review)) => Json(review_overview(&state.review_identity, &review)).into_response(),
-        Ok(Err(_)) | Err(_) => problem(
+        Ok(Ok(review)) => Ok(review),
+        Ok(Err(_)) | Err(_) => Err(problem(
             StatusCode::INTERNAL_SERVER_ERROR,
             "review_unavailable",
             "The review file could not be read.",
-        ),
+        )),
     }
 }
 
 #[utoipa::path(
     get,
     path = "/api/v1/openapi.json",
-    responses(
-        (status = 200, description = "OpenAPI document")
-    )
+    responses((status = 200, description = "OpenAPI document"))
 )]
 async fn get_openapi() -> Json<utoipa::openapi::OpenApi> {
     Json(ApiDocument::openapi())
@@ -323,43 +469,166 @@ fn review_overview(identity: &str, review: &Review) -> ReviewOverview {
 
 impl FileSummary {
     fn from_file(file: &FileDiff, review: &Review) -> Self {
-        let path = file
-            .new_side()
-            .or(file.old_side())
-            .expect("validated file diff has a side")
-            .path
-            .as_bytes();
+        let path = file_path(file);
         let open_findings = review
             .notes()
             .iter()
-            .filter(|note| note.status() == NoteStatus::Open && note.anchor().path().as_bytes() == path)
+            .filter(|note| note.status() == NoteStatus::Open && finding_matches_file(note, file))
             .count();
         Self {
             id: file.fingerprint().to_string(),
-            path: DisplayPath::from_bytes(path),
+            path: DisplayText::from_bytes(path),
             status: format!("{:?}", file.status()).to_lowercase(),
+            content_kind: match file.content() {
+                FileContent::Text { .. } => "text".to_owned(),
+                FileContent::Binary => "binary".to_owned(),
+            },
             open_findings,
         }
     }
 }
 
-impl FindingSummary {
-    fn from_note(note: &mire_core::ReviewNote) -> Self {
+impl FileDetail {
+    fn from_file(file: &FileDiff, review: &Review) -> Self {
+        let content = match file.content() {
+            FileContent::Text { hunks } => {
+                SemanticFileContent::Text { hunks: hunks.iter().map(SemanticHunk::from_hunk).collect() }
+            }
+            FileContent::Binary => SemanticFileContent::Binary,
+        };
         Self {
-            id: note.id().as_str().to_owned(),
-            path: DisplayPath::from_bytes(note.anchor().path().as_bytes()),
-            severity: note.severity().to_string().to_lowercase(),
-            status: note.status().to_string(),
-            body: note.body().to_owned(),
+            id: file.fingerprint().to_string(),
+            path: DisplayText::from_bytes(file_path(file)),
+            old_path: file
+                .old_side()
+                .map(|side| DisplayText::from_bytes(side.path.as_bytes())),
+            status: format!("{:?}", file.status()).to_lowercase(),
+            content,
+            findings: review
+                .notes()
+                .iter()
+                .filter(|note| finding_matches_file(note, file))
+                .map(FindingSummary::from_note)
+                .collect(),
         }
     }
 }
 
-impl DisplayPath {
+impl SemanticHunk {
+    fn from_hunk(hunk: &Hunk) -> Self {
+        Self {
+            old_start: hunk.old_start(),
+            old_line_count: hunk.old_line_count(),
+            new_start: hunk.new_start(),
+            new_line_count: hunk.new_line_count(),
+            section: DisplayText::from_bytes(hunk.section()),
+            lines: hunk.lines().iter().map(SemanticLine::from_line).collect(),
+        }
+    }
+}
+
+impl SemanticLine {
+    fn from_line(line: &mire_core::DiffLine) -> Self {
+        Self {
+            kind: format!("{:?}", line.kind()).to_lowercase(),
+            old_line: line.old_line().map(|number| number.get()),
+            new_line: line.new_line().map(|number| number.get()),
+            content: DisplayText::from_bytes(line.content()),
+            missing_newline: format!("{:?}", line.missing_newline()).to_lowercase(),
+        }
+    }
+}
+
+impl FindingSummary {
+    fn from_note(note: &ReviewNote) -> Self {
+        let (anchor, anchor_state, navigable) = finding_location(note);
+        Self {
+            id: note.id().as_str().to_owned(),
+            path: DisplayText::from_bytes(anchor.path().as_bytes()),
+            side: match anchor.side() {
+                mire_core::AnchorSide::Old => "old".to_owned(),
+                mire_core::AnchorSide::New => "new".to_owned(),
+            },
+            start_line: anchor.range().start().get(),
+            end_line: anchor.range().end().get(),
+            anchor_state,
+            navigable,
+            severity: note.severity().to_string().to_lowercase(),
+            annotation_kind: note.annotation_kind().to_string(),
+            status: note.status().to_string(),
+            body: summarize(note.body()),
+        }
+    }
+}
+
+impl FindingDetail {
+    fn from_note(note: &ReviewNote) -> Self {
+        let (anchor, anchor_state, navigable) = finding_location(note);
+        Self {
+            id: note.id().as_str().to_owned(),
+            path: DisplayText::from_bytes(anchor.path().as_bytes()),
+            side: match anchor.side() {
+                mire_core::AnchorSide::Old => "old".to_owned(),
+                mire_core::AnchorSide::New => "new".to_owned(),
+            },
+            start_line: anchor.range().start().get(),
+            end_line: anchor.range().end().get(),
+            anchor_state,
+            navigable,
+            severity: note.severity().to_string().to_lowercase(),
+            annotation_kind: note.annotation_kind().to_string(),
+            status: note.status().to_string(),
+            body: note.body().to_owned(),
+            author: FindingAuthor {
+                id: note.author().id().to_owned(),
+                display_name: note.author().display_name().map(str::to_owned),
+            },
+            provenance: note.provenance().to_string(),
+        }
+    }
+}
+
+impl DisplayText {
     fn from_bytes(bytes: &[u8]) -> Self {
         let display = String::from_utf8_lossy(bytes);
         Self { lossy: matches!(display, std::borrow::Cow::Owned(_)), display: display.into_owned() }
     }
+}
+
+fn file_path(file: &FileDiff) -> &[u8] {
+    file.new_side()
+        .or(file.old_side())
+        .expect("validated file diff has a side")
+        .path
+        .as_bytes()
+}
+
+fn finding_location(note: &ReviewNote) -> (&mire_core::Anchor, String, bool) {
+    match note.reanchor_outcome() {
+        None => (note.anchor(), "captured".to_owned(), true),
+        Some(mire_core::ReanchorOutcome::Exact { candidate, .. }) => (candidate.anchor(), "exact".to_owned(), true),
+        Some(mire_core::ReanchorOutcome::Moved { candidate, .. }) => (candidate.anchor(), "moved".to_owned(), true),
+        Some(mire_core::ReanchorOutcome::Stale { .. }) => (note.anchor(), "stale".to_owned(), false),
+        Some(mire_core::ReanchorOutcome::Ambiguous { .. }) => (note.anchor(), "ambiguous".to_owned(), false),
+    }
+}
+
+fn finding_matches_file(note: &ReviewNote, file: &FileDiff) -> bool {
+    let (anchor, _, _) = finding_location(note);
+    match anchor.side() {
+        mire_core::AnchorSide::Old => file.old_side().is_some_and(|side| side.path == *anchor.path()),
+        mire_core::AnchorSide::New => file.new_side().is_some_and(|side| side.path == *anchor.path()),
+    }
+}
+
+fn summarize(body: &str) -> String {
+    const LIMIT: usize = 180;
+    let mut summary = body.lines().next().unwrap_or_default().trim().to_owned();
+    if summary.chars().count() > LIMIT {
+        summary = summary.chars().take(LIMIT.saturating_sub(1)).collect::<String>();
+        summary.push('…');
+    }
+    summary
 }
 
 fn source_summary(source: &ChangesetSource) -> String {
@@ -529,6 +798,23 @@ mod tests {
             response.headers().get("referrer-policy"),
             Some(&HeaderValue::from_static("no-referrer"))
         );
+    }
+
+    #[tokio::test]
+    async fn api_reports_missing_file_and_finding_resources() {
+        let mut file_request = request("/api/v1/files/missing");
+        file_request
+            .headers_mut()
+            .insert(AUTHORIZATION, HeaderValue::from_static("Bearer secret"));
+        let response = app(state()).oneshot(file_request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let mut finding_request = request("/api/v1/findings/missing");
+        finding_request
+            .headers_mut()
+            .insert(AUTHORIZATION, HeaderValue::from_static("Bearer secret"));
+        let response = app(state()).oneshot(finding_request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

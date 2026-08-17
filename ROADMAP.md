@@ -25,8 +25,8 @@ In scope:
   note editing, and note decisions.
 - Source-backed refresh, external review-file change detection, and clear
   optimistic-concurrency recovery.
-- A deterministic review overview, readiness summary, and existing Mire export
-  formats.
+- A deterministic review overview, readiness summary, existing Mire export
+  formats, and a Git-compatible patch export of captured text changes.
 - Responsive keyboard- and screen-reader-usable interaction.
 
 Out of scope for this effort:
@@ -111,8 +111,57 @@ derive them honestly rather than presenting guesses as review facts.
    writes only if that revision is still current.
 7. Source or review-file changes update the UI. Conflicts preserve unsaved input
    and ask the user to reload before retrying.
-8. Finish review shows what remains and offers Markdown, JSON, and agent-context
-   exports without inventing a remote approval state.
+8. Finish review shows what remains and offers Markdown, JSON, agent-context,
+   and patch exports without inventing a remote approval state.
+
+## Portable patch export
+
+A review file is Mire's durable, machine-readable record. People can already open
+it in the TUI or browser, inspect its status, and export findings as Markdown. Add
+a patch export for tools and workflows that need the captured changeset without
+Mire's review metadata:
+
+```text
+mire review export REVIEW.json --format patch [--output PATH]
+```
+
+Keep this under `mire review export` because `mire patch` consumes a patch. The
+patch contains only the changeset. Findings and decisions remain available from
+note and review exports rather than being encoded as non-standard patch comments.
+A complete Markdown review report can be added as another review export format
+when the product needs one; it should reuse the patch writer for diff content.
+
+### Fidelity
+
+The export is a deterministic, semantically equivalent Git-style patch, not the
+original `git diff` byte stream. Mire canonicalizes file and hunk order and does
+not retain original header spelling, path quoting, or Git blob IDs. It does retain
+the information needed to reconstruct text changes: old and new byte paths, file
+status and modes, rename or copy similarity, hunk coordinates and headings, line
+content, CRLF state, and missing-final-newline markers.
+
+The writer must support additions, deletions, modifications, renames, copies,
+mode-only changes, empty textual changes, and Git-compatible quoting for byte
+paths. Fingerprints are Mire identities and must not be emitted as Git `index`
+object IDs.
+
+Binary payloads are intentionally absent from the review model. Patch export must
+therefore reject a changeset containing binary content before writing any output
+and name the affected files. A later display-only diff format may emit binary
+summary markers, but it must not claim that the result can be applied.
+
+### Implementation boundary
+
+Put patch serialization beside parsing in `mire-core` behind a byte-oriented
+writer API. The CLI validates and loads the review, writes to stdout by default,
+and uses an atomic file replacement for `--output`. Keep formatting independent
+of the TUI, browser renderer, and review-note protocol.
+
+Verify the writer by parsing fixture patches, serializing them, parsing the result,
+and comparing normalized changesets. Apply generated patches to temporary Git
+repositories with `git apply --check`, covering modes, renames, copies, unusual
+paths, CRLF content, and missing newlines. Tests must also prove that binary
+changes fail without leaving partial stdout or output files.
 
 ## Architecture
 
@@ -294,6 +343,17 @@ large-review performance work justified by measurements.
 Exit when the core review flow works at desktop and narrow widths, by keyboard and
 screen reader, with a documented size budget and no regression in packaged CLI
 startup.
+
+### 5. Portable patch export
+
+Add deterministic Git-compatible patch serialization and expose it through
+`mire review export`. Document that normalized text changes are preserved while
+the original diff byte stream, Git object IDs, and binary payloads cannot be
+recovered.
+
+Exit when supported review fixtures round-trip through Mire's parser, generated
+patches pass `git apply --check`, and binary reviews fail before producing partial
+output.
 
 ## Verification strategy
 

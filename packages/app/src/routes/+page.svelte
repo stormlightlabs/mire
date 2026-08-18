@@ -3,7 +3,17 @@
 	import DiffPane from '$lib/DiffPane.svelte';
 	import FileNavigator from '$lib/FileNavigator.svelte';
 	import FindingQueue from '$lib/FindingQueue.svelte';
-	import type { FileDetail, FindingDetail, FindingSummary, ReviewOverview } from '$lib/review';
+	import {
+		defaultFindingFilters,
+		filterFindings,
+		type FileDetail,
+		type FindingDetail,
+		type FindingDraft,
+		type FindingMutation,
+		type FindingSummary,
+		type Problem,
+		type ReviewOverview
+	} from '$lib/review';
 
 	let review = $state<ReviewOverview | null>(null);
 	let activeFile = $state<string | null>(null);
@@ -12,7 +22,11 @@
 	let error = $state<string | null>(null);
 	let fileError = $state<string | null>(null);
 	let findingError = $state<string | null>(null);
+	let filters = $state({ ...defaultFindingFilters });
+	let viewedFileIds = $state<string[]>([]);
+	let conflictRevision = $state<number | null>(null);
 	let secret = '';
+	const visibleFindings = $derived(review ? filterFindings(review.findings, filters) : []);
 
 	onMount(() => {
 		secret = window.location.hash.slice(1);
@@ -24,18 +38,39 @@
 		void loadReview();
 	});
 
-	async function request<T>(path: string): Promise<T> {
-		const response = await fetch(path, { headers: { Authorization: `Bearer ${secret}` } });
-		if (!response.ok) throw new Error(`The requested review data is unavailable (${response.status}).`);
+	async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+		const headers = new Headers(init.headers);
+		headers.set('Authorization', `Bearer ${secret}`);
+		const response = await fetch(path, { ...init, headers });
+		if (!response.ok) {
+			const problem = (await response.json().catch(() => null)) as Problem | null;
+			if (response.status === 409 && problem?.code === 'revision_conflict') {
+				conflictRevision = problem.actualRevision ?? null;
+			}
+			throw new Error(problem?.detail ?? `The requested review data is unavailable (${response.status}).`);
+		}
 		return (await response.json()) as T;
 	}
 
 	async function loadReview() {
 		try {
 			review = await request<ReviewOverview>('/api/v1/review');
+			loadViewedFiles();
 			if (review.files[0]) await selectFile(review.files[0].id);
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'The review could not be loaded.';
+		}
+	}
+
+	async function reloadReview() {
+		if (!review) return;
+		try {
+			review = await request<ReviewOverview>('/api/v1/review');
+			loadViewedFiles();
+			conflictRevision = null;
+			if (activeFile) await selectFile(activeFile);
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'The review could not be reloaded.';
 		}
 	}
 
@@ -45,6 +80,7 @@
 		fileError = null;
 		try {
 			file = await request<FileDetail>(`/api/v1/files/${encodeURIComponent(id)}`);
+			markViewed(id);
 			if (finding) window.setTimeout(() => scrollToFinding(finding.id));
 		} catch (cause) {
 			fileError = cause instanceof Error ? cause.message : 'The file diff could not be loaded.';
@@ -63,6 +99,96 @@
 		}
 	}
 
+	async function editFinding(draft: FindingDraft): Promise<string | null> {
+		if (!review || !activeFinding) return 'Select a finding before editing it.';
+		try {
+			const result = await request<FindingMutation>(`/api/v1/findings/${encodeURIComponent(activeFinding.id)}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ expectedRevision: review.revision, ...draft })
+			});
+			await applyFindingMutation(result);
+			return null;
+		} catch (cause) {
+			return cause instanceof Error ? cause.message : 'The finding could not be saved.';
+		}
+	}
+
+	async function decideFinding(decision: 'resolve' | 'reopen' | 'dismiss' | 'accept-risk'): Promise<string | null> {
+		if (!review || !activeFinding) return 'Select a finding before recording a decision.';
+		try {
+			const result = await request<FindingMutation>(
+				`/api/v1/findings/${encodeURIComponent(activeFinding.id)}/decision`,
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ expectedRevision: review.revision, decision })
+				}
+			);
+			await applyFindingMutation(result);
+			return null;
+		} catch (cause) {
+			return cause instanceof Error ? cause.message : 'The decision could not be saved.';
+		}
+	}
+
+	async function applyFindingMutation(result: FindingMutation) {
+		activeFinding = result.finding;
+		await reloadReview();
+	}
+
+	function loadViewedFiles() {
+		if (!review) return;
+		try {
+			const stored = JSON.parse(localStorage.getItem(viewedStorageKey()) ?? '[]');
+			viewedFileIds = Array.isArray(stored)
+				? stored.filter((id): id is string => typeof id === 'string' && !!review?.files.some((file) => file.id === id))
+				: [];
+		} catch {
+			viewedFileIds = [];
+		}
+	}
+
+	function markViewed(fileId: string) {
+		if (!review || viewedFileIds.includes(fileId)) return;
+		viewedFileIds = [...viewedFileIds, fileId];
+		try {
+			localStorage.setItem(viewedStorageKey(), JSON.stringify(viewedFileIds));
+		} catch {
+			// Browser privacy settings can disable local storage; the review remains usable.
+		}
+	}
+
+	function viewedStorageKey() {
+		return `mire:viewed-files:${review?.reviewIdentity ?? ''}`;
+	}
+
+	function navigateQueue(direction: 1 | -1) {
+		if (!visibleFindings.length) return;
+		const current = visibleFindings.findIndex((finding) => finding.id === activeFinding?.id);
+		const nextIndex =
+			current < 0
+				? direction > 0
+					? 0
+					: visibleFindings.length - 1
+				: (current + direction + visibleFindings.length) % visibleFindings.length;
+		const next = visibleFindings[nextIndex];
+		void selectFinding(next);
+	}
+
+	function onKeydown(event: KeyboardEvent) {
+		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+		const target = event.target;
+		if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+		if (event.key === 'j') {
+			event.preventDefault();
+			navigateQueue(1);
+		} else if (event.key === 'k') {
+			event.preventDefault();
+			navigateQueue(-1);
+		}
+	}
+
 	function scrollToFinding(id: string) {
 		document.querySelector<HTMLElement>(`[data-mire-finding="${CSS.escape(id)}"]`)?.scrollIntoView({
 			block: 'center',
@@ -74,6 +200,8 @@
 <svelte:head>
 	<meta name="description" content="A local browser surface for reviewing a Mire review file." />
 </svelte:head>
+
+<svelte:window onkeydown={onKeydown} />
 
 <a class="skip-link" href="#review-content">Skip to diff</a>
 
@@ -102,15 +230,32 @@
 				<p>Reading the local review file.</p>
 			</section>
 		{:else}
-			<FileNavigator files={review.files} {activeFile} onSelect={selectFile} />
-			<DiffPane {file} {fileError} {activeFinding} {findingError} onFindingClick={selectFinding} />
+			<FileNavigator files={review.files} {activeFile} {viewedFileIds} onSelect={selectFile} />
+			<DiffPane
+				{file}
+				{fileError}
+				{activeFinding}
+				{findingError}
+				onFindingClick={selectFinding}
+				onEditFinding={editFinding}
+				onDecideFinding={decideFinding} />
 			<FindingQueue
-				findings={review.findings}
+				findings={visibleFindings}
 				activeFindingId={activeFinding?.id ?? null}
 				openCount={review.totals.open}
+				bind:filters
 				onSelect={selectFinding} />
 		{/if}
 	</main>
+	{#if conflictRevision !== null}
+		<dialog class="conflict" open aria-labelledby="conflict-heading">
+			<div>
+				<h1 id="conflict-heading">Review changed</h1>
+				<p>Revision {conflictRevision} is now current. Your unsaved edit is still here; reload, then save it again.</p>
+				<button onclick={() => void reloadReview()}>Reload review</button>
+			</div>
+		</dialog>
+	{/if}
 </div>
 
 <style>
@@ -197,6 +342,37 @@
 	}
 	.message.error h1 {
 		color: #a4332f;
+	}
+	.conflict {
+		position: fixed;
+		inset: 0;
+		z-index: 2;
+		display: grid;
+		place-items: center;
+		padding: 1rem;
+		background: rgb(17 17 17 / 32%);
+	}
+	.conflict > div {
+		max-width: 30rem;
+		padding: 1.25rem;
+		border: 1px solid var(--ink);
+		background: var(--surface);
+		box-shadow: 0 0.75rem 2rem rgb(17 17 17 / 18%);
+	}
+	.conflict h1 {
+		margin: 0;
+		font: 600 1.25rem 'Google Sans Variable', 'Google Sans', sans-serif;
+	}
+	.conflict p {
+		line-height: 1.5;
+	}
+	.conflict button {
+		min-height: 2.5rem;
+		border: 1px solid var(--ink);
+		padding: 0.4rem 0.7rem;
+		background: var(--ink);
+		color: var(--surface);
+		cursor: pointer;
 	}
 	@media (max-width: 54rem) {
 		.workspace {

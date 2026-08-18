@@ -1,19 +1,24 @@
 <script lang="ts">
 	import DiffViewer from './DiffViewer.svelte';
-	import { formatPath, type FileDetail, type FindingDetail, type FindingSummary } from './review';
+	import FindingEditor from './FindingEditor.svelte';
+	import { formatPath, type FindingDetail, type FindingDraft, type FileDetail, type FindingSummary } from './review';
 
 	let {
 		file,
 		fileError,
 		activeFinding,
 		findingError,
-		onFindingClick
+		onFindingClick,
+		onEditFinding,
+		onDecideFinding
 	}: {
 		file: FileDetail | null;
 		fileError: string | null;
 		activeFinding: FindingDetail | null;
 		findingError: string | null;
 		onFindingClick: (finding: FindingSummary) => void;
+		onEditFinding: (draft: FindingDraft) => Promise<string | null>;
+		onDecideFinding: (decision: 'resolve' | 'reopen' | 'dismiss' | 'accept-risk') => Promise<string | null>;
 	} = $props();
 </script>
 
@@ -51,6 +56,9 @@
 					{activeFinding.anchorState}
 				</footer>
 			</article>
+		{/if}
+		{#if activeFinding}
+			<FindingEditor finding={activeFinding} onEdit={onEditFinding} onDecision={onDecideFinding} />
 		{/if}
 		{#if findingError}<p class="finding-error" role="alert">{findingError}</p>{/if}
 

@@ -26,12 +26,12 @@ Work from top to bottom unless dependencies allow otherwise.
 
 ## Review actions
 
-- [ ] Add finding editing.
-- [ ] Add resolve, reopen, dismiss, and accept-risk decisions.
-- [ ] Enforce expected revisions on every write.
-- [ ] Preserve drafts when resolving revision conflicts.
-- [ ] Add finding filters and keyboard navigation.
-- [ ] Store viewed-file progress in browser-local state.
+- [x] Add finding editing.
+- [x] Add resolve, reopen, dismiss, and accept-risk decisions.
+- [x] Enforce expected revisions on every write.
+- [x] Preserve drafts when resolving revision conflicts.
+- [x] Add finding filters and keyboard navigation.
+- [x] Store viewed-file progress in browser-local state.
 
 ## Refresh and completion
 

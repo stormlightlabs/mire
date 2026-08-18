@@ -61,6 +61,41 @@ export type FindingDetail = FindingSummary & {
 	provenance: string;
 };
 
+export type FindingDraft = Pick<FindingDetail, 'body' | 'severity' | 'annotationKind'>;
+
+export type FindingFilters = {
+	status: string;
+	severity: string;
+	annotationKind: string;
+};
+
+export const defaultFindingFilters: FindingFilters = {
+	status: 'all',
+	severity: 'all',
+	annotationKind: 'all'
+};
+
+/** Returns findings that match the active queue filters. */
+export function filterFindings(findings: FindingSummary[], filters: FindingFilters): FindingSummary[] {
+	return findings.filter(
+		(finding) =>
+			(filters.status === 'all' || finding.status === filters.status) &&
+			(filters.severity === 'all' || finding.severity === filters.severity) &&
+			(filters.annotationKind === 'all' || finding.annotationKind === filters.annotationKind)
+	);
+}
+
+export type FindingMutation = {
+	revision: number;
+	finding: FindingDetail;
+};
+
+export type Problem = {
+	code: string;
+	detail: string;
+	actualRevision?: number;
+};
+
 export type ReviewOverview = {
 	reviewIdentity: string;
 	revision: number;

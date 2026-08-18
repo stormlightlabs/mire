@@ -12,12 +12,15 @@ use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_SECURITY_POLICY, 
 use axum::http::{HeaderMap, HeaderValue, Method, Response, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Router, extract::MatchedPath};
 use base64::Engine;
 use include_dir::{Dir, include_dir};
-use mire_core::{ChangesetSource, FileContent, FileDiff, Hunk, NoteStatus, Review, ReviewNote};
-use serde::Serialize;
+use mire_core::{
+    AnnotationKind, Author, ChangesetSource, FileContent, FileDiff, Hunk, NoteId, NoteSeverity, NoteStatus, Review,
+    ReviewNote, ReviewRevision,
+};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
@@ -171,15 +174,77 @@ struct ReviewTotals {
     accepted_risk: usize,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Deserialize, Serialize, ToSchema)]
 struct Problem {
     code: String,
     detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actual_revision: Option<u64>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EditFindingRequest {
+    expected_revision: u64,
+    body: String,
+    severity: WebSeverity,
+    annotation_kind: WebAnnotationKind,
+}
+
+#[derive(Clone, Copy, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum WebSeverity {
+    Note,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+#[derive(Clone, Copy, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum WebAnnotationKind {
+    Comment,
+    Defect,
+    Suggestion,
+    Question,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FindingDecisionRequest {
+    expected_revision: u64,
+    decision: FindingDecision,
+}
+
+#[derive(Clone, Copy, Deserialize, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+enum FindingDecision {
+    Resolve,
+    Reopen,
+    Dismiss,
+    AcceptRisk,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct FindingMutation {
+    revision: u64,
+    finding: FindingDetail,
+}
+
+#[derive(Debug)]
+enum FindingMutationError {
+    Conflict { actual_revision: u64 },
+    NotFound,
+    InvalidInput,
+    Locked,
+    Unavailable,
 }
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_review, get_file, get_finding, get_openapi),
+    paths(get_review, get_file, get_finding, edit_finding, decide_finding, get_openapi),
     components(schemas(
         ReviewOverview,
         FileSummary,
@@ -192,6 +257,12 @@ struct Problem {
         FindingAuthor,
         DisplayText,
         ReviewTotals,
+        EditFindingRequest,
+        FindingDecisionRequest,
+        FindingMutation,
+        WebSeverity,
+        WebAnnotationKind,
+        FindingDecision,
         Problem
     ))
 )]
@@ -232,7 +303,8 @@ fn app(state: AppState) -> Router {
     Router::new()
         .route("/api/v1/review", get(get_review))
         .route("/api/v1/files/{file_id}", get(get_file))
-        .route("/api/v1/findings/{note_id}", get(get_finding))
+        .route("/api/v1/findings/{note_id}", get(get_finding).patch(edit_finding))
+        .route("/api/v1/findings/{note_id}/decision", post(decide_finding))
         .route("/api/v1/openapi.json", get(get_openapi))
         .fallback(get(static_asset))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
@@ -366,6 +438,178 @@ async fn get_finding(State(state): State<AppState>, AxumPath(note_id): AxumPath<
                 )
             }),
         Err(response) => response,
+    }
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/findings/{note_id}",
+    params(("note_id" = String, Path, description = "Stable finding identifier")),
+    request_body = EditFindingRequest,
+    responses(
+        (status = 200, description = "Updated finding", body = FindingMutation),
+        (status = 409, description = "The supplied revision is no longer current", body = Problem)
+    )
+)]
+async fn edit_finding(
+    State(state): State<AppState>, AxumPath(note_id): AxumPath<String>,
+    axum::Json(request): axum::Json<EditFindingRequest>,
+) -> Response<Body> {
+    let path = state.review_path.clone();
+    match tokio::task::spawn_blocking(move || {
+        mutate_finding(&path, &note_id, request.expected_revision, FindingChange::Edit(request))
+    })
+    .await
+    {
+        Ok(Ok(mutation)) => Json(mutation).into_response(),
+        Ok(Err(error)) => finding_mutation_problem(error),
+        Err(_) => finding_mutation_problem(FindingMutationError::Unavailable),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/findings/{note_id}/decision",
+    params(("note_id" = String, Path, description = "Stable finding identifier")),
+    request_body = FindingDecisionRequest,
+    responses(
+        (status = 200, description = "Finding with its recorded decision", body = FindingMutation),
+        (status = 409, description = "The supplied revision is no longer current", body = Problem)
+    )
+)]
+async fn decide_finding(
+    State(state): State<AppState>, AxumPath(note_id): AxumPath<String>,
+    axum::Json(request): axum::Json<FindingDecisionRequest>,
+) -> Response<Body> {
+    let path = state.review_path.clone();
+    match tokio::task::spawn_blocking(move || {
+        mutate_finding(
+            &path,
+            &note_id,
+            request.expected_revision,
+            FindingChange::Decision(request.decision),
+        )
+    })
+    .await
+    {
+        Ok(Ok(mutation)) => Json(mutation).into_response(),
+        Ok(Err(error)) => finding_mutation_problem(error),
+        Err(_) => finding_mutation_problem(FindingMutationError::Unavailable),
+    }
+}
+
+enum FindingChange {
+    Edit(EditFindingRequest),
+    Decision(FindingDecision),
+}
+
+fn mutate_finding(
+    path: &Path, note_id: &str, expected_revision: u64, change: FindingChange,
+) -> Result<FindingMutation, FindingMutationError> {
+    let review = read_review(path).map_err(|_| FindingMutationError::Unavailable)?;
+    if review.revision().get() != expected_revision {
+        return Err(FindingMutationError::Conflict { actual_revision: review.revision().get() });
+    }
+    let expected = ReviewRevision::new(expected_revision).map_err(|_| FindingMutationError::InvalidInput)?;
+    let note_id = NoteId::new(note_id.to_owned()).map_err(|_| FindingMutationError::InvalidInput)?;
+    let updated = match change {
+        FindingChange::Edit(request) => review.edit_note(
+            &note_id,
+            request.body,
+            request.severity.into(),
+            request.annotation_kind.into(),
+        ),
+        FindingChange::Decision(decision) => review.change_note_status(&note_id, decision.into(), local_author()),
+    }
+    .map_err(|error| match error {
+        mire_core::ReviewError::NoteNotFound(_) => FindingMutationError::NotFound,
+        _ => FindingMutationError::InvalidInput,
+    })?;
+
+    if updated != review {
+        match crate::review_file::write_review_atomic_if_revision(path, expected, &updated) {
+            Ok(()) => {}
+            Err(ReviewFileError::RevisionConflict { actual, .. }) => {
+                return Err(FindingMutationError::Conflict { actual_revision: actual });
+            }
+            Err(ReviewFileError::Locked { .. }) => return Err(FindingMutationError::Locked),
+            Err(_) => return Err(FindingMutationError::Unavailable),
+        }
+    }
+    let note = updated
+        .notes()
+        .iter()
+        .find(|note| note.id() == &note_id)
+        .expect("a successful note mutation retains the target finding");
+    Ok(FindingMutation { revision: updated.revision().get(), finding: FindingDetail::from_note(note) })
+}
+
+fn finding_mutation_problem(error: FindingMutationError) -> Response<Body> {
+    match error {
+        FindingMutationError::Conflict { actual_revision } => revision_conflict(actual_revision),
+        FindingMutationError::NotFound => problem(
+            StatusCode::NOT_FOUND,
+            "finding_not_found",
+            "This finding is not part of the review.",
+        ),
+        FindingMutationError::InvalidInput => problem(
+            StatusCode::BAD_REQUEST,
+            "invalid_finding",
+            "The finding edit or decision is not valid for this review.",
+        ),
+        FindingMutationError::Locked => problem(
+            StatusCode::LOCKED,
+            "review_locked",
+            "The review is being updated by another process. Try again shortly.",
+        ),
+        FindingMutationError::Unavailable => problem(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "review_unavailable",
+            "The review file could not be read or updated.",
+        ),
+    }
+}
+
+fn local_author() -> Author {
+    let identifier = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .ok()
+        .filter(|value| !value.is_empty() && value.len() <= 256)
+        .unwrap_or_else(|| "local-human".to_owned());
+    Author::new(identifier, None).expect("the fallback author is valid")
+}
+
+impl From<WebSeverity> for NoteSeverity {
+    fn from(value: WebSeverity) -> Self {
+        match value {
+            WebSeverity::Note => Self::Note,
+            WebSeverity::Low => Self::Low,
+            WebSeverity::Medium => Self::Medium,
+            WebSeverity::High => Self::High,
+            WebSeverity::Critical => Self::Critical,
+        }
+    }
+}
+
+impl From<WebAnnotationKind> for AnnotationKind {
+    fn from(value: WebAnnotationKind) -> Self {
+        match value {
+            WebAnnotationKind::Comment => Self::Comment,
+            WebAnnotationKind::Defect => Self::Defect,
+            WebAnnotationKind::Suggestion => Self::Suggestion,
+            WebAnnotationKind::Question => Self::Question,
+        }
+    }
+}
+
+impl From<FindingDecision> for NoteStatus {
+    fn from(value: FindingDecision) -> Self {
+        match value {
+            FindingDecision::Resolve => Self::Resolved,
+            FindingDecision::Reopen => Self::Open,
+            FindingDecision::Dismiss => Self::Dismissed,
+            FindingDecision::AcceptRisk => Self::AcceptedRisk,
+        }
     }
 }
 
@@ -717,10 +961,22 @@ fn session_secret() -> std::io::Result<String> {
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
 
+fn revision_conflict(actual_revision: u64) -> Response<Body> {
+    (
+        StatusCode::CONFLICT,
+        Json(Problem {
+            code: "revision_conflict".to_owned(),
+            detail: "The review changed before this update could be saved. Reload and try again.".to_owned(),
+            actual_revision: Some(actual_revision),
+        }),
+    )
+        .into_response()
+}
+
 fn problem(status: StatusCode, code: &str, detail: &str) -> Response<Body> {
     (
         status,
-        Json(Problem { code: code.to_owned(), detail: detail.to_owned() }),
+        Json(Problem { code: code.to_owned(), detail: detail.to_owned(), actual_revision: None }),
     )
         .into_response()
 }
@@ -729,7 +985,10 @@ fn problem(status: StatusCode, code: &str, detail: &str) -> Response<Body> {
 mod tests {
     use super::*;
     use axum::http::Request;
-    use mire_core::{Changeset, ChangesetSource, Fingerprint, ReviewRevision};
+    use mire_core::{
+        AnchorSide, AnnotationKind, Author, BytePath, Changeset, ChangesetSource, Fingerprint, LineNumber, LineRange,
+        NoteInput, NoteSeverity, PatchLimits, Provenance, ReviewRevision, parse_patch,
+    };
     use tower::ServiceExt;
 
     static TEST_ID: AtomicU64 = AtomicU64::new(0);
@@ -755,6 +1014,37 @@ mod tests {
             origin: "http://127.0.0.1:3737".into(),
             request_ids: Arc::new(AtomicU64::new(1)),
         }
+    }
+
+    fn state_with_note() -> AppState {
+        let state = state();
+        let changeset = parse_patch(
+            b"--- a/file.rs\n+++ b/file.rs\n@@ -1 +1 @@\n-let old = 1;\n+let new = 2;\n",
+            ChangesetSource::Patch { label: None },
+            PatchLimits::default(),
+        )
+        .expect("changeset");
+        let review = Review::new(
+            ReviewRevision::new(1).expect("positive revision"),
+            changeset,
+            Vec::new(),
+            Vec::new(),
+        )
+        .expect("review");
+        let input = NoteInput::new(
+            BytePath::new(b"file.rs".to_vec()).expect("path"),
+            AnchorSide::New,
+            LineRange::new(LineNumber::new(1).expect("line"), LineNumber::new(1).expect("line")).expect("range"),
+            Author::new("agent", None).expect("author"),
+            Provenance::Agent { producer: "test".to_owned() },
+            NoteSeverity::Low,
+            AnnotationKind::Comment,
+            "A finding".to_owned(),
+        )
+        .expect("note input");
+        let review = review.apply_notes(vec![input]).expect("note applied");
+        crate::write_review_atomic(&state.review_path, &review).expect("review is written");
+        state
     }
 
     fn request(path: &str) -> Request<Body> {
@@ -815,6 +1105,75 @@ mod tests {
             .insert(AUTHORIZATION, HeaderValue::from_static("Bearer secret"));
         let response = app(state()).oneshot(finding_request).await.expect("response");
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn finding_mutations_edit_and_record_every_decision() {
+        let state = state_with_note();
+        let review = read_review(&state.review_path).expect("review");
+        let note_id = review.notes()[0].id().as_str().to_owned();
+        let edit = mutate_finding(
+            &state.review_path,
+            &note_id,
+            review.revision().get(),
+            FindingChange::Edit(EditFindingRequest {
+                expected_revision: review.revision().get(),
+                body: "Updated finding".to_owned(),
+                severity: WebSeverity::High,
+                annotation_kind: WebAnnotationKind::Defect,
+            }),
+        )
+        .expect("edit succeeds");
+        assert_eq!(edit.revision, 3);
+        assert_eq!(edit.finding.body, "Updated finding");
+        assert_eq!(edit.finding.severity, "high");
+        assert_eq!(edit.finding.annotation_kind, "defect");
+
+        let mut revision = edit.revision;
+        for (decision, status) in [
+            (FindingDecision::Resolve, "resolved"),
+            (FindingDecision::Reopen, "open"),
+            (FindingDecision::Dismiss, "dismissed"),
+            (FindingDecision::AcceptRisk, "accepted-risk"),
+        ] {
+            let result = mutate_finding(
+                &state.review_path,
+                &note_id,
+                revision,
+                FindingChange::Decision(decision),
+            )
+            .expect("decision succeeds");
+            revision = result.revision;
+            assert_eq!(result.finding.status, status);
+        }
+        assert_eq!(revision, 7);
+    }
+
+    #[tokio::test]
+    async fn finding_writes_require_the_revision_that_was_read() {
+        let mut request = request("/api/v1/findings/missing");
+        *request.method_mut() = Method::PATCH;
+        request
+            .headers_mut()
+            .insert(AUTHORIZATION, HeaderValue::from_static("Bearer secret"));
+        request
+            .headers_mut()
+            .insert(ORIGIN, HeaderValue::from_static("http://127.0.0.1:3737"));
+        request
+            .headers_mut()
+            .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        *request.body_mut() = Body::from(
+            r#"{"expectedRevision":2,"body":"Updated finding","severity":"high","annotationKind":"defect"}"#,
+        );
+
+        let response = app(state()).oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let bytes = axum::body::to_bytes(response.into_body(), MAX_REQUEST_BODY_BYTES)
+            .await
+            .expect("response body");
+        let problem: Problem = serde_json::from_slice(&bytes).expect("problem response");
+        assert_eq!(problem.code, "revision_conflict");
+        assert_eq!(problem.actual_revision, Some(1));
     }
 
     #[tokio::test]

@@ -4,10 +4,12 @@
 	let {
 		files,
 		activeFile,
+		viewedFileIds,
 		onSelect
 	}: {
 		files: FileSummary[];
 		activeFile: string | null;
+		viewedFileIds: string[];
 		onSelect: (id: string) => void;
 	} = $props();
 
@@ -34,7 +36,7 @@
 				onclick={() => onSelect(summary.id)}
 				aria-current={activeFile === summary.id ? 'page' : undefined}>
 				<span class="path">{formatPath(summary.path)}</span>
-				<span class="file-meta">{summary.status} · {summary.contentKind} · {summary.openFindings} open</span>
+				<span class="file-meta">{summary.status} · {summary.contentKind} · {summary.openFindings} open{viewedFileIds.includes(summary.id) ? ' · viewed' : ''}</span>
 			</button>
 		{:else}
 			<p class="empty">No changed files match this filter.</p>

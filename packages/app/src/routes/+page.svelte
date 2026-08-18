@@ -6,20 +6,20 @@
 	import Overlay from '$lib/Overlay.svelte';
 	import { loadDevelopmentSessionSecret, parseSessionSecret, saveDevelopmentSessionSecret } from '$lib/session';
 	import { applyTheme, loadTheme, saveTheme, type Theme } from '$lib/theme';
-	import {
-		completionSummary,
-		defaultFindingFilters,
-		filterFindings,
-		type FileDetail,
-		type FindingDetail,
-		type FindingDraft,
-		type FindingMutation,
-		type FindingSummary,
-		type Problem,
-		type RefreshResponse,
-		type ReviewOverview,
-		type WatchStatus
+	import { completionSummary, defaultFindingFilters, filterFindings } from '$lib/review';
+	import type {
+		FileDetail,
+		FindingDetail,
+		FindingDraft,
+		FindingMutation,
+		FindingSummary,
+		Problem,
+		RefreshResponse,
+		ReviewOverview,
+		WatchStatus
 	} from '$lib/review';
+
+	type RefreshState = 'idle' | 'pending' | 'refreshed' | 'unchanged' | 'failed';
 
 	let review = $state<ReviewOverview | null>(null);
 	let activeFile = $state<string | null>(null);
@@ -31,17 +31,20 @@
 	let filters = $state({ ...defaultFindingFilters });
 	let viewedFileIds = $state<string[]>([]);
 	let conflictRevision = $state<number | null>(null);
-	let refreshState = $state<'idle' | 'pending' | 'refreshed' | 'unchanged' | 'failed'>('idle');
+	let refreshState = $state<RefreshState>('idle');
 	let finishReviewOpen = $state(false);
 	let sessionSecretInput = $state('');
 	let theme = $state<Theme>('light');
 	let themeReady = $state(false);
 	let isNarrow = $state(false);
 	let mobilePane = $state<'files' | 'findings' | null>(null);
+
 	let streamAbort: AbortController | null = null;
 	let secret = '';
+
 	const completion = $derived(review ? completionSummary(review, viewedFileIds) : null);
 	const visibleFindings = $derived(review ? filterFindings(review.findings, filters) : []);
+	const themeLabel = $derived(theme === 'dark' ? 'Use light mode' : 'Use dark mode');
 
 	$effect(() => {
 		if (!themeReady) return;
@@ -81,6 +84,10 @@
 		};
 	});
 
+	function handleErr(err: unknown, fallback: string) {
+		return err instanceof Error ? err.message : fallback;
+	}
+
 	async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 		const headers = new Headers(init.headers);
 		headers.set('Authorization', `Bearer ${secret}`);
@@ -103,7 +110,7 @@
 			error = null;
 			return true;
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : 'The review could not be loaded.';
+			error = handleErr(cause, 'The review could not be loaded.');
 			return false;
 		}
 	}
@@ -134,7 +141,7 @@
 			conflictRevision = null;
 			if (activeFile) await selectFile(activeFile);
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : 'The review could not be reloaded.';
+			error = handleErr(cause, 'The review could not be reloaded.');
 		}
 	}
 
@@ -147,7 +154,7 @@
 			await reloadReview();
 		} catch (cause) {
 			refreshState = 'failed';
-			error = cause instanceof Error ? cause.message : 'The source could not be refreshed.';
+			error = handleErr(cause, 'The source could not be refreshed.');
 		}
 	}
 
@@ -162,7 +169,7 @@
 			link.click();
 			URL.revokeObjectURL(url);
 		} catch (cause) {
-			error = cause instanceof Error ? cause.message : 'The download could not be created.';
+			error = handleErr(cause, 'The download could not be created.');
 		}
 	}
 
@@ -195,7 +202,7 @@
 			}
 		} catch (cause) {
 			if (!streamAbort?.signal.aborted) {
-				error = cause instanceof Error ? cause.message : 'Live review updates disconnected.';
+				error = handleErr(cause, 'Live review updates disconnected.');
 				window.setTimeout(connectEvents, 1_000);
 			}
 		}
@@ -216,7 +223,7 @@
 			markViewed(id);
 			if (finding) window.setTimeout(() => scrollToFinding(finding.id));
 		} catch (cause) {
-			fileError = cause instanceof Error ? cause.message : 'The file diff could not be loaded.';
+			fileError = handleErr(cause, 'The file diff could not be loaded.');
 		}
 	}
 
@@ -228,7 +235,7 @@
 			const target = review.files.find((file) => file.path.display === finding.path.display);
 			if (target) await selectFile(target.id, finding);
 		} catch (cause) {
-			findingError = cause instanceof Error ? cause.message : 'The finding could not be loaded.';
+			findingError = handleErr(cause, 'The finding could not be loaded.');
 		}
 	}
 
@@ -243,7 +250,7 @@
 			await applyFindingMutation(result);
 			return null;
 		} catch (cause) {
-			return cause instanceof Error ? cause.message : 'The finding could not be saved.';
+			return handleErr(cause, 'The finding could not be saved.');
 		}
 	}
 
@@ -261,7 +268,7 @@
 			await applyFindingMutation(result);
 			return null;
 		} catch (cause) {
-			return cause instanceof Error ? cause.message : 'The decision could not be saved.';
+			return handleErr(cause, 'The decision could not be saved.');
 		}
 	}
 
@@ -288,7 +295,7 @@
 		try {
 			localStorage.setItem(viewedStorageKey(), JSON.stringify(viewedFileIds));
 		} catch {
-			// Browser privacy settings can disable local storage; the review remains usable.
+			/**  Browser privacy settings can disable local storage; the review remains usable. */
 		}
 	}
 
@@ -299,6 +306,7 @@
 	function navigateQueue(direction: 1 | -1) {
 		if (!visibleFindings.length) return;
 		const current = visibleFindings.findIndex((finding) => finding.id === activeFinding?.id);
+		// FIXME: this is awful
 		const nextIndex =
 			current < 0
 				? direction > 0
@@ -345,6 +353,14 @@
 	}
 </script>
 
+{#snippet refreshLabel(state: RefreshState)}
+	{#if state === 'refreshed'}
+		· refreshed
+	{:else if state === 'unchanged'}
+		· current
+	{/if}
+{/snippet}
+
 <svelte:head>
 	<meta name="description" content="A local browser surface for reviewing a Mire review file." />
 </svelte:head>
@@ -357,29 +373,46 @@
 	<header class="topbar">
 		<div class="brand" aria-label="Mire">
 			<strong>mire</strong>
-			<span>review in context</span>
 		</div>
 		<div class="review-meta">
-			<strong>Local review</strong>
-			<span
-				>{review
-					? `${review.source} · revision ${review.revision}${refreshState === 'refreshed' ? ' · refreshed' : refreshState === 'unchanged' ? ' · current' : ''}`
-					: 'Connecting to local review'}</span>
+			<strong>Local review</strong><span aria-hidden="true">·</span>
+			<span class="review-detail">
+				{#if review}
+					{review.source} · revision {review.revision} {@render refreshLabel(refreshState)}
+				{:else}
+					Connecting to local review
+				{/if}
+			</span>
 		</div>
 		<div class="topbar-actions">
 			{#if review && isNarrow}
-				<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'files')}>Files</button>
-				<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'findings')}>Findings</button>
+				<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'files')}>
+					<span class="i-lucide-files icon" aria-hidden="true"></span>Files
+				</button>
+				<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'findings')}>
+					<span class="i-lucide-list-checks icon" aria-hidden="true"></span>Findings
+				</button>
 			{/if}
 			{#if review}
 				<button class="topbar-button" disabled={refreshState === 'pending'} onclick={() => void refreshReview()}>
-					{refreshState === 'pending' ? 'Refreshing…' : 'Refresh source'}
+					<span class="i-lucide-refresh-cw icon" class:spinning={refreshState === 'pending'} aria-hidden="true"></span>
+					{#if refreshState === 'pending'}
+						Refreshing…
+					{:else}
+						Refresh source
+					{/if}
 				</button>
-				<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>Finish review</button>
+				<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>
+					<span class="i-lucide-circle-check-big icon" aria-hidden="true"></span>Finish review
+				</button>
 				<button
-					class="topbar-button"
+					class="topbar-button icon-button"
+					aria-label={themeLabel}
+					title={themeLabel}
 					aria-pressed={theme === 'dark'}
-					onclick={() => (theme = theme === 'dark' ? 'light' : 'dark')}>Dark mode</button>
+					onclick={() => (theme = theme === 'dark' ? 'light' : 'dark')}>
+					<span class={theme === 'dark' ? 'i-lucide-sun icon' : 'i-lucide-moon icon'} aria-hidden="true"></span>
+				</button>
 			{/if}
 			<span
 				class:ready={review?.watch === 'watching'}
@@ -518,7 +551,7 @@
 	}
 	.topbar {
 		display: grid;
-		grid-template-columns: 14rem minmax(0, 1fr) 18rem;
+		grid-template-columns: 14rem minmax(8rem, 1fr) auto;
 		align-items: center;
 		border-bottom: 1px solid var(--line);
 		background: var(--surface);
@@ -534,19 +567,19 @@
 		font-size: 1.15rem;
 		letter-spacing: -0.04em;
 	}
-	.brand span {
-		color: var(--muted);
-		font-size: 0.72rem;
-	}
+
 	.review-meta {
 		min-width: 0;
-		display: grid;
+		display: flex;
+		align-items: baseline;
+		gap: 0.35rem;
 		padding: 0.5rem 0.75rem;
+		white-space: nowrap;
 	}
 	.topbar-actions {
 		min-width: 0;
 		display: flex;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
 		align-items: center;
 		justify-content: flex-end;
 		gap: 0.5rem;
@@ -565,6 +598,9 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	.review-detail {
+		min-width: 0;
+	}
 	.topbar-button {
 		min-height: 1.85rem;
 		border: 1px solid var(--line-strong);
@@ -576,9 +612,31 @@
 			'Google Sans',
 			sans-serif;
 		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.35rem;
+		white-space: nowrap;
 		transition:
 			background-color 100ms ease-out,
 			border-color 100ms ease-out;
+	}
+	.topbar-button .icon {
+		width: 0.85rem;
+		height: 0.85rem;
+		flex: none;
+	}
+	.icon-button {
+		width: 1.85rem;
+		padding-inline: 0;
+	}
+	.spinning {
+		animation: spin 800ms linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(1turn);
+		}
 	}
 	.topbar-button:hover {
 		background: var(--paper);
@@ -764,9 +822,9 @@
 	}
 	@media (max-width: 54rem) {
 		.topbar {
-			display: flex;
-			align-items: flex-start;
-			flex-wrap: wrap;
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			align-items: center;
 			gap: 0.75rem;
 			padding: 0.5rem 1rem;
 		}
@@ -776,17 +834,24 @@
 			padding: 0;
 		}
 		.review-meta {
-			order: 2;
-			flex-basis: 100%;
+			display: none;
 		}
 		.topbar-actions {
-			margin-left: auto;
+			grid-column: 3;
+			margin-left: 0;
 		}
 		.workspace {
 			grid-template-columns: minmax(0, 1fr);
 		}
-		.brand span {
-			display: none;
+
+		.topbar-actions .topbar-button:not(.mobile-pane-button):not(.icon-button) {
+			width: 2.75rem;
+			padding-inline: 0;
+			font-size: 0;
+		}
+		.topbar-actions .topbar-button .icon {
+			width: 1rem;
+			height: 1rem;
 		}
 	}
 	@media (max-width: 32rem) {

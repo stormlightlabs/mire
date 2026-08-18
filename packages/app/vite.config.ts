@@ -2,11 +2,13 @@ import { defineConfig } from 'vitest/config';
 import { playwright } from '@vitest/browser-playwright';
 import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
+import UnoCSS from 'unocss/vite';
 
 const mireServerOrigin = process.env.MIRE_SERVER_ORIGIN ?? 'http://127.0.0.1:3737';
 
 export default defineConfig({
 	plugins: [
+		UnoCSS(),
 		sveltekit({
 			compilerOptions: {
 				// Force runes mode for the project, except for libraries. Can be removed in svelte 6.

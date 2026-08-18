@@ -50,7 +50,8 @@
 <style>
 	.files {
 		min-height: 0;
-		overflow: auto;
+		overflow-y: auto;
+		overflow-x: hidden;
 		border-right: 1px solid var(--line);
 		background: var(--surface);
 	}
@@ -58,13 +59,13 @@
 		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
-		padding: 0.8rem;
+		padding: 0.65rem 0.75rem;
 		border-bottom: 1px solid var(--line);
 	}
 	.pane-heading h1 {
 		margin: 0;
 		font:
-			600 0.875rem 'Google Sans Variable',
+			600 0.82rem 'Google Sans Variable',
 			'Google Sans',
 			sans-serif;
 	}
@@ -72,30 +73,36 @@
 	.file-meta,
 	.empty {
 		color: var(--muted);
-		font-size: 0.75rem;
+		font-size: 0.72rem;
 	}
 	.search {
 		display: grid;
 		gap: 0.3rem;
-		padding: 0.7rem 0.8rem;
+		padding: 0.6rem 0.75rem;
 		border-bottom: 1px solid var(--line);
 		color: var(--muted);
-		font-size: 0.72rem;
+		font-size: 0.68rem;
 		font-weight: 600;
 	}
 	.search input {
 		min-width: 0;
 		border: 1px solid var(--line-strong);
 		border-radius: 0.2rem;
-		padding: 0.4rem 0.5rem;
+		padding: 0.35rem 0.45rem;
 		background: var(--paper);
 		color: var(--ink);
+		font: inherit;
+		transition: border-color 100ms ease-out;
+	}
+	.search input:focus {
+		outline: none;
+		border-color: var(--ink);
 	}
 	.file {
 		width: 100%;
 		display: grid;
-		gap: 0.2rem;
-		padding: 0.7rem 0.8rem;
+		gap: 0.15rem;
+		padding: 0.55rem 0.75rem;
 		border: 0;
 		border-bottom: 1px solid var(--line);
 		background: transparent;
@@ -115,17 +122,17 @@
 	.path {
 		overflow: hidden;
 		font-family: 'Google Sans Code Variable', 'Google Sans Code', monospace;
-		font-size: 0.75rem;
+		font-size: 0.72rem;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 	.empty {
-		padding: 0.8rem;
+		padding: 0.75rem;
 	}
 	@media (max-width: 54rem) {
 		.files {
 			order: 2;
-			max-height: 15rem;
+			max-height: 12rem;
 			border: 0;
 			border-top: 1px solid var(--line);
 		}
@@ -134,16 +141,17 @@
 			overflow-x: auto;
 		}
 		.file {
-			min-width: 14rem;
+			min-width: 13rem;
 			border-right: 1px solid var(--line);
 			border-bottom: 0;
 		}
 	}
 	@media (prefers-reduced-motion: no-preference) {
-		.file {
+		.file,
+		.search input {
 			transition:
-				background-color 120ms ease-out,
-				border-color 120ms ease-out;
+				background-color 100ms ease-out,
+				border-color 100ms ease-out;
 		}
 	}
 </style>

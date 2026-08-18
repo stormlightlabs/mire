@@ -24,7 +24,7 @@
 				button.textContent = `${finding.severity} · ${finding.body}`;
 				button.setAttribute('aria-label', `Open ${finding.severity} finding: ${finding.body}`);
 				button.style.cssText =
-					'display:block;width:100%;border:1px solid #b7b7b0;background:#fff;color:#111;padding:.55rem .7rem;text-align:left;font:600 .75rem/1.4 system-ui,sans-serif;cursor:pointer;';
+					'display:block;width:100%;border:1px solid #b7b7b0;background:#fff;color:#111;padding:.5rem .65rem;text-align:left;font:600 .72rem/1.4 system-ui,sans-serif;cursor:pointer;transition:background-color 100ms ease-out;border-radius:0;';
 				button.onclick = () => onFindingClick(finding);
 				return button;
 			}
@@ -210,7 +210,7 @@
 	}
 </script>
 
-<div class="diff-host" bind:this={host}></div>
+<diffs-container class="diff-host" bind:this={host}></diffs-container>
 
 <style>
 	.diff-host {
@@ -222,7 +222,7 @@
 		--diffs-light: var(--ink);
 		--diffs-font-family: 'Google Sans Code Variable', 'Google Sans Code', monospace;
 		--diffs-header-font-family: 'IBM Plex Sans Variable', 'IBM Plex Sans', sans-serif;
-		--diffs-font-size: 0.78rem;
-		--diffs-line-height: 1.45rem;
+		--diffs-font-size: 0.75rem;
+		--diffs-line-height: 1.4rem;
 	}
 </style>

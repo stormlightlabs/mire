@@ -3,6 +3,7 @@
 	import DiffPane from '$lib/DiffPane.svelte';
 	import FileNavigator from '$lib/FileNavigator.svelte';
 	import FindingQueue from '$lib/FindingQueue.svelte';
+	import { loadDevelopmentSessionSecret, parseSessionSecret, saveDevelopmentSessionSecret } from '$lib/session';
 	import {
 		completionSummary,
 		defaultFindingFilters,
@@ -30,19 +31,29 @@
 	let conflictRevision = $state<number | null>(null);
 	let refreshState = $state<'idle' | 'pending' | 'refreshed' | 'unchanged' | 'failed'>('idle');
 	let finishReviewOpen = $state(false);
+	let sessionSecretInput = $state('');
 	let streamAbort: AbortController | null = null;
 	let secret = '';
 	const completion = $derived(review ? completionSummary(review, viewedFileIds) : null);
 	const visibleFindings = $derived(review ? filterFindings(review.findings, filters) : []);
 
 	onMount(() => {
-		secret = window.location.hash.slice(1);
-		window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+		secret = parseSessionSecret(window.location.hash);
+		if (secret) {
+			window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+			if (import.meta.env.DEV) saveDevelopmentSessionSecret(secret);
+		} else if (import.meta.env.DEV) {
+			secret = loadDevelopmentSessionSecret();
+		}
 		if (!secret) {
-			error = 'This review URL is missing its session secret. Run mire serve again.';
+			error = import.meta.env.DEV
+				? 'Paste the session URL printed by mire serve to connect.'
+				: 'This review URL is missing its session secret. Run mire serve again.';
 			return;
 		}
-		void loadReview().then(connectEvents);
+		void loadReview().then((loaded) => {
+			if (loaded) return connectEvents();
+		});
 		return () => streamAbort?.abort();
 	});
 
@@ -60,13 +71,34 @@
 		return (await response.json()) as T;
 	}
 
-	async function loadReview() {
+	async function loadReview(): Promise<boolean> {
 		try {
 			review = await request<ReviewOverview>('/api/v1/review');
 			loadViewedFiles();
 			if (review.files[0]) await selectFile(review.files[0].id);
+			error = null;
+			return true;
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'The review could not be loaded.';
+			return false;
+		}
+	}
+
+	async function connectDevelopmentSession(event: SubmitEvent) {
+		event.preventDefault();
+		const nextSecret = parseSessionSecret(sessionSecretInput);
+		if (!nextSecret) {
+			error = 'Enter the session secret or the complete URL printed by mire serve.';
+			return;
+		}
+		streamAbort?.abort();
+		secret = nextSecret;
+		review = null;
+		error = null;
+		if (await loadReview()) {
+			saveDevelopmentSessionSecret(secret);
+			sessionSecretInput = '';
+			void connectEvents();
 		}
 	}
 
@@ -300,17 +332,19 @@
 					? `${review.source} · revision ${review.revision}${refreshState === 'refreshed' ? ' · refreshed' : refreshState === 'unchanged' ? ' · current' : ''}`
 					: 'Connecting to local review'}</span>
 		</div>
-		{#if review}
-			<button class="topbar-button" disabled={refreshState === 'pending'} onclick={() => void refreshReview()}>
-				{refreshState === 'pending' ? 'Refreshing…' : 'Refresh source'}
-			</button>
-			<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>Finish review</button>
-		{/if}
-		<span
-			class:ready={review?.watch === 'watching'}
-			class:degraded={review?.watch === 'degraded'}
-			class="status"
-			aria-live="polite">{review ? review.watch : 'loading'}</span>
+		<div class="topbar-actions">
+			{#if review}
+				<button class="topbar-button" disabled={refreshState === 'pending'} onclick={() => void refreshReview()}>
+					{refreshState === 'pending' ? 'Refreshing…' : 'Refresh source'}
+				</button>
+				<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>Finish review</button>
+			{/if}
+			<span
+				class:ready={review?.watch === 'watching'}
+				class:degraded={review?.watch === 'degraded'}
+				class="status"
+				aria-live="polite">{review ? review.watch : 'loading'}</span>
+		</div>
 	</header>
 
 	<main id="review-content" class="workspace" tabindex="-1">
@@ -318,6 +352,20 @@
 			<section class="message error" aria-labelledby="error-heading">
 				<h1 id="error-heading">Review unavailable</h1>
 				<p>{error}</p>
+				{#if import.meta.env.DEV}
+					<form class="session-form" onsubmit={connectDevelopmentSession}>
+						<label for="session-secret">Session secret or Mire URL</label>
+						<div>
+							<input
+								id="session-secret"
+								type="password"
+								bind:value={sessionSecretInput}
+								autocomplete="off"
+								placeholder="http://127.0.0.1:3737/#…" />
+							<button type="submit">Connect</button>
+						</div>
+					</form>
+				{/if}
 			</section>
 		{:else if !review}
 			<section class="message" aria-live="polite">
@@ -377,43 +425,55 @@
 
 <style>
 	.app-shell {
-		min-height: 100vh;
+		height: 100vh;
+		height: 100dvh;
+		min-height: 0;
+		overflow: hidden;
 		display: grid;
 		grid-template-rows: auto 1fr;
 	}
 	.topbar {
-		min-height: 3.75rem;
-		display: flex;
+		display: grid;
+		grid-template-columns: 14rem minmax(0, 1fr) 18rem;
 		align-items: center;
-		gap: 1rem;
-		padding: 0.625rem 1rem;
 		border-bottom: 1px solid var(--line);
 		background: var(--surface);
 	}
 	.brand {
-		min-width: 12rem;
 		display: flex;
 		align-items: baseline;
-		gap: 0.5rem;
+		gap: 0.4rem;
+		padding: 0.5rem 1rem;
 		font-family: 'Google Sans Variable', 'Google Sans', sans-serif;
 	}
 	.brand strong {
-		font-size: 1.25rem;
+		font-size: 1.15rem;
 		letter-spacing: -0.04em;
 	}
-	.brand span,
-	.review-meta span,
-	.status {
+	.brand span {
 		color: var(--muted);
-		font-size: 0.75rem;
+		font-size: 0.72rem;
 	}
 	.review-meta {
 		min-width: 0;
-		flex: 1;
 		display: grid;
+		padding: 0.5rem 0.75rem;
+	}
+	.topbar-actions {
+		min-width: 0;
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.75rem;
+		padding: 0.5rem 1rem;
 	}
 	.review-meta strong {
-		font-size: 0.875rem;
+		font-size: 0.82rem;
+	}
+	.review-meta span,
+	.status {
+		color: var(--muted);
+		font-size: 0.72rem;
 	}
 	.review-meta span {
 		overflow: hidden;
@@ -421,20 +481,34 @@
 		white-space: nowrap;
 	}
 	.topbar-button {
-		min-height: 2.1rem;
+		min-height: 1.85rem;
 		border: 1px solid var(--line-strong);
-		padding: 0.3rem 0.55rem;
+		padding: 0.25rem 0.6rem;
 		background: var(--surface);
 		color: var(--ink);
 		font:
-			600 0.75rem 'Google Sans Variable',
+			600 0.72rem 'Google Sans Variable',
 			'Google Sans',
 			sans-serif;
 		cursor: pointer;
+		transition:
+			background-color 100ms ease-out,
+			border-color 100ms ease-out;
+	}
+	.topbar-button:hover {
+		background: var(--paper);
+		border-color: var(--ink);
+	}
+	.topbar-button:active {
+		background: var(--paper-deep);
 	}
 	.topbar-button:disabled {
-		cursor: progress;
-		opacity: 0.65;
+		cursor: not-allowed;
+		opacity: 0.5;
+	}
+	.topbar-button:disabled:hover {
+		background: var(--surface);
+		border-color: var(--line-strong);
 	}
 	.status {
 		display: inline-flex;
@@ -443,25 +517,28 @@
 		white-space: nowrap;
 	}
 	.status::before {
-		width: 0.45rem;
-		height: 0.45rem;
+		width: 0.4rem;
+		height: 0.4rem;
 		border-radius: 50%;
-		background: var(--muted);
+		background: var(--faint);
 		content: '';
 	}
 	.status.ready::before {
-		background: #24724d;
+		background: #2d8a56;
 	}
 	.status.degraded::before {
-		background: #a4332f;
+		background: #c0392b;
 	}
 	.workspace {
 		min-height: 0;
+		overflow: hidden;
 		display: grid;
-		grid-template-columns: 15.5rem minmax(26rem, 1fr) 19rem;
+		grid-template-columns: 14rem minmax(0, 1fr) 18rem;
 	}
 	.message {
 		align-self: center;
+		grid-column: 1 / -1;
+		width: min(100%, 42rem);
 		max-width: 42rem;
 		padding: clamp(2rem, 8vw, 7rem);
 	}
@@ -475,9 +552,58 @@
 	}
 	.message p {
 		color: var(--muted);
+		margin-top: 0.5rem;
 	}
 	.message.error h1 {
 		color: #a4332f;
+	}
+	.session-form {
+		display: grid;
+		gap: 0.4rem;
+		max-width: 34rem;
+		margin-top: 1.5rem;
+	}
+	.session-form label {
+		font:
+			600 0.75rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
+	}
+	.session-form div {
+		display: flex;
+		gap: 0.5rem;
+	}
+	.session-form input {
+		min-width: 0;
+		min-height: 2.5rem;
+		flex: 1;
+		border: 1px solid var(--line-strong);
+		padding: 0.5rem 0.65rem;
+		background: var(--surface);
+		color: var(--ink);
+		font:
+			0.82rem 'Google Sans Code Variable',
+			'Google Sans Code',
+			monospace;
+	}
+	.session-form input:focus-visible {
+		outline: 2px solid var(--focus);
+		outline-offset: 2px;
+	}
+	.session-form button {
+		min-height: 2.5rem;
+		border: 1px solid var(--ink);
+		padding: 0.5rem 0.9rem;
+		background: var(--ink);
+		color: var(--surface);
+		font:
+			600 0.78rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
+		cursor: pointer;
+	}
+	.session-form button:hover {
+		background: #333;
 	}
 	.conflict,
 	.finish-review {
@@ -487,15 +613,15 @@
 		display: grid;
 		place-items: center;
 		padding: 1rem;
-		background: rgb(17 17 17 / 32%);
+		background: rgb(17 17 17 / 40%);
 	}
 	.conflict > div,
 	.finish-review > div {
 		max-width: 30rem;
-		padding: 1.25rem;
-		border: 1px solid var(--ink);
+		padding: 1.5rem;
+		border: 1px solid var(--line);
 		background: var(--surface);
-		box-shadow: 0 0.75rem 2rem rgb(17 17 17 / 18%);
+		box-shadow: 0 1rem 3rem rgb(17 17 17 / 15%);
 	}
 	.conflict h1,
 	.finish-review h1 {
@@ -507,12 +633,14 @@
 	}
 	.conflict p,
 	.finish-review p {
+		color: var(--muted);
 		line-height: 1.5;
+		margin-top: 0.4rem;
 	}
 	.finish-review ul {
 		margin: 1rem 0;
 		padding-left: 1.2rem;
-		line-height: 1.6;
+		line-height: 1.7;
 	}
 	.downloads {
 		display: flex;
@@ -520,24 +648,84 @@
 		gap: 0.5rem;
 		margin-bottom: 1rem;
 	}
+	.downloads button,
 	.conflict button,
-	.finish-review button {
-		min-height: 2.5rem;
+	.finish-review .close {
+		min-height: 2.25rem;
 		border: 1px solid var(--ink);
-		padding: 0.4rem 0.7rem;
+		padding: 0.35rem 0.7rem;
+		background: var(--surface);
+		color: var(--ink);
+		font:
+			600 0.75rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
+		cursor: pointer;
+		transition: background-color 100ms ease-out;
+	}
+	.downloads button:hover,
+	.conflict button:hover,
+	.finish-review .close:hover {
+		background: var(--paper);
+	}
+	.conflict button {
 		background: var(--ink);
 		color: var(--surface);
-		cursor: pointer;
+	}
+	.conflict button:hover {
+		background: #333;
+	}
+	.finish-review .close {
+		margin-top: 0.5rem;
+		width: 100%;
 	}
 	@media (max-width: 54rem) {
+		.topbar {
+			display: flex;
+			align-items: flex-start;
+			flex-wrap: wrap;
+			gap: 0.75rem;
+			padding: 0.5rem 1rem;
+		}
+		.brand,
+		.review-meta,
+		.topbar-actions {
+			padding: 0;
+		}
+		.review-meta {
+			order: 2;
+			flex-basis: 100%;
+		}
+		.topbar-actions {
+			margin-left: auto;
+		}
 		.workspace {
 			grid-template-columns: minmax(0, 1fr);
 		}
-		.brand {
-			min-width: auto;
-		}
 		.brand span {
 			display: none;
+		}
+	}
+	@media (max-width: 32rem) {
+		.message {
+			padding: 2rem 1rem;
+		}
+		.session-form div {
+			align-items: stretch;
+			flex-direction: column;
+		}
+		.session-form button {
+			width: 100%;
+		}
+	}
+	@media (prefers-reduced-motion: no-preference) {
+		.topbar-button,
+		.downloads button,
+		.conflict button,
+		.finish-review .close {
+			transition:
+				background-color 100ms ease-out,
+				border-color 100ms ease-out;
 		}
 	}
 </style>

@@ -81,21 +81,22 @@
 <style>
 	.diff-pane {
 		min-width: 0;
-		padding: clamp(1rem, 2vw, 1.5rem);
-		overflow: auto;
+		overflow-y: auto;
+		overflow-x: hidden;
+		padding: clamp(0.85rem, 2vw, 1.25rem);
 	}
 	.diff-heading {
 		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
-		gap: 1rem;
-		margin-bottom: 1rem;
+		gap: 0.75rem;
+		margin-bottom: 0.85rem;
 	}
 	.diff-heading h1 {
-		margin: 0.15rem 0 0;
+		margin: 0.1rem 0 0;
 		overflow-wrap: anywhere;
 		font:
-			600 clamp(1.15rem, 2.5vw, 1.7rem) 'Google Sans Variable',
+			600 clamp(1.1rem, 2.5vw, 1.5rem) 'Google Sans Variable',
 			'Google Sans',
 			sans-serif;
 		letter-spacing: -0.035em;
@@ -103,7 +104,7 @@
 	.eyebrow {
 		color: var(--muted);
 		font:
-			650 0.68rem 'Google Sans Code Variable',
+			650 0.65rem 'Google Sans Code Variable',
 			'Google Sans Code',
 			monospace;
 		letter-spacing: 0.06em;
@@ -113,30 +114,30 @@
 	.finding-title,
 	.finding-detail footer {
 		color: var(--muted);
-		font-size: 0.75rem;
+		font-size: 0.72rem;
 	}
 	.finding-detail {
-		margin-bottom: 1rem;
-		padding: 0.8rem;
+		margin-bottom: 0.85rem;
+		padding: 0.7rem;
 		border: 1px solid var(--line-strong);
 		background: var(--paper);
 	}
 	.finding-title {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: 0.45rem;
 	}
 	.finding-detail p {
-		margin: 0.65rem 0;
-		line-height: 1.45;
+		margin: 0.55rem 0;
+		line-height: 1.5;
 	}
 	.finding-error {
 		color: #a4332f;
-		font-size: 0.8rem;
+		font-size: 0.78rem;
 	}
 	.diff-state {
 		display: grid;
-		min-height: 18rem;
+		min-height: 16rem;
 		place-content: center;
 		padding: 2rem;
 		border: 1px dashed var(--line-strong);
@@ -145,20 +146,21 @@
 	.diff-state h2 {
 		margin: 0;
 		font:
-			600 1.2rem 'Google Sans Variable',
+			600 1.1rem 'Google Sans Variable',
 			'Google Sans',
 			sans-serif;
 	}
 	.diff-state p,
 	.message p {
 		color: var(--muted);
+		margin-top: 0.35rem;
 	}
 	.badge {
 		display: inline-block;
-		padding: 0.1rem 0.3rem;
+		padding: 0.08rem 0.3rem;
 		border: 1px solid currentColor;
 		font-family: 'Google Sans Code Variable', 'Google Sans Code', monospace;
-		font-size: 0.65rem;
+		font-size: 0.62rem;
 		text-transform: uppercase;
 	}
 	.message {

@@ -81,24 +81,24 @@
 <style>
 	.finding-editor {
 		display: grid;
-		gap: 0.65rem;
-		margin-bottom: 1rem;
-		padding: 0.8rem;
+		gap: 0.55rem;
+		margin-bottom: 0.85rem;
+		padding: 0.7rem;
 		border: 1px solid var(--line-strong);
 		background: var(--surface);
 	}
 	.finding-editor h2 {
 		margin: 0;
 		font:
-			600 0.875rem 'Google Sans Variable',
+			600 0.82rem 'Google Sans Variable',
 			'Google Sans',
 			sans-serif;
 	}
 	.finding-editor label {
 		display: grid;
-		gap: 0.3rem;
+		gap: 0.25rem;
 		color: var(--muted);
-		font-size: 0.72rem;
+		font-size: 0.68rem;
 		font-weight: 600;
 	}
 	.finding-editor textarea,
@@ -106,43 +106,78 @@
 		width: 100%;
 		border: 1px solid var(--line-strong);
 		border-radius: 0.2rem;
-		padding: 0.45rem 0.55rem;
+		padding: 0.4rem 0.5rem;
 		background: var(--paper);
 		color: var(--ink);
 		font: inherit;
+		transition: border-color 100ms ease-out;
+	}
+	.finding-editor textarea:focus,
+	.finding-editor select:focus {
+		outline: none;
+		border-color: var(--ink);
 	}
 	.finding-editor textarea {
-		min-height: 5rem;
+		min-height: 4.5rem;
 		resize: vertical;
 	}
 	.editor-fields,
 	.editor-actions {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.55rem;
+		gap: 0.45rem;
 	}
 	.editor-fields > label {
 		flex: 1 1 9rem;
 	}
 	.editor-actions button {
-		min-height: 2.25rem;
+		min-height: 2rem;
 		border: 1px solid var(--ink);
 		border-radius: 0.2rem;
-		padding: 0.35rem 0.55rem;
+		padding: 0.3rem 0.55rem;
 		background: var(--surface);
+		font:
+			600 0.72rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
 		cursor: pointer;
+		transition: background-color 100ms ease-out;
+	}
+	.editor-actions button:hover {
+		background: var(--paper);
+	}
+	.editor-actions button:active {
+		background: var(--paper-deep);
 	}
 	.editor-actions button[type='submit'] {
 		background: var(--ink);
 		color: var(--surface);
 	}
+	.editor-actions button[type='submit']:hover {
+		background: #333;
+	}
 	.editor-actions button:disabled {
-		cursor: wait;
-		opacity: 0.6;
+		cursor: not-allowed;
+		opacity: 0.5;
+	}
+	.editor-actions button:disabled:hover {
+		background: var(--surface);
+	}
+	.editor-actions button[type='submit']:disabled:hover {
+		background: var(--ink);
 	}
 	.editor-message {
 		margin: 0;
 		color: #a4332f;
-		font-size: 0.8rem;
+		font-size: 0.78rem;
+	}
+	@media (prefers-reduced-motion: no-preference) {
+		.editor-actions button,
+		.finding-editor textarea,
+		.finding-editor select {
+			transition:
+				background-color 100ms ease-out,
+				border-color 100ms ease-out;
+		}
 	}
 </style>

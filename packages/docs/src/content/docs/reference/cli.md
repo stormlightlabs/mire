@@ -113,6 +113,34 @@ writes fail with `revision_conflict`. Full-note import remains available for
 compatible clients. List returns deterministic JSON. Export can produce JSON
 or standalone Markdown.
 
+## Browser review server
+
+```text
+mire serve REVIEW.json [--port PORT] [--open]
+```
+
+Starts a loopback HTTP server that serves the review in a local browser. The
+server prints a session URL containing a random secret. Open that URL in a
+browser to view the review, or pass `--open` to launch automatically.
+
+The server proxies the embedded frontend and exposes a REST API at `/api/v1/*`.
+Frontend changes during development are proxied through Vite when using
+`pnpm run dev` in `packages/app`.
+
+```sh
+# Serve a review on the default port
+mire serve review.json
+
+# Serve on a specific port
+mire serve review.json --port 3737
+
+# Open the browser automatically
+mire serve review.json --open
+```
+
+See [local development](/docs/guides/local-development/) for the full workflow
+with the Vite dev server.
+
 ## Agent skill
 
 ```text

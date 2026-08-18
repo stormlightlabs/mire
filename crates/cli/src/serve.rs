@@ -444,6 +444,7 @@ fn app(state: AppState) -> Router {
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+    eprintln!("Shutting down Mire review server…");
 }
 
 fn start_watcher(state: AppState, shutdown: watch::Receiver<bool>) -> JoinHandle<()> {

@@ -51,6 +51,7 @@ Work from top to bottom unless dependencies allow otherwise.
 - [ ] Complete keyboard, focus, screen-reader, contrast, and reduced-motion
       behavior.
 - [ ] Measure large-review rendering before adding highlighting or virtualization.
+- [ ] Add dark mode with toggle
 
 ## Portable patch export
 
@@ -70,3 +71,7 @@ Work from top to bottom unless dependencies allow otherwise.
 - [ ] Check embedded assets in CI and packaging without Node.
 - [ ] Update user and security documentation.
 - [ ] Run the complete Rust and frontend checks.
+
+## Parking Lot
+
+- [ ] Add comments to review findings

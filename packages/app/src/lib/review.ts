@@ -96,6 +96,16 @@ export type Problem = {
 	actualRevision?: number;
 };
 
+export type WatchStatus = 'watching' | 'unavailable' | 'degraded';
+
+export type ReanchorTotals = {
+	captured: number;
+	exact: number;
+	moved: number;
+	stale: number;
+	ambiguous: number;
+};
+
 export type ReviewOverview = {
 	reviewIdentity: string;
 	revision: number;
@@ -110,4 +120,33 @@ export type ReviewOverview = {
 		dismissed: number;
 		acceptedRisk: number;
 	};
+	changes: { additions: number; deletions: number };
+	reanchor: ReanchorTotals;
+	readiness: { ready: boolean; openFindings: number; unsafeAnchors: number };
+	watch: WatchStatus;
 };
+
+export type RefreshResponse = {
+	revision: number;
+	status: 'refreshed' | 'unchanged';
+	reanchor: ReanchorTotals;
+};
+
+export type CompletionSummary = {
+	ready: boolean;
+	unviewedFiles: number;
+	openFindings: number;
+	unsafeAnchors: number;
+};
+
+/** Combines durable review readiness with browser-local file progress. */
+export function completionSummary(review: ReviewOverview, viewedFileIds: string[]): CompletionSummary {
+	const viewed = new Set(viewedFileIds);
+	const unviewedFiles = review.files.filter((file) => !viewed.has(file.id)).length;
+	return {
+		ready: review.readiness.ready && unviewedFiles === 0,
+		unviewedFiles,
+		openFindings: review.readiness.openFindings,
+		unsafeAnchors: review.readiness.unsafeAnchors
+	};
+}

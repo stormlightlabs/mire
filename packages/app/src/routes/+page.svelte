@@ -4,6 +4,7 @@
 	import FileNavigator from '$lib/FileNavigator.svelte';
 	import FindingQueue from '$lib/FindingQueue.svelte';
 	import {
+		completionSummary,
 		defaultFindingFilters,
 		filterFindings,
 		type FileDetail,
@@ -12,7 +13,9 @@
 		type FindingMutation,
 		type FindingSummary,
 		type Problem,
-		type ReviewOverview
+		type RefreshResponse,
+		type ReviewOverview,
+		type WatchStatus
 	} from '$lib/review';
 
 	let review = $state<ReviewOverview | null>(null);
@@ -25,7 +28,11 @@
 	let filters = $state({ ...defaultFindingFilters });
 	let viewedFileIds = $state<string[]>([]);
 	let conflictRevision = $state<number | null>(null);
+	let refreshState = $state<'idle' | 'pending' | 'refreshed' | 'unchanged' | 'failed'>('idle');
+	let finishReviewOpen = $state(false);
+	let streamAbort: AbortController | null = null;
 	let secret = '';
+	const completion = $derived(review ? completionSummary(review, viewedFileIds) : null);
 	const visibleFindings = $derived(review ? filterFindings(review.findings, filters) : []);
 
 	onMount(() => {
@@ -35,7 +42,8 @@
 			error = 'This review URL is missing its session secret. Run mire serve again.';
 			return;
 		}
-		void loadReview();
+		void loadReview().then(connectEvents);
+		return () => streamAbort?.abort();
 	});
 
 	async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -72,6 +80,75 @@
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : 'The review could not be reloaded.';
 		}
+	}
+
+	async function refreshReview() {
+		if (!review || refreshState === 'pending') return;
+		refreshState = 'pending';
+		try {
+			const result = await request<RefreshResponse>('/api/v1/refresh', { method: 'POST' });
+			refreshState = result.status;
+			await reloadReview();
+		} catch (cause) {
+			refreshState = 'failed';
+			error = cause instanceof Error ? cause.message : 'The source could not be refreshed.';
+		}
+	}
+
+	async function download(path: string, filename: string) {
+		try {
+			const response = await fetch(path, { headers: { Authorization: `Bearer ${secret}` } });
+			if (!response.ok) throw new Error(`The download is unavailable (${response.status}).`);
+			const url = URL.createObjectURL(await response.blob());
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = filename;
+			link.click();
+			URL.revokeObjectURL(url);
+		} catch (cause) {
+			error = cause instanceof Error ? cause.message : 'The download could not be created.';
+		}
+	}
+
+	async function connectEvents() {
+		streamAbort?.abort();
+		streamAbort = new AbortController();
+		try {
+			const response = await fetch('/api/v1/events', {
+				headers: { Authorization: `Bearer ${secret}` },
+				signal: streamAbort.signal
+			});
+			if (!response.ok || !response.body) throw new Error('Live review updates are unavailable.');
+			const reader = response.body.getReader();
+			const decoder = new TextDecoder();
+			let buffer = '';
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				buffer += decoder.decode(value, { stream: true });
+				const messages = buffer.split('\n\n');
+				buffer = messages.pop() ?? '';
+				for (const message of messages) {
+					const data = message
+						.split('\n')
+						.find((line) => line.startsWith('data:'))
+						?.slice('data:'.length)
+						.trim();
+					if (data) await handleEvent(data);
+				}
+			}
+		} catch (cause) {
+			if (!streamAbort?.signal.aborted) {
+				error = cause instanceof Error ? cause.message : 'Live review updates disconnected.';
+				window.setTimeout(connectEvents, 1_000);
+			}
+		}
+	}
+
+	async function handleEvent(data: string) {
+		const event = JSON.parse(data) as { kind?: string; watch?: WatchStatus };
+		if (event.kind === 'shutdown') return;
+		await reloadReview();
 	}
 
 	async function selectFile(id: string, finding?: FindingSummary) {
@@ -179,7 +256,12 @@
 	function onKeydown(event: KeyboardEvent) {
 		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
 		const target = event.target;
-		if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+		if (
+			target instanceof HTMLInputElement ||
+			target instanceof HTMLTextAreaElement ||
+			target instanceof HTMLSelectElement
+		)
+			return;
 		if (event.key === 'j') {
 			event.preventDefault();
 			navigateQueue(1);
@@ -213,9 +295,22 @@
 		</div>
 		<div class="review-meta">
 			<strong>Local review</strong>
-			<span>{review ? `${review.source} · revision ${review.revision}` : 'Connecting to local review'}</span>
+			<span
+				>{review
+					? `${review.source} · revision ${review.revision}${refreshState === 'refreshed' ? ' · refreshed' : refreshState === 'unchanged' ? ' · current' : ''}`
+					: 'Connecting to local review'}</span>
 		</div>
-		<span class:ready={review} class="status" aria-live="polite">{review ? 'ready' : 'loading'}</span>
+		{#if review}
+			<button class="topbar-button" disabled={refreshState === 'pending'} onclick={() => void refreshReview()}>
+				{refreshState === 'pending' ? 'Refreshing…' : 'Refresh source'}
+			</button>
+			<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>Finish review</button>
+		{/if}
+		<span
+			class:ready={review?.watch === 'watching'}
+			class:degraded={review?.watch === 'degraded'}
+			class="status"
+			aria-live="polite">{review ? review.watch : 'loading'}</span>
 	</header>
 
 	<main id="review-content" class="workspace" tabindex="-1">
@@ -247,6 +342,28 @@
 				onSelect={selectFinding} />
 		{/if}
 	</main>
+	{#if finishReviewOpen && review && completion}
+		<dialog class="finish-review" open aria-labelledby="finish-review-heading">
+			<div>
+				<h1 id="finish-review-heading">Finish review</h1>
+				<p>
+					{completion.ready ? 'This review is ready to hand off.' : 'Resolve the remaining review work before handoff.'}
+				</p>
+				<ul>
+					<li>{completion.unviewedFiles} unviewed file{completion.unviewedFiles === 1 ? '' : 's'}</li>
+					<li>{completion.openFindings} open finding{completion.openFindings === 1 ? '' : 's'}</li>
+					<li>{completion.unsafeAnchors} stale or ambiguous anchor{completion.unsafeAnchors === 1 ? '' : 's'}</li>
+				</ul>
+				<div class="downloads" aria-label="Review downloads">
+					<button onclick={() => void download('/api/v1/exports/notes.md', 'mire-notes.md')}>Markdown</button>
+					<button onclick={() => void download('/api/v1/exports/notes.json', 'mire-notes.json')}>JSON</button>
+					<button onclick={() => void download('/api/v1/exports/context.json', 'mire-context.json')}
+						>Agent context</button>
+				</div>
+				<button class="close" onclick={() => (finishReviewOpen = false)}>Close</button>
+			</div>
+		</dialog>
+	{/if}
 	{#if conflictRevision !== null}
 		<dialog class="conflict" open aria-labelledby="conflict-heading">
 			<div>
@@ -303,6 +420,22 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	.topbar-button {
+		min-height: 2.1rem;
+		border: 1px solid var(--line-strong);
+		padding: 0.3rem 0.55rem;
+		background: var(--surface);
+		color: var(--ink);
+		font:
+			600 0.75rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
+		cursor: pointer;
+	}
+	.topbar-button:disabled {
+		cursor: progress;
+		opacity: 0.65;
+	}
 	.status {
 		display: inline-flex;
 		align-items: center;
@@ -317,7 +450,10 @@
 		content: '';
 	}
 	.status.ready::before {
-		background: var(--ink);
+		background: #24724d;
+	}
+	.status.degraded::before {
+		background: #a4332f;
 	}
 	.workspace {
 		min-height: 0;
@@ -343,7 +479,8 @@
 	.message.error h1 {
 		color: #a4332f;
 	}
-	.conflict {
+	.conflict,
+	.finish-review {
 		position: fixed;
 		inset: 0;
 		z-index: 2;
@@ -352,21 +489,39 @@
 		padding: 1rem;
 		background: rgb(17 17 17 / 32%);
 	}
-	.conflict > div {
+	.conflict > div,
+	.finish-review > div {
 		max-width: 30rem;
 		padding: 1.25rem;
 		border: 1px solid var(--ink);
 		background: var(--surface);
 		box-shadow: 0 0.75rem 2rem rgb(17 17 17 / 18%);
 	}
-	.conflict h1 {
+	.conflict h1,
+	.finish-review h1 {
 		margin: 0;
-		font: 600 1.25rem 'Google Sans Variable', 'Google Sans', sans-serif;
+		font:
+			600 1.25rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
 	}
-	.conflict p {
+	.conflict p,
+	.finish-review p {
 		line-height: 1.5;
 	}
-	.conflict button {
+	.finish-review ul {
+		margin: 1rem 0;
+		padding-left: 1.2rem;
+		line-height: 1.6;
+	}
+	.downloads {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+	}
+	.conflict button,
+	.finish-review button {
 		min-height: 2.5rem;
 		border: 1px solid var(--ink);
 		padding: 0.4rem 0.7rem;

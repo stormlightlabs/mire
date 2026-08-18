@@ -1,16 +1,20 @@
 //! Loopback HTTP server for the browser review surface.
 
+use std::convert::Infallible;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path as AxumPath, Request, State};
-use axum::http::header::{AUTHORIZATION, CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, ORIGIN};
+use axum::http::header::{
+    AUTHORIZATION, CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_SECURITY_POLICY, CONTENT_TYPE, HOST, ORIGIN,
+};
 use axum::http::{HeaderMap, HeaderValue, Method, Response, StatusCode, Uri};
 use axum::middleware::{self, Next};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json};
 use axum::routing::{get, post};
 use axum::{Router, extract::MatchedPath};
@@ -23,12 +27,19 @@ use mire_core::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
+use tokio::sync::{broadcast, watch};
+use tokio::task::JoinHandle;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::cli::ServeArgs;
+use crate::protocol::{ContextSelection, ProtocolError, context_json, notes_json, notes_markdown};
+use crate::refresh::{RefreshError, refresh_review};
 use crate::review_file::{ReviewFileError, read_review};
+use crate::watch::WatchSet;
 
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/web");
 
@@ -53,6 +64,8 @@ struct AppState {
     session_secret: Arc<str>,
     origin: Arc<str>,
     request_ids: Arc<AtomicU64>,
+    events: broadcast::Sender<ServerEvent>,
+    watch_status: Arc<Mutex<WatchStatus>>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -64,6 +77,10 @@ struct ReviewOverview {
     files: Vec<FileSummary>,
     findings: Vec<FindingSummary>,
     totals: ReviewTotals,
+    changes: ChangeTotals,
+    reanchor: ReanchorTotals,
+    readiness: ReadinessSummary,
+    watch: WatchStatus,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -174,6 +191,64 @@ struct ReviewTotals {
     accepted_risk: usize,
 }
 
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct ChangeTotals {
+    additions: usize,
+    deletions: usize,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct ReanchorTotals {
+    captured: usize,
+    exact: usize,
+    moved: usize,
+    stale: usize,
+    ambiguous: usize,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct ReadinessSummary {
+    ready: bool,
+    open_findings: usize,
+    unsafe_anchors: usize,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+enum WatchStatus {
+    Watching,
+    Unavailable,
+    Degraded,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+struct ServerEvent {
+    kind: ServerEventKind,
+    revision: Option<u64>,
+    watch: WatchStatus,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ServerEventKind {
+    ReviewInvalidated,
+    Refresh,
+    WatchStatus,
+    Shutdown,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct RefreshResponse {
+    revision: u64,
+    status: String,
+    reanchor: ReanchorTotals,
+}
+
 #[derive(Deserialize, Serialize, ToSchema)]
 struct Problem {
     code: String,
@@ -244,7 +319,19 @@ enum FindingMutationError {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_review, get_file, get_finding, edit_finding, decide_finding, get_openapi),
+    paths(
+        get_review,
+        get_file,
+        get_finding,
+        edit_finding,
+        decide_finding,
+        refresh,
+        get_events,
+        export_notes_json,
+        export_notes_markdown,
+        export_context,
+        get_openapi
+    ),
     components(schemas(
         ReviewOverview,
         FileSummary,
@@ -257,6 +344,11 @@ enum FindingMutationError {
         FindingAuthor,
         DisplayText,
         ReviewTotals,
+        ChangeTotals,
+        ReanchorTotals,
+        ReadinessSummary,
+        WatchStatus,
+        RefreshResponse,
         EditFindingRequest,
         FindingDecisionRequest,
         FindingMutation,
@@ -280,23 +372,45 @@ pub async fn run(arguments: ServeArgs) -> Result<(), ServeError> {
     let origin: Arc<str> = format!("http://{address}").into();
     let secret = session_secret().map_err(ServeError::Bind)?;
     let session_url = format!("{origin}/#{secret}");
+    let (events, _) = broadcast::channel(64);
+    let initial_watch_status = if read_review(&review_path)
+        .map_err(ServeError::Review)?
+        .source_binding()
+        .is_some()
+    {
+        WatchStatus::Watching
+    } else {
+        WatchStatus::Unavailable
+    };
     let state = AppState {
         review_identity: review_identity(&review_path).map_err(ServeError::Bind)?,
         review_path,
         session_secret: secret.into(),
         origin,
         request_ids: Arc::new(AtomicU64::new(1)),
+        events,
+        watch_status: Arc::new(Mutex::new(initial_watch_status)),
     };
+    let (shutdown, shutdown_receiver) = watch::channel(false);
+    let watcher = start_watcher(state.clone(), shutdown_receiver);
 
     println!("Mire review server: {session_url}");
     if arguments.open {
         open::that_detached(&session_url).map_err(ServeError::OpenBrowser)?;
     }
 
-    axum::serve(listener, app(state))
+    let server = axum::serve(listener, app(state.clone()))
         .with_graceful_shutdown(shutdown_signal())
         .await
-        .map_err(ServeError::Run)
+        .map_err(ServeError::Run);
+    let _ = state
+        .events
+        .send(server_event(ServerEventKind::Shutdown, None, watch_status(&state)));
+    let _ = shutdown.send(true);
+    if let Err(error) = watcher.await {
+        tracing::error!(error = %error, "Mire watcher task stopped unexpectedly");
+    }
+    server
 }
 
 fn app(state: AppState) -> Router {
@@ -305,6 +419,11 @@ fn app(state: AppState) -> Router {
         .route("/api/v1/files/{file_id}", get(get_file))
         .route("/api/v1/findings/{note_id}", get(get_finding).patch(edit_finding))
         .route("/api/v1/findings/{note_id}/decision", post(decide_finding))
+        .route("/api/v1/refresh", post(refresh))
+        .route("/api/v1/events", get(get_events))
+        .route("/api/v1/exports/notes.json", get(export_notes_json))
+        .route("/api/v1/exports/notes.md", get(export_notes_markdown))
+        .route("/api/v1/exports/context.json", get(export_context))
         .route("/api/v1/openapi.json", get(get_openapi))
         .fallback(get(static_asset))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
@@ -325,6 +444,170 @@ fn app(state: AppState) -> Router {
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+fn start_watcher(state: AppState, shutdown: watch::Receiver<bool>) -> JoinHandle<()> {
+    tokio::task::spawn_blocking(move || watch_review(state, shutdown))
+}
+
+fn watch_review(state: AppState, shutdown: watch::Receiver<bool>) {
+    let review_parent = watched_file_parent(&state.review_path);
+    let mut review_watcher = match WatchSet::new(&review_parent, false) {
+        Ok(watcher) => watcher,
+        Err(error) => {
+            tracing::warn!(error = %error, "Mire review-file watching is unavailable");
+            set_watch_status(&state, WatchStatus::Degraded);
+            return;
+        }
+    };
+    let (mut source_watcher, mut source_degraded) = match create_source_watcher(&state) {
+        Ok(watcher) => (watcher, false),
+        Err(error) => {
+            tracing::warn!(error = %error, "Mire source watching is unavailable");
+            (None, true)
+        }
+    };
+    set_watch_status(
+        &state,
+        if source_degraded {
+            WatchStatus::Degraded
+        } else if source_watcher.is_some() {
+            WatchStatus::Watching
+        } else {
+            WatchStatus::Unavailable
+        },
+    );
+    let mut source_retry = Instant::now() + Duration::from_secs(2);
+    let mut revision = read_review(&state.review_path)
+        .ok()
+        .map(|review| review.revision().get());
+
+    while !*shutdown.borrow() {
+        if source_watcher.is_none() && Instant::now() >= source_retry {
+            source_retry = Instant::now() + Duration::from_secs(2);
+            match create_source_watcher(&state) {
+                Ok(Some(watcher)) => {
+                    source_watcher = Some(watcher);
+                    source_degraded = false;
+                    set_watch_status(&state, WatchStatus::Watching);
+                }
+                Ok(None) if !source_degraded => set_watch_status(&state, WatchStatus::Unavailable),
+                Ok(None) => {}
+                Err(error) => {
+                    tracing::warn!(error = %error, "Mire source watcher recovery failed");
+                    source_degraded = true;
+                    set_watch_status(&state, WatchStatus::Degraded);
+                }
+            }
+        }
+        let review_due = review_watcher.reload_due();
+        if let Some(error) = review_watcher.take_error() {
+            tracing::warn!(error = %error, "Mire review-file watcher failed");
+            set_watch_status(&state, WatchStatus::Degraded);
+        }
+        let source_due = source_watcher.as_mut().is_some_and(WatchSet::reload_due);
+        if let Some(error) = source_watcher.as_mut().and_then(WatchSet::take_error) {
+            tracing::warn!(error = %error, "Mire source watcher failed");
+            source_watcher = None;
+            source_degraded = true;
+            set_watch_status(&state, WatchStatus::Degraded);
+        }
+
+        if review_due {
+            match read_review(&state.review_path) {
+                Ok(review) if revision != Some(review.revision().get()) => {
+                    revision = Some(review.revision().get());
+                    publish(&state, ServerEventKind::ReviewInvalidated, revision);
+                }
+                Ok(_) => {
+                    if !source_degraded {
+                        set_watch_status(
+                            &state,
+                            if source_watcher.is_some() { WatchStatus::Watching } else { WatchStatus::Unavailable },
+                        );
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "Mire review-file reload failed");
+                    set_watch_status(&state, WatchStatus::Degraded);
+                }
+            }
+        }
+        if source_due {
+            match refresh_review(&state.review_path) {
+                Ok(result) => {
+                    revision = Some(result.review().revision().get());
+                    if result.changed() {
+                        publish(&state, ServerEventKind::Refresh, revision);
+                    }
+                    if source_watcher.is_some() {
+                        source_degraded = false;
+                        set_watch_status(&state, WatchStatus::Watching);
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "Mire source refresh failed");
+                    source_degraded = true;
+                    set_watch_status(&state, WatchStatus::Degraded);
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn create_source_watcher(state: &AppState) -> Result<Option<WatchSet>, crate::watch::WatchError> {
+    let review = match read_review(&state.review_path) {
+        Ok(review) => review,
+        Err(_) => return Ok(None),
+    };
+    let Some(binding) = review.source_binding() else {
+        return Ok(None);
+    };
+    let root = match crate::git::bound_repository_root(binding) {
+        Ok(root) => root,
+        Err(error) => {
+            tracing::warn!(error = %error, "Mire source binding is unavailable");
+            return Ok(None);
+        }
+    };
+    WatchSet::new(&root, true).map(Some)
+}
+
+fn watched_file_parent(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .to_owned()
+}
+
+fn watch_status(state: &AppState) -> WatchStatus {
+    state
+        .watch_status
+        .lock()
+        .map_or(WatchStatus::Degraded, |status| *status)
+}
+
+fn set_watch_status(state: &AppState, status: WatchStatus) {
+    let changed = state.watch_status.lock().is_ok_and(|mut current| {
+        if *current == status {
+            false
+        } else {
+            *current = status;
+            true
+        }
+    });
+    if changed {
+        publish(state, ServerEventKind::WatchStatus, None);
+    }
+}
+
+fn publish(state: &AppState, kind: ServerEventKind, revision: Option<u64>) {
+    let _ = state.events.send(server_event(kind, revision, watch_status(state)));
+}
+
+fn server_event(kind: ServerEventKind, revision: Option<u64>, watch: WatchStatus) -> ServerEvent {
+    ServerEvent { kind, revision, watch }
 }
 
 async fn secure_request(State(state): State<AppState>, request: Request, next: Next) -> Response<Body> {
@@ -381,7 +664,11 @@ async fn secure_request(State(state): State<AppState>, request: Request, next: N
 )]
 async fn get_review(State(state): State<AppState>) -> Response<Body> {
     match load_current_review(&state).await {
-        Ok(review) => Json(review_overview(&state.review_identity, &review)).into_response(),
+        Ok(review) => {
+            let mut overview = review_overview(&state.review_identity, &review);
+            overview.watch = watch_status(&state);
+            Json(overview).into_response()
+        }
         Err(response) => response,
     }
 }
@@ -461,7 +748,10 @@ async fn edit_finding(
     })
     .await
     {
-        Ok(Ok(mutation)) => Json(mutation).into_response(),
+        Ok(Ok(mutation)) => {
+            publish(&state, ServerEventKind::ReviewInvalidated, Some(mutation.revision));
+            Json(mutation).into_response()
+        }
         Ok(Err(error)) => finding_mutation_problem(error),
         Err(_) => finding_mutation_problem(FindingMutationError::Unavailable),
     }
@@ -492,7 +782,10 @@ async fn decide_finding(
     })
     .await
     {
-        Ok(Ok(mutation)) => Json(mutation).into_response(),
+        Ok(Ok(mutation)) => {
+            publish(&state, ServerEventKind::ReviewInvalidated, Some(mutation.revision));
+            Json(mutation).into_response()
+        }
         Ok(Err(error)) => finding_mutation_problem(error),
         Err(_) => finding_mutation_problem(FindingMutationError::Unavailable),
     }
@@ -613,6 +906,94 @@ impl From<FindingDecision> for NoteStatus {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/v1/refresh",
+    responses(
+        (status = 200, description = "Refreshed review and re-anchor summary", body = RefreshResponse),
+        (status = 409, description = "The review was changed repeatedly during refresh", body = Problem),
+        (status = 422, description = "The review has no usable source binding", body = Problem)
+    )
+)]
+async fn refresh(State(state): State<AppState>) -> Response<Body> {
+    let path = state.review_path.clone();
+    match tokio::task::spawn_blocking(move || refresh_review(&path)).await {
+        Ok(Ok(result)) => {
+            let review = result.review();
+            let response = RefreshResponse {
+                revision: review.revision().get(),
+                status: if result.changed() { "refreshed" } else { "unchanged" }.to_owned(),
+                reanchor: reanchor_totals(review),
+            };
+            publish(&state, ServerEventKind::Refresh, Some(response.revision));
+            Json(response).into_response()
+        }
+        Ok(Err(error)) => refresh_problem(error),
+        Err(_) => problem(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "refresh_unavailable",
+            "The source refresh could not finish.",
+        ),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/events",
+    responses((status = 200, description = "Authenticated review invalidation event stream"))
+)]
+async fn get_events(State(state): State<AppState>) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let stream = BroadcastStream::new(state.events.subscribe()).filter_map(|event| {
+        event.ok().map(|event| {
+            let data = serde_json::to_string(&event).unwrap_or_else(|_| "{\"kind\":\"watch_status\"}".to_owned());
+            Ok(Event::default().event("mire").data(data))
+        })
+    });
+    Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("keepalive"))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/exports/notes.json",
+    responses((status = 200, description = "Deterministic notes JSON download"))
+)]
+async fn export_notes_json(State(state): State<AppState>) -> Response<Body> {
+    match load_current_review(&state).await {
+        Ok(review) => match notes_json(&review) {
+            Ok(bytes) => download(bytes, "application/json; charset=utf-8", "mire-notes.json"),
+            Err(error) => protocol_problem(error),
+        },
+        Err(response) => response,
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/exports/notes.md",
+    responses((status = 200, description = "Deterministic notes Markdown download"))
+)]
+async fn export_notes_markdown(State(state): State<AppState>) -> Response<Body> {
+    match load_current_review(&state).await {
+        Ok(review) => download(notes_markdown(&review), "text/markdown; charset=utf-8", "mire-notes.md"),
+        Err(response) => response,
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/exports/context.json",
+    responses((status = 200, description = "Bounded agent context JSON download"))
+)]
+async fn export_context(State(state): State<AppState>) -> Response<Body> {
+    match load_current_review(&state).await {
+        Ok(review) => match context_json(&review, ContextSelection::Manifest, Some(256 * 1024)) {
+            Ok(bytes) => download(bytes, "application/json; charset=utf-8", "mire-context.json"),
+            Err(error) => protocol_problem(error),
+        },
+        Err(response) => response,
+    }
+}
+
 async fn load_current_review(state: &AppState) -> Result<Review, Response<Body>> {
     let path = state.review_path.clone();
     match tokio::task::spawn_blocking(move || read_review(&path)).await {
@@ -623,6 +1004,47 @@ async fn load_current_review(state: &AppState) -> Result<Review, Response<Body>>
             "The review file could not be read.",
         )),
     }
+}
+
+fn refresh_problem(error: RefreshError) -> Response<Body> {
+    match error {
+        RefreshError::UnavailableSource => problem(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "source_unavailable",
+            "This review has no source binding that can be refreshed.",
+        ),
+        RefreshError::Review(ReviewFileError::Locked { .. } | ReviewFileError::RevisionConflict { .. }) => problem(
+            StatusCode::CONFLICT,
+            "revision_conflict",
+            "The review changed during refresh. Reload and try again.",
+        ),
+        RefreshError::Review(_) | RefreshError::Git(_) | RefreshError::Reanchor(_) => problem(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "refresh_failed",
+            "Mire could not refresh the bound source. The current review is still available.",
+        ),
+    }
+}
+
+fn protocol_problem(error: ProtocolError) -> Response<Body> {
+    tracing::warn!(error = %error, "Mire export failed");
+    problem(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "export_unavailable",
+        "The requested export could not be created.",
+    )
+}
+
+fn download(bytes: Vec<u8>, content_type: &'static str, filename: &'static str) -> Response<Body> {
+    let mut response = Response::new(Body::from(bytes));
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
+    response.headers_mut().insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!("attachment; filename=\"{filename}\"")).expect("static filename is valid"),
+    );
+    response
 }
 
 #[utoipa::path(
@@ -700,6 +1122,13 @@ fn review_overview(identity: &str, review: &Review) -> ReviewOverview {
             NoteStatus::AcceptedRisk => totals.accepted_risk += 1,
         }
     }
+    let reanchor = reanchor_totals(review);
+    let changes = change_totals(review);
+    let readiness = ReadinessSummary {
+        ready: totals.open == 0 && reanchor.stale == 0 && reanchor.ambiguous == 0,
+        open_findings: totals.open,
+        unsafe_anchors: reanchor.stale + reanchor.ambiguous,
+    };
 
     ReviewOverview {
         review_identity: identity.to_owned(),
@@ -708,7 +1137,44 @@ fn review_overview(identity: &str, review: &Review) -> ReviewOverview {
         files,
         findings,
         totals,
+        changes,
+        reanchor,
+        readiness,
+        watch: WatchStatus::Unavailable,
     }
+}
+
+fn change_totals(review: &Review) -> ChangeTotals {
+    let mut totals = ChangeTotals { additions: 0, deletions: 0 };
+    for file in review.changeset().files() {
+        let FileContent::Text { hunks } = file.content() else {
+            continue;
+        };
+        for hunk in hunks {
+            for line in hunk.lines() {
+                match line.kind() {
+                    mire_core::LineKind::Addition => totals.additions += 1,
+                    mire_core::LineKind::Deletion => totals.deletions += 1,
+                    mire_core::LineKind::Context => {}
+                }
+            }
+        }
+    }
+    totals
+}
+
+fn reanchor_totals(review: &Review) -> ReanchorTotals {
+    let mut totals = ReanchorTotals { captured: 0, exact: 0, moved: 0, stale: 0, ambiguous: 0 };
+    for note in review.notes() {
+        match note.reanchor_outcome() {
+            None => totals.captured += 1,
+            Some(mire_core::ReanchorOutcome::Exact { .. }) => totals.exact += 1,
+            Some(mire_core::ReanchorOutcome::Moved { .. }) => totals.moved += 1,
+            Some(mire_core::ReanchorOutcome::Stale { .. }) => totals.stale += 1,
+            Some(mire_core::ReanchorOutcome::Ambiguous { .. }) => totals.ambiguous += 1,
+        }
+    }
+    totals
 }
 
 impl FileSummary {
@@ -1013,6 +1479,8 @@ mod tests {
             session_secret: "secret".into(),
             origin: "http://127.0.0.1:3737".into(),
             request_ids: Arc::new(AtomicU64::new(1)),
+            events: broadcast::channel(16).0,
+            watch_status: Arc::new(Mutex::new(WatchStatus::Unavailable)),
         }
     }
 
@@ -1185,6 +1653,31 @@ mod tests {
             .insert(AUTHORIZATION, HeaderValue::from_static("Bearer secret"));
         let response = app(state()).oneshot(request).await.expect("response");
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn refresh_requires_a_source_binding_and_exports_are_downloads() {
+        let mut refresh = request("/api/v1/refresh");
+        *refresh.method_mut() = Method::POST;
+        refresh
+            .headers_mut()
+            .insert(AUTHORIZATION, HeaderValue::from_static("Bearer secret"));
+        refresh
+            .headers_mut()
+            .insert(ORIGIN, HeaderValue::from_static("http://127.0.0.1:3737"));
+        let response = app(state()).oneshot(refresh).await.expect("response");
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+        let mut export = request("/api/v1/exports/notes.json");
+        export
+            .headers_mut()
+            .insert(AUTHORIZATION, HeaderValue::from_static("Bearer secret"));
+        let response = app(state()).oneshot(export).await.expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(CONTENT_DISPOSITION),
+            Some(&HeaderValue::from_static("attachment; filename=\"mire-notes.json\""))
+        );
     }
 
     #[tokio::test]

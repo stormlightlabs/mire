@@ -27,6 +27,7 @@ pub struct WatchSet {
     events: Receiver<notify::Result<Event>>,
     path: std::path::PathBuf,
     schedule: ReloadSchedule,
+    error: Option<notify::Error>,
 }
 
 impl WatchSet {
@@ -58,16 +59,24 @@ impl WatchSet {
                 }
             }
         };
-        Ok(Self { backend, events, path: path.to_owned(), schedule: ReloadSchedule::new(Instant::now()) })
+        Ok(Self { backend, events, path: path.to_owned(), schedule: ReloadSchedule::new(Instant::now()), error: None })
     }
 
     /// Reports when a debounced or recovery reload should run.
     pub fn reload_due(&mut self) -> bool {
         let now = Instant::now();
-        while self.events.try_recv().is_ok() {
-            self.schedule.observe(now);
+        while let Ok(event) = self.events.try_recv() {
+            match event {
+                Ok(_) => self.schedule.observe(now),
+                Err(error) => self.error = Some(error),
+            }
         }
         self.schedule.reload_due(now)
+    }
+
+    /// Returns and clears the latest backend error observed while watching.
+    pub fn take_error(&mut self) -> Option<notify::Error> {
+        self.error.take()
     }
 }
 

@@ -20,6 +20,7 @@ use crate::protocol::{
     ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, context_json, import_error_json,
     import_result_json, notes_json, notes_markdown, protocol_error_json, review_status_json, review_status_text,
 };
+use crate::refresh::{RefreshError, refresh_review as refresh_review_file};
 use crate::review_file::{
     DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, write_review_atomic_if_revision,
 };
@@ -250,6 +251,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
 fn serve_review(arguments: ServeArgs) -> Result<(), AppError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
+        .enable_time()
         .build()
         .map_err(AppError::WebReviewRuntime)?;
     runtime.block_on(serve::run(arguments)).map_err(AppError::Serve)
@@ -302,22 +304,20 @@ fn review_destination_exclusion(
 }
 
 fn refresh_review(arguments: ReviewRefreshArgs) -> Result<(), AppError> {
-    let path = Path::new(&arguments.review);
-    for _ in 0..8 {
-        let review = read_review(path).map_err(AppError::ReviewFile)?;
-        let binding = review.source_binding().ok_or(AppError::NonRefreshableReview)?;
-        let changeset = git::load_bound_diff(binding).map_err(AppError::Git)?;
-        let refreshed = review.reanchor(changeset).map_err(AppError::RefreshReview)?;
-        if refreshed == review {
-            return write_refresh_result("unchanged", &review);
-        }
-        match write_review_atomic_if_revision(path, review.revision(), &refreshed) {
-            Ok(()) => return write_refresh_result("refreshed", &refreshed),
-            Err(ReviewFileError::RevisionConflict { .. } | ReviewFileError::Locked { .. }) => continue,
-            Err(error) => return Err(AppError::ReviewFile(error)),
-        }
+    let result = refresh_review_file(Path::new(&arguments.review)).map_err(map_refresh_error)?;
+    write_refresh_result(
+        if result.changed() { "refreshed" } else { "unchanged" },
+        result.review(),
+    )
+}
+
+fn map_refresh_error(error: RefreshError) -> AppError {
+    match error {
+        RefreshError::Review(error) => AppError::ReviewFile(error),
+        RefreshError::UnavailableSource => AppError::NonRefreshableReview,
+        RefreshError::Git(error) => AppError::Git(error),
+        RefreshError::Reanchor(error) => AppError::RefreshReview(error),
     }
-    Err(AppError::ReviewFile(ReviewFileError::Locked { path: path.to_owned() }))
 }
 
 fn write_refresh_result(status: &str, review: &Review) -> Result<(), AppError> {
@@ -380,7 +380,13 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
             },
             |force| {
                 let review_due = review_watcher.reload_due();
+                if let Some(error) = review_watcher.take_error() {
+                    return mire_tui::WatchUpdate::Failed(error.to_string());
+                }
                 let source_due = source_watcher.as_mut().is_some_and(WatchSet::reload_due);
+                if let Some(error) = source_watcher.as_mut().and_then(WatchSet::take_error) {
+                    return mire_tui::WatchUpdate::Failed(error.to_string());
+                }
                 if !force && !review_due && !source_due {
                     return mire_tui::WatchUpdate::Unchanged;
                 }
@@ -479,7 +485,11 @@ fn run_changeset(
             changeset,
             mire_tui::AppOptions { language_override: language, theme, human_author: None },
             |force| {
-                if !force && !watcher.reload_due() {
+                let reload_due = watcher.reload_due();
+                if let Some(error) = watcher.take_error() {
+                    return mire_tui::WatchUpdate::Failed(error.to_string());
+                }
+                if !force && !reload_due {
                     return mire_tui::WatchUpdate::Unchanged;
                 }
                 match source.load() {

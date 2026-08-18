@@ -22,9 +22,22 @@
 		<span>{openCount} open</span>
 	</div>
 	<div class="filters" aria-label="Filter findings">
-		<label>Status <select bind:value={filters.status}><option value="all">All</option><option value="open">Open</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option><option value="accepted-risk">Accepted risk</option></select></label>
-		<label>Severity <select bind:value={filters.severity}><option value="all">All</option><option value="note">Note</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="critical">Critical</option></select></label>
-		<label>Intent <select bind:value={filters.annotationKind}><option value="all">All</option><option value="comment">Comment</option><option value="defect">Defect</option><option value="suggestion">Suggestion</option><option value="question">Question</option></select></label>
+		<label
+			>Status <select bind:value={filters.status}
+				><option value="all">All</option><option value="open">Open</option><option value="resolved">Resolved</option
+				><option value="dismissed">Dismissed</option><option value="accepted-risk">Accepted risk</option></select
+			></label>
+		<label
+			>Severity <select bind:value={filters.severity}
+				><option value="all">All</option><option value="note">Note</option><option value="low">Low</option><option
+					value="medium">Medium</option
+				><option value="high">High</option><option value="critical">Critical</option></select
+			></label>
+		<label
+			>Intent <select bind:value={filters.annotationKind}
+				><option value="all">All</option><option value="comment">Comment</option><option value="defect">Defect</option
+				><option value="suggestion">Suggestion</option><option value="question">Question</option></select
+			></label>
 	</div>
 	<p class="queue-help">Press J or K to move through this queue.</p>
 	<div class="finding-list">

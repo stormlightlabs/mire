@@ -35,13 +35,13 @@ Work from top to bottom unless dependencies allow otherwise.
 
 ## Refresh and completion
 
-- [ ] Add explicit source refresh and re-anchoring.
-- [ ] Watch source and review-file changes.
-- [ ] Stream authenticated invalidation events to the SPA.
-- [ ] Show refresh, watch, and degraded states.
-- [ ] Add the review overview and readiness summary.
-- [ ] Add the finish-review summary.
-- [ ] Add Markdown, JSON, and agent-context downloads.
+- [x] Add explicit source refresh and re-anchoring.
+- [x] Watch source and review-file changes.
+- [x] Stream authenticated invalidation events to the SPA.
+- [x] Show refresh, watch, and degraded states.
+- [x] Add the review overview and readiness summary.
+- [x] Add the finish-review summary.
+- [x] Add Markdown, JSON, and agent-context downloads.
 
 ## Diff and interface polish
 

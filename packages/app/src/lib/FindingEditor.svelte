@@ -35,6 +35,7 @@
 
 <form
 	class="finding-editor"
+	aria-busy={pending}
 	onsubmit={(event) => {
 		event.preventDefault();
 		void save();
@@ -112,10 +113,9 @@
 		font: inherit;
 		transition: border-color 100ms ease-out;
 	}
-	.finding-editor textarea:focus,
-	.finding-editor select:focus {
-		outline: none;
-		border-color: var(--ink);
+	.finding-editor textarea:focus-visible,
+	.finding-editor select:focus-visible {
+		border-color: var(--focus);
 	}
 	.finding-editor textarea {
 		min-height: 4.5rem;
@@ -143,9 +143,6 @@
 		cursor: pointer;
 		transition: background-color 100ms ease-out;
 	}
-	.editor-actions button:hover {
-		background: var(--paper);
-	}
 	.editor-actions button:active {
 		background: var(--paper-deep);
 	}
@@ -153,8 +150,14 @@
 		background: var(--ink);
 		color: var(--surface);
 	}
-	.editor-actions button[type='submit']:hover {
-		background: #333;
+	@media (hover: hover) {
+		.editor-actions button:hover {
+			background: var(--button-hover);
+		}
+		.editor-actions button[type='submit']:hover {
+			background: var(--selected-ink);
+			color: var(--selected);
+		}
 	}
 	.editor-actions button:disabled {
 		cursor: not-allowed;
@@ -168,8 +171,13 @@
 	}
 	.editor-message {
 		margin: 0;
-		color: #a4332f;
+		color: var(--danger);
 		font-size: 0.78rem;
+	}
+	@media (pointer: coarse) {
+		.editor-actions button {
+			min-height: 2.75rem;
+		}
 	}
 	@media (prefers-reduced-motion: no-preference) {
 		.editor-actions button,

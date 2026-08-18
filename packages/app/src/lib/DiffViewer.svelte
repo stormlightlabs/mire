@@ -2,48 +2,87 @@
 	import { FileDiff, type DiffLineAnnotation, type FileDiffMetadata, type Hunk } from '@pierre/diffs';
 	import { onMount } from 'svelte';
 	import type { FileDetail, FindingSummary, SemanticHunk } from './review';
+	import type { Theme } from './theme';
 
-	let { file, onFindingClick }: { file: FileDetail; onFindingClick: (finding: FindingSummary) => void } = $props();
+	let {
+		file,
+		diffStyle,
+		expandContext,
+		theme,
+		onFindingClick
+	}: {
+		file: FileDetail;
+		diffStyle: 'unified' | 'split';
+		expandContext: boolean;
+		theme: Theme;
+		onFindingClick: (finding: FindingSummary) => void;
+	} = $props();
 
 	let host = $state<HTMLElement>();
 	let viewer: FileDiff<FindingSummary> | undefined;
 
 	onMount(() => {
-		viewer = new FileDiff<FindingSummary>({
-			theme: { light: 'github-light', dark: 'github-dark' },
-			themeType: 'light',
-			diffStyle: 'unified',
-			hunkSeparators: 'line-info-basic',
-			overflow: 'scroll',
-			renderAnnotation(annotation) {
-				const finding = annotation.metadata;
-				if (!finding) return undefined;
-				const button = document.createElement('button');
-				button.type = 'button';
-				button.dataset.mireFinding = finding.id;
-				button.textContent = `${finding.severity} · ${finding.body}`;
-				button.setAttribute('aria-label', `Open ${finding.severity} finding: ${finding.body}`);
-				button.style.cssText =
-					'display:block;width:100%;border:1px solid #b7b7b0;background:#fff;color:#111;padding:.5rem .65rem;text-align:left;font:600 .72rem/1.4 system-ui,sans-serif;cursor:pointer;transition:background-color 100ms ease-out;border-radius:0;';
-				button.onclick = () => onFindingClick(finding);
-				return button;
-			}
-		});
+		viewer = new FileDiff<FindingSummary>(viewerOptions());
 		render(file);
 		return () => viewer?.cleanUp();
 	});
 
 	$effect(() => {
+		if (!viewer) return;
+		viewer.setOptions(viewerOptions());
 		render(file);
 	});
 
-	function render(currentFile: FileDetail) {
-		if (!viewer || !host || currentFile.content.kind !== 'text') return;
-		viewer.render({
-			fileContainer: host,
-			fileDiff: toPierreDiff(currentFile),
-			lineAnnotations: annotations(currentFile.findings)
-		});
+	function viewerOptions() {
+		return {
+			theme: { light: 'github-light', dark: 'github-dark' },
+			themeType: theme,
+			diffStyle,
+			hunkSeparators: 'line-info' as const,
+			overflow: 'scroll' as const,
+			expandUnchanged: expandContext,
+			collapsedContextThreshold: 3,
+			renderAnnotation,
+			onPostRender(node: HTMLElement) {
+				makeExpansionControlsKeyboardAccessible(node);
+			}
+		};
+	}
+
+	function renderAnnotation(annotation: DiffLineAnnotation<FindingSummary>) {
+		const finding = annotation.metadata;
+		if (!finding) return undefined;
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.dataset.mireFinding = finding.id;
+		button.textContent = `${finding.severity} · ${finding.body}`;
+		button.setAttribute('aria-label', `Open ${finding.severity} finding: ${finding.body}`);
+		button.style.cssText =
+			'display:block;width:100%;min-height:2.75rem;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);padding:.5rem .65rem;text-align:left;font:600 .75rem/1.4 system-ui,sans-serif;cursor:pointer;border-radius:0;';
+		button.onclick = () => onFindingClick(finding);
+		return button;
+	}
+
+	function makeExpansionControlsKeyboardAccessible(node: HTMLElement) {
+		const root = node.shadowRoot ?? node;
+		for (const control of root.querySelectorAll<HTMLElement>('[data-expand-button]')) {
+			control.tabIndex = 0;
+			control.setAttribute(
+				'aria-label',
+				control.hasAttribute('data-expand-all-button')
+					? 'Expand all unchanged lines'
+					: control.hasAttribute('data-expand-both')
+						? 'Expand unchanged lines'
+						: control.hasAttribute('data-expand-up')
+							? 'Expand unchanged lines above'
+							: 'Expand unchanged lines below'
+			);
+			control.onkeydown = (event) => {
+				if (event.key !== 'Enter' && event.key !== ' ') return;
+				event.preventDefault();
+				control.click();
+			};
+		}
 	}
 
 	function annotations(findings: FindingSummary[]): DiffLineAnnotation<FindingSummary>[] {
@@ -54,6 +93,15 @@
 				lineNumber: finding.startLine,
 				metadata: finding
 			}));
+	}
+
+	function render(currentFile: FileDetail) {
+		if (!viewer || !host || currentFile.content.kind !== 'text') return;
+		viewer.render({
+			fileContainer: host,
+			fileDiff: toPierreDiff(currentFile),
+			lineAnnotations: annotations(currentFile.findings)
+		});
 	}
 
 	function toPierreDiff(file: FileDetail): FileDiffMetadata {

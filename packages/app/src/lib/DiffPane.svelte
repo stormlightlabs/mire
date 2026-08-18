@@ -2,12 +2,14 @@
 	import DiffViewer from './DiffViewer.svelte';
 	import FindingEditor from './FindingEditor.svelte';
 	import { formatPath, type FindingDetail, type FindingDraft, type FileDetail, type FindingSummary } from './review';
+	import type { Theme } from './theme';
 
 	let {
 		file,
 		fileError,
 		activeFinding,
 		findingError,
+		theme,
 		onFindingClick,
 		onEditFinding,
 		onDecideFinding
@@ -16,10 +18,14 @@
 		fileError: string | null;
 		activeFinding: FindingDetail | null;
 		findingError: string | null;
+		theme: Theme;
 		onFindingClick: (finding: FindingSummary) => void;
 		onEditFinding: (draft: FindingDraft) => Promise<string | null>;
 		onDecideFinding: (decision: 'resolve' | 'reopen' | 'dismiss' | 'accept-risk') => Promise<string | null>;
 	} = $props();
+
+	let diffStyle = $state<'unified' | 'split'>('unified');
+	let expandContext = $state(false);
 </script>
 
 <section class="diff-pane" aria-label="File diff">
@@ -56,8 +62,6 @@
 					{activeFinding.anchorState}
 				</footer>
 			</article>
-		{/if}
-		{#if activeFinding}
 			<FindingEditor finding={activeFinding} onEdit={onEditFinding} onDecision={onDecideFinding} />
 		{/if}
 		{#if findingError}<p class="finding-error" role="alert">{findingError}</p>{/if}
@@ -73,7 +77,17 @@
 				<p>This file changed without a textual diff.</p>
 			</section>
 		{:else}
-			<DiffViewer {file} {onFindingClick} />
+			<div class="diff-controls" role="group" aria-label="Diff display">
+				<div class="control-group" role="group" aria-label="Diff layout">
+					<button aria-pressed={diffStyle === 'unified'} onclick={() => (diffStyle = 'unified')}>Unified</button>
+					<button aria-pressed={diffStyle === 'split'} onclick={() => (diffStyle = 'split')}>Split</button>
+				</div>
+				<button onclick={() => (expandContext = !expandContext)}>
+					{expandContext ? 'Collapse context' : 'Expand context'}
+				</button>
+			</div>
+			<p class="diff-help">Show or collapse all available context around the captured changes.</p>
+			<DiffViewer {file} {diffStyle} {expandContext} {theme} {onFindingClick} />
 		{/if}
 	{/if}
 </section>
@@ -112,7 +126,8 @@
 	}
 	.renamed,
 	.finding-title,
-	.finding-detail footer {
+	.finding-detail footer,
+	.diff-help {
 		color: var(--muted);
 		font-size: 0.72rem;
 	}
@@ -132,8 +147,39 @@
 		line-height: 1.5;
 	}
 	.finding-error {
-		color: #a4332f;
+		color: var(--danger);
 		font-size: 0.78rem;
+	}
+	.diff-controls,
+	.control-group {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+	}
+	.diff-controls {
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 0.35rem;
+	}
+	.diff-controls button {
+		min-height: 2rem;
+		border: 1px solid var(--line-strong);
+		padding: 0.3rem 0.55rem;
+		background: var(--surface);
+		color: var(--ink);
+		font:
+			600 0.72rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
+	}
+	.diff-controls button[aria-pressed='true'] {
+		border-color: var(--ink);
+		background: var(--ink);
+		color: var(--surface);
+	}
+	.diff-help {
+		margin: 0 0 0.65rem;
+		line-height: 1.4;
 	}
 	.diff-state {
 		display: grid;
@@ -171,12 +217,29 @@
 	.message h1 {
 		margin: 0;
 		font:
-			600 clamp(2rem, 5vw, 3.5rem)/1 'Google Sans Variable',
+			600 clamp(2rem, 5vw, 3.5rem) / 1 'Google Sans Variable',
 			'Google Sans',
 			sans-serif;
 		letter-spacing: -0.04em;
 	}
 	.message.error h1 {
-		color: #a4332f;
+		color: var(--danger);
+	}
+	@media (hover: hover) {
+		.diff-controls button:hover:not([aria-pressed='true']) {
+			background: var(--button-hover);
+		}
+	}
+	@media (pointer: coarse) {
+		.diff-controls button {
+			min-height: 2.75rem;
+		}
+	}
+	@media (prefers-reduced-motion: no-preference) {
+		.diff-controls button {
+			transition:
+				background-color 100ms ease-out,
+				border-color 100ms ease-out;
+		}
 	}
 </style>

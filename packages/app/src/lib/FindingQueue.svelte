@@ -5,18 +5,20 @@
 		findings,
 		activeFindingId,
 		openCount,
+		drawer = false,
 		filters = $bindable<FindingFilters>(),
 		onSelect
 	}: {
 		findings: FindingSummary[];
 		activeFindingId: string | null;
 		openCount: number;
+		drawer?: boolean;
 		filters: FindingFilters;
 		onSelect: (finding: FindingSummary) => void;
 	} = $props();
 </script>
 
-<aside class="findings" aria-labelledby="findings-heading">
+<aside class:drawer class="findings" aria-labelledby="findings-heading">
 	<div class="pane-heading">
 		<h2 id="findings-heading">Review queue</h2>
 		<span>{openCount} open</span>
@@ -112,9 +114,8 @@
 		font: inherit;
 		transition: border-color 100ms ease-out;
 	}
-	.filters select:focus {
-		outline: none;
-		border-color: var(--ink);
+	.filters select:focus-visible {
+		border-color: var(--focus);
 	}
 	.queue-help {
 		margin: 0;
@@ -135,10 +136,15 @@
 		text-align: left;
 		cursor: pointer;
 	}
-	.finding:hover,
 	.finding.current {
 		border-color: var(--ink);
 		background: var(--paper);
+	}
+	@media (hover: hover) {
+		.finding:hover {
+			border-color: var(--ink);
+			background: var(--paper);
+		}
 	}
 	.finding p {
 		margin: 0.4rem 0;
@@ -170,12 +176,21 @@
 	.empty {
 		padding: 0.75rem;
 	}
+	.findings.drawer {
+		height: 100%;
+		border: 0;
+	}
 	@media (max-width: 54rem) {
-		.findings {
+		.findings:not(.drawer) {
 			order: 3;
 			max-height: 12rem;
 			border: 0;
 			border-top: 1px solid var(--line);
+		}
+	}
+	@media (pointer: coarse) {
+		.finding {
+			min-height: 2.75rem;
 		}
 	}
 	@media (prefers-reduced-motion: no-preference) {

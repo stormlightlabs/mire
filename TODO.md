@@ -45,13 +45,13 @@ Work from top to bottom unless dependencies allow otherwise.
 
 ## Diff and interface polish
 
-- [ ] Add split diff rendering.
-- [ ] Add context expansion and hunk collapsing.
-- [ ] Add responsive file and finding drawers.
-- [ ] Complete keyboard, focus, screen-reader, contrast, and reduced-motion
+- [x] Add split diff rendering.
+- [x] Add context expansion and hunk collapsing.
+- [x] Add responsive file and finding drawers.
+- [x] Complete keyboard, focus, screen-reader, contrast, and reduced-motion
       behavior.
-- [ ] Measure large-review rendering before adding highlighting or virtualization.
-- [ ] Add dark mode with toggle
+- [x] Measure large-review rendering before adding highlighting or virtualization.
+- [x] Add dark mode with toggle
 
 ## Portable patch export
 

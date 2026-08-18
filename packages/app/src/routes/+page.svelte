@@ -3,7 +3,9 @@
 	import DiffPane from '$lib/DiffPane.svelte';
 	import FileNavigator from '$lib/FileNavigator.svelte';
 	import FindingQueue from '$lib/FindingQueue.svelte';
+	import Overlay from '$lib/Overlay.svelte';
 	import { loadDevelopmentSessionSecret, parseSessionSecret, saveDevelopmentSessionSecret } from '$lib/session';
+	import { applyTheme, loadTheme, saveTheme, type Theme } from '$lib/theme';
 	import {
 		completionSummary,
 		defaultFindingFilters,
@@ -32,12 +34,31 @@
 	let refreshState = $state<'idle' | 'pending' | 'refreshed' | 'unchanged' | 'failed'>('idle');
 	let finishReviewOpen = $state(false);
 	let sessionSecretInput = $state('');
+	let theme = $state<Theme>('light');
+	let themeReady = $state(false);
+	let isNarrow = $state(false);
+	let mobilePane = $state<'files' | 'findings' | null>(null);
 	let streamAbort: AbortController | null = null;
 	let secret = '';
 	const completion = $derived(review ? completionSummary(review, viewedFileIds) : null);
 	const visibleFindings = $derived(review ? filterFindings(review.findings, filters) : []);
 
+	$effect(() => {
+		if (!themeReady) return;
+		applyTheme(theme);
+		saveTheme(theme);
+	});
+
 	onMount(() => {
+		const narrowScreen = window.matchMedia('(max-width: 54rem)');
+		const updateNarrowScreen = () => {
+			isNarrow = narrowScreen.matches;
+			if (!isNarrow) mobilePane = null;
+		};
+		theme = loadTheme();
+		themeReady = true;
+		updateNarrowScreen();
+		narrowScreen.addEventListener('change', updateNarrowScreen);
 		secret = parseSessionSecret(window.location.hash);
 		if (secret) {
 			window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
@@ -54,7 +75,10 @@
 		void loadReview().then((loaded) => {
 			if (loaded) return connectEvents();
 		});
-		return () => streamAbort?.abort();
+		return () => {
+			streamAbort?.abort();
+			narrowScreen.removeEventListener('change', updateNarrowScreen);
+		};
 	});
 
 	async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -306,8 +330,18 @@
 	function scrollToFinding(id: string) {
 		document.querySelector<HTMLElement>(`[data-mire-finding="${CSS.escape(id)}"]`)?.scrollIntoView({
 			block: 'center',
-			behavior: 'smooth'
+			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
 		});
+	}
+
+	function selectFileFromDrawer(id: string) {
+		mobilePane = null;
+		void selectFile(id);
+	}
+
+	function selectFindingFromDrawer(finding: FindingSummary) {
+		mobilePane = null;
+		void selectFinding(finding);
 	}
 </script>
 
@@ -333,11 +367,19 @@
 					: 'Connecting to local review'}</span>
 		</div>
 		<div class="topbar-actions">
+			{#if review && isNarrow}
+				<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'files')}>Files</button>
+				<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'findings')}>Findings</button>
+			{/if}
 			{#if review}
 				<button class="topbar-button" disabled={refreshState === 'pending'} onclick={() => void refreshReview()}>
 					{refreshState === 'pending' ? 'Refreshing…' : 'Refresh source'}
 				</button>
 				<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>Finish review</button>
+				<button
+					class="topbar-button"
+					aria-pressed={theme === 'dark'}
+					onclick={() => (theme = theme === 'dark' ? 'light' : 'dark')}>Dark mode</button>
 			{/if}
 			<span
 				class:ready={review?.watch === 'watching'}
@@ -372,6 +414,16 @@
 				<h1>Loading review</h1>
 				<p>Reading the local review file.</p>
 			</section>
+		{:else if isNarrow}
+			<DiffPane
+				{file}
+				{fileError}
+				{activeFinding}
+				{findingError}
+				{theme}
+				onFindingClick={selectFinding}
+				onEditFinding={editFinding}
+				onDecideFinding={decideFinding} />
 		{:else}
 			<FileNavigator files={review.files} {activeFile} {viewedFileIds} onSelect={selectFile} />
 			<DiffPane
@@ -379,6 +431,7 @@
 				{fileError}
 				{activeFinding}
 				{findingError}
+				{theme}
 				onFindingClick={selectFinding}
 				onEditFinding={editFinding}
 				onDecideFinding={decideFinding} />
@@ -390,9 +443,40 @@
 				onSelect={selectFinding} />
 		{/if}
 	</main>
-	{#if finishReviewOpen && review && completion}
-		<dialog class="finish-review" open aria-labelledby="finish-review-heading">
-			<div>
+	{#if review && isNarrow && mobilePane === 'files'}
+		<Overlay open={true} labelledBy="files-drawer-heading" variant="drawer" onClose={() => (mobilePane = null)}>
+			<section class="drawer-content">
+				<header class="drawer-heading">
+					<h2 id="files-drawer-heading">Changed files</h2>
+					<button onclick={() => (mobilePane = null)}>Close files</button>
+				</header>
+				<FileNavigator files={review.files} {activeFile} {viewedFileIds} drawer onSelect={selectFileFromDrawer} />
+			</section>
+		</Overlay>
+	{:else if review && isNarrow && mobilePane === 'findings'}
+		<Overlay open={true} labelledBy="findings-drawer-heading" variant="drawer" onClose={() => (mobilePane = null)}>
+			<section class="drawer-content">
+				<header class="drawer-heading">
+					<h2 id="findings-drawer-heading">Review queue</h2>
+					<button onclick={() => (mobilePane = null)}>Close findings</button>
+				</header>
+				<FindingQueue
+					findings={visibleFindings}
+					activeFindingId={activeFinding?.id ?? null}
+					openCount={review.totals.open}
+					drawer
+					bind:filters
+					onSelect={selectFindingFromDrawer} />
+			</section>
+		</Overlay>
+	{/if}
+	{#if review && completion}
+		<Overlay
+			open={finishReviewOpen}
+			labelledBy="finish-review-heading"
+			variant="dialog"
+			onClose={() => (finishReviewOpen = false)}>
+			<section class="dialog-content">
 				<h1 id="finish-review-heading">Finish review</h1>
 				<p>
 					{completion.ready ? 'This review is ready to hand off.' : 'Resolve the remaining review work before handoff.'}
@@ -409,17 +493,17 @@
 						>Agent context</button>
 				</div>
 				<button class="close" onclick={() => (finishReviewOpen = false)}>Close</button>
-			</div>
-		</dialog>
+			</section>
+		</Overlay>
 	{/if}
 	{#if conflictRevision !== null}
-		<dialog class="conflict" open aria-labelledby="conflict-heading">
-			<div>
+		<Overlay open={true} labelledBy="conflict-heading" variant="dialog" onClose={() => (conflictRevision = null)}>
+			<section class="dialog-content">
 				<h1 id="conflict-heading">Review changed</h1>
 				<p>Revision {conflictRevision} is now current. Your unsaved edit is still here; reload, then save it again.</p>
-				<button onclick={() => void reloadReview()}>Reload review</button>
-			</div>
-		</dialog>
+				<button class="primary-button" onclick={() => void reloadReview()}>Reload review</button>
+			</section>
+		</Overlay>
 	{/if}
 </div>
 
@@ -462,9 +546,10 @@
 	.topbar-actions {
 		min-width: 0;
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		justify-content: flex-end;
-		gap: 0.75rem;
+		gap: 0.5rem;
 		padding: 0.5rem 1rem;
 	}
 	.review-meta strong {
@@ -524,10 +609,10 @@
 		content: '';
 	}
 	.status.ready::before {
-		background: #2d8a56;
+		background: var(--success);
 	}
 	.status.degraded::before {
-		background: #c0392b;
+		background: var(--danger);
 	}
 	.workspace {
 		min-height: 0;
@@ -555,7 +640,7 @@
 		margin-top: 0.5rem;
 	}
 	.message.error h1 {
-		color: #a4332f;
+		color: var(--danger);
 	}
 	.session-form {
 		display: grid;
@@ -602,42 +687,20 @@
 			sans-serif;
 		cursor: pointer;
 	}
-	.session-form button:hover {
-		background: #333;
-	}
-	.conflict,
-	.finish-review {
-		position: fixed;
-		inset: 0;
-		z-index: 2;
-		display: grid;
-		place-items: center;
-		padding: 1rem;
-		background: rgb(17 17 17 / 40%);
-	}
-	.conflict > div,
-	.finish-review > div {
-		max-width: 30rem;
-		padding: 1.5rem;
-		border: 1px solid var(--line);
-		background: var(--surface);
-		box-shadow: 0 1rem 3rem rgb(17 17 17 / 15%);
-	}
-	.conflict h1,
-	.finish-review h1 {
+	.dialog-content h1,
+	.drawer-heading h2 {
 		margin: 0;
 		font:
 			600 1.25rem 'Google Sans Variable',
 			'Google Sans',
 			sans-serif;
 	}
-	.conflict p,
-	.finish-review p {
+	.dialog-content p {
 		color: var(--muted);
 		line-height: 1.5;
 		margin-top: 0.4rem;
 	}
-	.finish-review ul {
+	.dialog-content ul {
 		margin: 1rem 0;
 		padding-left: 1.2rem;
 		line-height: 1.7;
@@ -649,8 +712,10 @@
 		margin-bottom: 1rem;
 	}
 	.downloads button,
-	.conflict button,
-	.finish-review .close {
+	.dialog-content .close,
+	.primary-button,
+	.drawer-heading button,
+	.session-form button {
 		min-height: 2.25rem;
 		border: 1px solid var(--ink);
 		padding: 0.35rem 0.7rem;
@@ -660,24 +725,42 @@
 			600 0.75rem 'Google Sans Variable',
 			'Google Sans',
 			sans-serif;
-		cursor: pointer;
-		transition: background-color 100ms ease-out;
 	}
-	.downloads button:hover,
-	.conflict button:hover,
-	.finish-review .close:hover {
-		background: var(--paper);
-	}
-	.conflict button {
+	.primary-button,
+	.session-form button {
 		background: var(--ink);
 		color: var(--surface);
 	}
-	.conflict button:hover {
-		background: #333;
-	}
-	.finish-review .close {
-		margin-top: 0.5rem;
+	.dialog-content .close {
 		width: 100%;
+	}
+	.drawer-content {
+		height: 100%;
+		display: grid;
+		grid-template-rows: auto minmax(0, 1fr);
+	}
+	.drawer-heading {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		padding: 0.75rem;
+		border-bottom: 1px solid var(--line);
+	}
+	@media (hover: hover) {
+		.topbar-button:hover,
+		.downloads button:hover,
+		.dialog-content .close:hover,
+		.drawer-heading button:hover,
+		.session-form button:hover {
+			background: var(--button-hover);
+			border-color: var(--ink);
+		}
+		.primary-button:hover,
+		.session-form button:hover {
+			background: var(--selected-ink);
+			color: var(--selected);
+		}
 	}
 	@media (max-width: 54rem) {
 		.topbar {
@@ -718,11 +801,22 @@
 			width: 100%;
 		}
 	}
+	@media (pointer: coarse) {
+		.topbar-button,
+		.downloads button,
+		.dialog-content .close,
+		.primary-button,
+		.drawer-heading button {
+			min-height: 2.75rem;
+		}
+	}
 	@media (prefers-reduced-motion: no-preference) {
 		.topbar-button,
 		.downloads button,
-		.conflict button,
-		.finish-review .close {
+		.dialog-content .close,
+		.primary-button,
+		.drawer-heading button,
+		.session-form button {
 			transition:
 				background-color 100ms ease-out,
 				border-color 100ms ease-out;

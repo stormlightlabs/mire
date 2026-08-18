@@ -5,11 +5,13 @@
 		files,
 		activeFile,
 		viewedFileIds,
+		drawer = false,
 		onSelect
 	}: {
 		files: FileSummary[];
 		activeFile: string | null;
 		viewedFileIds: string[];
+		drawer?: boolean;
 		onSelect: (id: string) => void;
 	} = $props();
 
@@ -19,9 +21,9 @@
 	);
 </script>
 
-<aside class="files" aria-label="Changed files">
+<aside class:drawer class="files" aria-label="Changed files">
 	<div class="pane-heading">
-		<h1>Changed files</h1>
+		<h2>Changed files</h2>
 		<span>{files.length}</span>
 	</div>
 	<label class="search">
@@ -62,7 +64,7 @@
 		padding: 0.65rem 0.75rem;
 		border-bottom: 1px solid var(--line);
 	}
-	.pane-heading h1 {
+	.pane-heading h2 {
 		margin: 0;
 		font:
 			600 0.82rem 'Google Sans Variable',
@@ -94,9 +96,8 @@
 		font: inherit;
 		transition: border-color 100ms ease-out;
 	}
-	.search input:focus {
-		outline: none;
-		border-color: var(--ink);
+	.search input:focus-visible {
+		border-color: var(--focus);
 	}
 	.file {
 		width: 100%;
@@ -109,8 +110,10 @@
 		text-align: left;
 		cursor: pointer;
 	}
-	.file:hover {
-		background: var(--paper);
+	@media (hover: hover) {
+		.file:hover {
+			background: var(--paper);
+		}
 	}
 	.file.active {
 		background: var(--ink);
@@ -129,21 +132,30 @@
 	.empty {
 		padding: 0.75rem;
 	}
+	.files.drawer {
+		height: 100%;
+		border: 0;
+	}
 	@media (max-width: 54rem) {
-		.files {
+		.files:not(.drawer) {
 			order: 2;
 			max-height: 12rem;
 			border: 0;
 			border-top: 1px solid var(--line);
 		}
-		.file-list {
+		.files:not(.drawer) .file-list {
 			display: flex;
 			overflow-x: auto;
 		}
-		.file {
+		.files:not(.drawer) .file {
 			min-width: 13rem;
 			border-right: 1px solid var(--line);
 			border-bottom: 0;
+		}
+	}
+	@media (pointer: coarse) {
+		.file {
+			min-height: 2.75rem;
 		}
 	}
 	@media (prefers-reduced-motion: no-preference) {

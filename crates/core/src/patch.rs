@@ -2,6 +2,8 @@ use thiserror::Error;
 
 use crate::{Changeset, ChangesetSource};
 
+mod fold;
+mod mbox;
 mod parser;
 mod writer;
 
@@ -82,12 +84,32 @@ impl<'a> PatchInput<'a> {
     }
 }
 
-/// Parses bounded UTF-8 patch bytes into Mire's normalized changeset model.
 pub use writer::{PatchWriteError, write_patch};
 
+/// Parses bounded UTF-8 patch bytes into Mire's normalized changeset model.
+///
+/// An mbox series, as `git format-patch --stdout` and `gh pr diff --patch`
+/// print it, is read as one net diff: commit headers and messages are skipped,
+/// and the commits' changes to each file are folded together.
 pub fn parse_patch(bytes: &[u8], source: ChangesetSource, limits: PatchLimits) -> Result<Changeset> {
     let input = PatchInput::new(bytes, limits)?;
-    parser::parse(input.as_utf8()?, source)
+    let text = input.as_utf8()?;
+    if !mbox::is_mbox(text) {
+        return parser::parse(text, source);
+    }
+    let diffs = mbox::commit_diffs(text);
+    match diffs.as_slice() {
+        [] => parser::parse("", source),
+        [single] => {
+            let changeset = fold::parse_at(*single)?;
+            Ok(Changeset::new(
+                source,
+                changeset.files().to_vec(),
+                changeset.fingerprint(),
+            ))
+        }
+        _ => parser::parse(&fold::fold(&diffs)?, source),
+    }
 }
 
 #[cfg(test)]

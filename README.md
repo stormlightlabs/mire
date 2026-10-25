@@ -53,7 +53,7 @@ mire show HEAD
 mire patch changes.diff
 
 # A GitHub pull request, as a patch from gh
-gh pr diff 123 | mire patch -
+mire patch <(gh pr diff 123)
 ```
 
 Place repository-relative path filters after `--`:

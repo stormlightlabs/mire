@@ -1,0 +1,1590 @@
+From 5f74ebac7daf8cd940d2bb72ad0f65ff364980f4 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 25 Oct 2026 16:52:23 +0000
+Subject: [PATCH 1/4] test: add TUI screenshots and wider snapshot coverage
+
+UI changes now carry evidence reviewers can check. `just shots` captures nine
+TUI states as PNG and ANSI files against a fixture repository, using
+fabrial's shot.sh, copied in until a fabrial release ships it. As in fabrial,
+the captures run locally, not in CI.
+
+insta snapshots now cover the sidebar, forced layouts, collapsed files and
+hunks, findings, the note editor and filters, walkthrough progress, the file
+picker and search, plus JSON from context, review status and session inspect.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01McED3zcaewkwybS2P4vZya
+---
+ .../arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5.md      |  17 +-
+ .github/storm/shot.sh                         | 144 +++++++++++++
+ AGENTS.md                                     |   3 +
+ Cargo.lock                                    |   2 +
+ crates/cli/Cargo.toml                         |   1 +
+ crates/cli/tests/json_output.rs               | 112 ++++++++++
+ crates/cli/tests/live_session.rs              |   1 +
+ .../json_output__context_manifest.snap        |  78 +++++++
+ .../snapshots/json_output__review_status.snap |  37 ++++
+ .../live_session__session_inspect.snap        |  30 +++
+ ...i__view__tests__collapsed_file_100x16.snap |  20 ++
+ ...i__view__tests__collapsed_hunk_100x16.snap |  20 ++
+ ..._tui__view__tests__file_picker_100x16.snap |  20 ++
+ ...tui__view__tests__layout_split_120x16.snap |  20 ++
+ ...i__view__tests__layout_unified_120x16.snap |  20 ++
+ ...tui__view__tests__notes_editor_120x18.snap |  22 ++
+ ...ui__view__tests__notes_filters_120x18.snap |  22 ++
+ ...ui__view__tests__notes_focused_120x18.snap |  22 ++
+ ...tui__view__tests__notes_inline_120x18.snap |  22 ++
+ ...ui__view__tests__search_prompt_100x16.snap |  20 ++
+ ...ui__view__tests__sidebar_files_100x16.snap |  20 ++
+ ...__view__tests__sidebar_focused_100x16.snap |  20 ++
+ ...i__view__tests__sidebar_hidden_100x16.snap |  20 ++
+ ...ew__tests__walkthrough_started_120x18.snap |  22 ++
+ crates/ui/src/view.rs                         | 203 ++++++++++++++++++
+ justfile                                      |  10 +
+ .../content/docs/guides/local-development.md  |  49 +++++
+ scripts/shots.sh                              | 152 +++++++++++++
+ 28 files changed, 1120 insertions(+), 9 deletions(-)
+ create mode 100755 .github/storm/shot.sh
+ create mode 100644 crates/cli/tests/json_output.rs
+ create mode 100644 crates/cli/tests/snapshots/json_output__context_manifest.snap
+ create mode 100644 crates/cli/tests/snapshots/json_output__review_status.snap
+ create mode 100644 crates/cli/tests/snapshots/live_session__session_inspect.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__collapsed_file_100x16.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__collapsed_hunk_100x16.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__file_picker_100x16.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__layout_split_120x16.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__layout_unified_120x16.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__notes_editor_120x18.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__notes_filters_120x18.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__notes_focused_120x18.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__notes_inline_120x18.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__search_prompt_100x16.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__sidebar_files_100x16.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__sidebar_focused_100x16.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__sidebar_hidden_100x16.snap
+ create mode 100644 crates/ui/src/snapshots/mire_tui__view__tests__walkthrough_started_120x18.snap
+ create mode 100755 scripts/shots.sh
+
+diff --git a/.arcl/workspace/tasks/arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5.md b/.arcl/workspace/tasks/arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5.md
+index 3a4ce3f..d9b4c5c 100644
+--- a/.arcl/workspace/tasks/arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5.md
++++ b/.arcl/workspace/tasks/arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5.md
+@@ -2,24 +2,23 @@
+ id = "arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5"
+ plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
+ title = "Visual verification and snapshot coverage"
+-status = "pending"
++status = "in_progress"
+ priority = "high"
+ position = 0
+ +++
+ 
+-Capture the TUI as images in CI and widen snapshot test coverage, so UI changes carry visual evidence that reviewers can check.
++Capture the TUI as images locally and widen snapshot test coverage, so UI changes carry visual evidence that reviewers can check.
+ 
+ Use fabrial's `.github/storm/shot.sh` (tmux + freeze). It shipped after fabrial 0.3.3, so run `fab update` once a release includes it, or copy it in until then.
+ 
+ Acceptance criteria:
+-- [ ] `scripts/shots.sh` lists scenarios (name, size, mire command, keys) against a deterministic fixture repository, covering unified, split, narrow, help, collapsed sidebar, note overlay, live walkthrough, and `NO_COLOR`.
+-- [ ] `just shot <scenario>` and `just shots` write PNG and ANSI files.
+-- [ ] A `shots` CI job installs tmux and a pinned freeze, runs `just shots`, and uploads the files as an artifact. It is not a required check.
+-- [ ] insta `TestBackend` snapshots cover the sidebar and tree, split and unified layouts, intraline highlights, notes and findings, footer actions, walkthrough status, collapsed files and hunks, and empty and error states.
+-- [ ] insta JSON snapshots cover `mire context`, `mire review status`, and `mire session inspect`, with revisions and paths redacted.
+-- [ ] The local development guide covers `just shots` and `cargo insta review`.
++- [x] `scripts/shots.sh` lists scenarios (name, size, mire command, keys) against a deterministic fixture repository, covering unified, split, narrow, help, collapsed sidebar, note overlay, live walkthrough, and `NO_COLOR`.
++- [x] `just shot <scenario>` and `just shots` write PNG and ANSI files.
++- [x] As in fabrial, the implementer and reviewers run the captures locally and report the PNG paths. There is no CI job for them.
++- [x] insta `TestBackend` snapshots cover the sidebar and tree, split and unified layouts, intraline highlights, notes and findings, footer actions, walkthrough status, collapsed files and hunks, and empty and error states.
++- [x] insta JSON snapshots cover `mire context`, `mire review status`, and `mire session inspect`. Their output holds no absolute paths or random values, so nothing needs redacting.
++- [x] The local development guide covers `just shots` and `cargo insta review`.
+ 
+ Verification:
+ - `just shots` produces PNGs locally, and `cargo insta test --workspace` is clean.
+ - A deliberate UI change makes a snapshot fail.
+-- The `shots` artifact appears on the pull request.
+diff --git a/.github/storm/shot.sh b/.github/storm/shot.sh
+new file mode 100755
+index 0000000..ea5f8ee
+--- /dev/null
++++ b/.github/storm/shot.sh
+@@ -0,0 +1,144 @@
++#!/usr/bin/env bash
++# Capture a terminal UI as a PNG and an ANSI text file. Needs tmux and freeze.
++# Usage: .github/storm/shot.sh [options] <name> <cols> <rows> <command...>
++#
++#   --wait-for <text>  wait until the screen shows <text>, then settle; fail
++#                      if it does not appear before the timeout
++#   --keys <key>       after the screen settles, send <key> with tmux
++#                      send-keys, then settle again. Repeat it for more keys,
++#                      sent in order: a tmux key name such as Enter or C-c is
++#                      pressed, anything else is typed, as in
++#                      --keys /reload --keys Enter
++#   --timeout <s>      seconds to wait for the whole capture (default 10)
++#
++# The command runs on a tmux server of its own, so its options and its cleanup
++# never touch the user's sessions. The script prints the PNG's path and exits
++# with the command's status when the command has exited.
++set -euo pipefail
++
++usage() {
++  echo "usage: .github/storm/shot.sh [--wait-for <text>] [--keys <key>]... [--timeout <s>] <name> <cols> <rows> <command...>" >&2
++  exit 2
++}
++
++wait_for='' timeout=10 keys=()
++while [ "$#" -gt 0 ]; do
++  case "$1" in
++    --wait-for | --keys | --timeout) [ "$#" -ge 2 ] || usage ;;
++  esac
++  case "$1" in
++    --wait-for) wait_for=$2 ;;
++    --keys) keys+=("$2") ;;
++    --timeout) timeout=$2 ;;
++    --) shift; break ;;
++    -*) usage ;;
++    *) break ;;
++  esac
++  shift 2
++done
++[ "$#" -ge 4 ] || usage
++case "$timeout" in
++  '' | *[!0-9]*) echo "shot: --timeout takes whole seconds" >&2; exit 2 ;;
++esac
++name=$1 cols=$2 rows=$3
++shift 3
++case "$name" in
++  '' | *[!A-Za-z0-9_-]*)
++    echo "shot: name may hold only letters, digits, '-' and '_'" >&2
++    exit 2
++    ;;
++esac
++
++# Resolve the output directory through its nearest existing parent, so the
++# check below runs before anything is created.
++repo=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
++ref=$(git symbolic-ref --short -q HEAD || git rev-parse --short HEAD)
++out=${FAB_SHOT_DIR:-${TMPDIR:-/tmp}/fabrial-shots/${ref//\//-}}
++case "$out" in /*) ;; *) out=$PWD/$out ;; esac
++dir=${out%/} rest=''
++while [ ! -d "$dir" ]; do
++  rest=/${dir##*/}$rest
++  dir=$(dirname "$dir")
++done
++out=$(cd "$dir" && pwd -P)$rest
++case "$out/" in
++  "$repo/"*)
++    echo "shot: $out is inside the repository" >&2
++    exit 2
++    ;;
++esac
++mkdir -p "$out"
++
++tmp=$(mktemp -d)
++pane="=$name:"
++t() { tmux -S "$tmp/tmux" -f /dev/null "$@"; }
++trap 't kill-server 2>/dev/null || true; rm -rf "$tmp"' EXIT
++
++# Start on a placeholder so options are set before the command runs. On a
++# private server, the extended-keys server options reach only this capture.
++# tmux before 3.5 has no extended-keys-format. remain-on-exit keeps the pane,
++# its output and its exit status after the command exits, with no process
++# left behind.
++t new-session -d -s "$name" -x "$cols" -y "$rows" cat
++t set-option -s extended-keys on
++t set-option -s extended-keys-format csi-u 2>/dev/null || true
++t set-option -g remain-on-exit on
++t set-option -g remain-on-exit-format '' 2>/dev/null || true
++t respawn-pane -k -t "$pane" -c "$PWD" -e "PATH=$PATH" "$@"
++
++deadline=$((SECONDS + timeout))
++dead() {
++  local d
++  d=$(t display-message -p -t "$pane" '#{pane_dead}') || {
++    echo "shot: the tmux server stopped" >&2
++    exit 1
++  }
++  [ "$d" = 1 ]
++}
++
++# Wait until the command exits, or the pane holds still for a second, or the
++# timeout passes. Without an argument, a blank pane has not drawn yet.
++settle() {
++  local blank_ok=${1:-} prev='' cur still=0
++  while [ "$SECONDS" -lt "$deadline" ]; do
++    sleep 0.5
++    dead && return
++    cur=$(t capture-pane -p -e -t "$pane")
++    if [ -n "$blank_ok${cur//[[:space:]]/}" ] && [ "$cur" = "$prev" ]; then
++      still=$((still + 1))
++      [ "$still" -ge 2 ] && return
++    else
++      still=0
++    fi
++    prev=$cur
++  done
++}
++
++if [ -n "$wait_for" ]; then
++  until [[ $(t capture-pane -p -J -t "$pane" 2>/dev/null) == *"$wait_for"* ]]; do
++    if dead || [ "$SECONDS" -ge "$deadline" ]; then
++      echo "shot: '$wait_for' did not appear within ${timeout}s" >&2
++      exit 1
++    fi
++    sleep 0.2
++  done
++fi
++if [ "${#keys[@]}" -gt 0 ]; then
++  settle blank
++  t send-keys -t "$pane" "${keys[@]}"
++  settle blank
++else
++  settle
++fi
++
++t capture-pane -p -e -t "$pane" >"$out/$name.ansi"
++freeze --language ansi -o "$out/$name.png" <"$out/$name.ansi" >/dev/null
++echo "$out/$name.png"
++
++if dead; then
++  code=$(t display-message -p -t "$pane" '#{pane_dead_status}')
++  if [ "${code:-0}" -ne 0 ]; then
++    echo "shot: command exited with status $code" >&2
++    exit "$code"
++  fi
++fi
+diff --git a/AGENTS.md b/AGENTS.md
+index e8579f2..314c771 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -12,6 +12,9 @@
+   - Keep packages/docs/ up to date with usage instructions, again with the writing skill
+ - The TUI can and should be verified with a herdr pane. Open a background tab
+   and send key/mouse events. Use the current working tree as the diff to check.
++- For a TUI change, run `just shots` (or `just shot` for a state it lacks) and
++  report the PNG paths. Review snapshot changes with `cargo insta review` and
++  commit only the ones you meant.
+ 
+ ## Gates
+ 
+diff --git a/Cargo.lock b/Cargo.lock
+index 27eae90..5ae6828 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -747,6 +747,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "86f0f8fee8c926415c58d6ae43a08523a26faccb2323f5e6b644fe7dd4ef6b82"
+ dependencies = [
+  "once_cell",
++ "serde",
+  "similar",
+  "tempfile",
+ ]
+@@ -933,6 +934,7 @@ dependencies = [
+  "clap_mangen",
+  "getrandom 0.3.4",
+  "include_dir",
++ "insta",
+  "mire-core",
+  "mire-tui",
+  "notify",
+diff --git a/crates/cli/Cargo.toml b/crates/cli/Cargo.toml
+index 1a2b708..72fbabd 100644
+--- a/crates/cli/Cargo.toml
++++ b/crates/cli/Cargo.toml
+@@ -39,6 +39,7 @@ mire-core = { version = "0.1.0", path = "../core" }
+ serde_json.workspace = true
+ 
+ [dev-dependencies]
++insta = { version = "1.48.0", default-features = false, features = ["json"] }
+ portable-pty = { version = "0.9.0", default-features = false }
+ tower = { version = "0.5.2", features = ["util"] }
+ 
+diff --git a/crates/cli/tests/json_output.rs b/crates/cli/tests/json_output.rs
+new file mode 100644
+index 0000000..876813d
+--- /dev/null
++++ b/crates/cli/tests/json_output.rs
+@@ -0,0 +1,112 @@
++use std::fs;
++use std::path::{Path, PathBuf};
++use std::process::{Command, Output};
++use std::sync::atomic::{AtomicU64, Ordering};
++
++use serde_json::Value;
++
++static TEST_ID: AtomicU64 = AtomicU64::new(0);
++
++/// A Git repository with one commit and a worktree edit, captured in a review
++/// file that holds one finding.
++struct Fixture {
++    root: PathBuf,
++}
++
++impl Fixture {
++    fn new() -> Self {
++        let id = TEST_ID.fetch_add(1, Ordering::Relaxed);
++        let root = std::env::temp_dir().join(format!("mire-json-output-{}-{id}", std::process::id()));
++        fs::create_dir_all(&root).expect("fixture repository directory can be created");
++        git(&root, &["init", "--quiet"]);
++        git(&root, &["config", "user.name", "Mire Tests"]);
++        git(&root, &["config", "user.email", "mire@example.invalid"]);
++        fs::write(
++            root.join("config.rs"),
++            b"const PORT: u16 = 80;\nconst HOST: &str = \"localhost\";\n",
++        )
++        .expect("base source can be written");
++        git(&root, &["add", "."]);
++        git(&root, &["commit", "--quiet", "-m", "base"]);
++        fs::write(
++            root.join("config.rs"),
++            b"const PORT: u16 = 8080;\nconst HOST: &str = \"127.0.0.1\";\nconst RETRIES: u8 = 3;\n",
++        )
++        .expect("source edit can be written");
++
++        let fixture = Self { root };
++        fixture.run(&["review", "init", "review.json"]);
++        fixture.run(&[
++            "note",
++            "add",
++            "review.json",
++            "--revision",
++            "1",
++            "--file",
++            "config.rs",
++            "--new-line",
++            "1",
++            "--author",
++            "reviewer",
++            "--provenance",
++            "agent",
++            "--producer",
++            "fixture",
++            "--severity",
++            "medium",
++            "--kind",
++            "defect",
++            "--body",
++            "Port 8080 collides with the dev server.",
++        ]);
++        fixture
++    }
++
++    fn json(&self, arguments: &[&str]) -> Value {
++        serde_json::from_slice(&self.run(arguments).stdout).expect("Mire prints JSON")
++    }
++
++    fn run(&self, arguments: &[&str]) -> Output {
++        let output = Command::new(env!("CARGO_BIN_EXE_mire"))
++            .args(arguments)
++            .current_dir(&self.root)
++            .output()
++            .expect("Mire runs");
++        assert!(
++            output.status.success(),
++            "mire {arguments:?} failed: {}",
++            String::from_utf8_lossy(&output.stderr)
++        );
++        output
++    }
++}
++
++impl Drop for Fixture {
++    fn drop(&mut self) {
++        let _ = fs::remove_dir_all(&self.root);
++    }
++}
++
++#[test]
++fn context_manifest_json_is_stable() {
++    let fixture = Fixture::new();
++    insta::assert_json_snapshot!("context_manifest", fixture.json(&["context", "review.json"]));
++}
++
++#[test]
++fn review_status_json_is_stable() {
++    let fixture = Fixture::new();
++    insta::assert_json_snapshot!(
++        "review_status",
++        fixture.json(&["review", "status", "review.json", "--format", "json"])
++    );
++}
++
++fn git(path: &Path, arguments: &[&str]) {
++    let output = Command::new("git")
++        .args(arguments)
++        .current_dir(path)
++        .output()
++        .expect("git runs");
++    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
++}
+diff --git a/crates/cli/tests/live_session.rs b/crates/cli/tests/live_session.rs
+index a182770..4850ad0 100644
+--- a/crates/cli/tests/live_session.rs
++++ b/crates/cli/tests/live_session.rs
+@@ -104,6 +104,7 @@ fn live_session_inspects_and_navigates_an_open_review_without_writing_it() {
+         panic!("inspect failed: {inspected}");
+     }
+     assert_eq!(inspected["result"]["review_revision"], 2);
++    insta::assert_json_snapshot!("session_inspect", inspected);
+ 
+     let focused = session_command(&directory.0, &["focus", &session, "--note", "note-1"]);
+     assert_eq!(focused["status"], "ok");
+diff --git a/crates/cli/tests/snapshots/json_output__context_manifest.snap b/crates/cli/tests/snapshots/json_output__context_manifest.snap
+new file mode 100644
+index 0000000..7cbb9d4
+--- /dev/null
++++ b/crates/cli/tests/snapshots/json_output__context_manifest.snap
+@@ -0,0 +1,78 @@
++---
++source: crates/cli/tests/json_output.rs
++expression: "fixture.json(&[\"context\", \"review.json\"])"
++---
++{
++  "payload": {
++    "files": [
++      {
++        "fingerprint": "7ba5dce248f0a76fa485ab1f48c9fd6f8e070d0b404023b90bcf6d57010d410e",
++        "hunks": [
++          {
++            "fingerprint": "d5e14d952d6ea2e706bb2d02ae5a4af9c0abb16c2cffc689b8cb4eabfd5a67a0",
++            "new_line_count": 3,
++            "new_start": 1,
++            "old_line_count": 2,
++            "old_start": 1
++          }
++        ],
++        "new_path": [
++          99,
++          111,
++          110,
++          102,
++          105,
++          103,
++          46,
++          114,
++          115
++        ],
++        "old_path": [
++          99,
++          111,
++          110,
++          102,
++          105,
++          103,
++          46,
++          114,
++          115
++        ],
++        "status": "modified"
++      }
++    ],
++    "kind": "manifest",
++    "notes": [
++      {
++        "annotation_kind": "defect",
++        "end": 1,
++        "id": "note-1",
++        "path": [
++          99,
++          111,
++          110,
++          102,
++          105,
++          103,
++          46,
++          114,
++          115
++        ],
++        "provenance": {
++          "kind": "agent",
++          "producer": "fixture"
++        },
++        "reanchor_outcome": null,
++        "severity": "medium",
++        "side": "new",
++        "start": 1,
++        "status": "open"
++      }
++    ]
++  },
++  "review_revision": 2,
++  "schema_version": {
++    "major": 1,
++    "minor": 2
++  }
++}
+diff --git a/crates/cli/tests/snapshots/json_output__review_status.snap b/crates/cli/tests/snapshots/json_output__review_status.snap
+new file mode 100644
+index 0000000..5b6aa9d
+--- /dev/null
++++ b/crates/cli/tests/snapshots/json_output__review_status.snap
+@@ -0,0 +1,37 @@
++---
++source: crates/cli/tests/json_output.rs
++expression: "fixture.json(&[\"review\", \"status\", \"review.json\", \"--format\", \"json\"])"
++---
++{
++  "additions": 3,
++  "changeset_fingerprint": "7ba5dce248f0a76fa485ab1f48c9fd6f8e070d0b404023b90bcf6d57010d410e",
++  "deletions": 2,
++  "files": 1,
++  "findings": {
++    "accepted_risk": 0,
++    "dismissed": 0,
++    "open": 1,
++    "resolved": 0,
++    "total": 1
++  },
++  "reanchor": {
++    "ambiguous": 0,
++    "exact": 0,
++    "moved": 0,
++    "original": 1,
++    "stale": 0
++  },
++  "review_revision": 2,
++  "schema_version": {
++    "major": 1,
++    "minor": 2
++  },
++  "source": {
++    "kind": "git",
++    "operation": {
++      "kind": "worktree",
++      "paths": [],
++      "staged": false
++    }
++  }
++}
+diff --git a/crates/cli/tests/snapshots/live_session__session_inspect.snap b/crates/cli/tests/snapshots/live_session__session_inspect.snap
+new file mode 100644
+index 0000000..d3b2491
+--- /dev/null
++++ b/crates/cli/tests/snapshots/live_session__session_inspect.snap
+@@ -0,0 +1,30 @@
++---
++source: crates/cli/tests/live_session.rs
++expression: inspected
++---
++{
++  "result": {
++    "filter": "author=all status=all severity=all kind=all file=all",
++    "layout": "automatic",
++    "review_revision": 2,
++    "scroll_row": 0,
++    "selected_note_id": null,
++    "selected_path": [
++      102,
++      105,
++      108,
++      101,
++      46,
++      114,
++      115
++    ],
++    "state": "ready",
++    "walkthrough_active": false,
++    "walkthrough_progress": null
++  },
++  "schema_version": {
++    "major": 1,
++    "minor": 0
++  },
++  "status": "ok"
++}
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__collapsed_file_100x16.snap b/crates/ui/src/snapshots/mire_tui__view__tests__collapsed_file_100x16.snap
+new file mode 100644
+index 0000000..0f9dd2e
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__collapsed_file_100x16.snap
+@@ -0,0 +1,20 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(file, 100, 16)"
++---
++ Mire review │ split │ focus review │ context 3 │ wrap off │ file 1/3 · 1/12
++ Files            1/3 │ ▸ docs/guide.md · 2 lines hidden                                    added +2
++▌ A docs/guide.md   +2│ ▾ src/lib.rs                                                  modified +1 -1
++  M src/lib.rs   +1 -1│ ▾ @@ -1,3 +1,3 @@
++  M …arse/mod.rs +2 -1│    1  pub mod parse;                 │     1  pub mod parse;
++                      │    2 -pub const PORT: u16 = 80;      │     2 +pub const PORT: u16 = 8080;
++                      │    3  pub const HOST: &str = "localh │     3  pub const HOST: &str = "localh
++                      │ ▾ src/parse/mod.rs                                            modified +2 -1
++                      │ ▾ @@ -1,3 +1,4 @@
++                      │    1  pub fn split(line: &str) -> Op │     1  pub fn split(line: &str) -> Op
++                      │    2 -    line.split_once('=')       │     2 +    let (key, value) = line.sp
++                      │                                      │     3 +    Some((key.trim(), value.tr
++                      │    3  }                              │     4  }
++                      │
++                      │
++ source  j/k move  v range  c note  / search  ? help  q quit
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__collapsed_hunk_100x16.snap b/crates/ui/src/snapshots/mire_tui__view__tests__collapsed_hunk_100x16.snap
+new file mode 100644
+index 0000000..a66881e
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__collapsed_hunk_100x16.snap
+@@ -0,0 +1,20 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(hunk, 100, 16)"
++---
++ Mire review │ split │ focus review │ context 3 │ wrap off │ file 1/3 · 2/13
++ Files            1/3 │ ▾ docs/guide.md                                                     added +2
++▌ A docs/guide.md   +2│ ▸ @@ -0,0 +1,2 @@ · 2 lines hidden
++  M src/lib.rs   +1 -1│ ▾ src/lib.rs                                                  modified +1 -1
++  M …arse/mod.rs +2 -1│ ▾ @@ -1,3 +1,3 @@
++                      │    1  pub mod parse;                 │     1  pub mod parse;
++                      │    2 -pub const PORT: u16 = 80;      │     2 +pub const PORT: u16 = 8080;
++                      │    3  pub const HOST: &str = "localh │     3  pub const HOST: &str = "localh
++                      │ ▾ src/parse/mod.rs                                            modified +2 -1
++                      │ ▾ @@ -1,3 +1,4 @@
++                      │    1  pub fn split(line: &str) -> Op │     1  pub fn split(line: &str) -> Op
++                      │    2 -    line.split_once('=')       │     2 +    let (key, value) = line.sp
++                      │                                      │     3 +    Some((key.trim(), value.tr
++                      │    3  }                              │     4  }
++                      │
++ source  j/k move  v range  c note  / search  ? help  q quit
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__file_picker_100x16.snap b/crates/ui/src/snapshots/mire_tui__view__tests__file_picker_100x16.snap
+new file mode 100644
+index 0000000..8169b95
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__file_picker_100x16.snap
+@@ -0,0 +1,20 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(picker, 100, 16)"
++---
++ Mire review │ split │ focus review │ context 3 │ wrap off │ file 1/3 · 1/15
++ Files    ┌──────────────────────────────────────────────────────────────────────────────┐ added +2█
++▌ A docs/g│ File jump                                                                    │         █
++  M src/li│ > █                                                                          │         █
++  M …arse/│ 3 changed files                                                              │s.       █
++          │ ▌ A docs/guide.md +2 -0                                                      │ied +1 -1█
++          │   M src/lib.rs +1 -1                                                         │         █
++          │   M src/parse/mod.rs +2 -1                                                   │         █
++          │                                                                              │ 8080;   █
++          │                                                                              │= "localh█
++          │                                                                              │ied +2 -1█
++          │                                                                              │         █
++          │                                                                              │tr) -> Op█
++          │                                                                              │= line.sp█
++          └──────────────────────────────────────────────────────────────────────────────┘ value.tr█
++ file jump  type filter  ↑↓ select  Enter jump  Esc close
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__layout_split_120x16.snap b/crates/ui/src/snapshots/mire_tui__view__tests__layout_split_120x16.snap
+new file mode 100644
+index 0000000..d9dc02d
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__layout_split_120x16.snap
+@@ -0,0 +1,20 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(split, 120, 16)"
++---
++ Mire review │ split │ focus review │ context 3 │ wrap off │ file 1/3 · 1/15
++ Files                1/3 │ ▾ docs/guide.md                                                                    added +2█
++▌ A docs/guide.md       +2│ ▾ @@ -0,0 +1,2 @@                                                                          █
++  M src/lib.rs       +1 -1│                                             │     1 +# Guide                               █
++  M src/parse/mod.rs +2 -1│                                             │     2 +Read key = value lines.               █
++                          │ ▾ src/lib.rs                                                                 modified +1 -1█
++                          │ ▾ @@ -1,3 +1,3 @@                                                                          █
++                          │    1  pub mod parse;                        │     1  pub mod parse;                        █
++                          │    2 -pub const PORT: u16 = 80;             │     2 +pub const PORT: u16 = 8080;           █
++                          │    3  pub const HOST: &str = "localhost";   │     3  pub const HOST: &str = "localhost";   █
++                          │ ▾ src/parse/mod.rs                                                           modified +2 -1█
++                          │ ▾ @@ -1,3 +1,4 @@                                                                          █
++                          │    1  pub fn split(line: &str) -> Option<(& │     1  pub fn split(line: &str) -> Option<(&s█
++                          │    2 -    line.split_once('=')              │     2 +    let (key, value) = line.split_once█
++                          │                                             │     3 +    Some((key.trim(), value.trim()))  █
++ source  j/k move  v range  c note  / search  ? help  q quit
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__layout_unified_120x16.snap b/crates/ui/src/snapshots/mire_tui__view__tests__layout_unified_120x16.snap
+new file mode 100644
+index 0000000..7af04d6
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__layout_unified_120x16.snap
+@@ -0,0 +1,20 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(unified, 120, 16)"
++---
++ Mire review │ unified │ focus review │ context 3 │ wrap off │ file 1/3 · 1/17
++ Files                1/3 │ ▾ docs/guide.md                                                                    added +2█
++▌ A docs/guide.md       +2│ ▾ @@ -0,0 +1,2 @@                                                                          █
++  M src/lib.rs       +1 -1│          1 +# Guide                                                                        █
++  M src/parse/mod.rs +2 -1│          2 +Read key = value lines.                                                        █
++                          │ ▾ src/lib.rs                                                                 modified +1 -1█
++                          │ ▾ @@ -1,3 +1,3 @@                                                                          █
++                          │    1     1  pub mod parse;                                                                 █
++                          │    2       -pub const PORT: u16 = 80;                                                      █
++                          │          2 +pub const PORT: u16 = 8080;                                                    █
++                          │    3     3  pub const HOST: &str = "localhost";                                            █
++                          │ ▾ src/parse/mod.rs                                                           modified +2 -1█
++                          │ ▾ @@ -1,3 +1,4 @@                                                                          █
++                          │    1     1  pub fn split(line: &str) -> Option<(&str, &str)> {                             │
++                          │    2       -    line.split_once('=')                                                       │
++ source  j/k move  v range  c note  / search  ? help  q quit
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__notes_editor_120x18.snap b/crates/ui/src/snapshots/mire_tui__view__tests__notes_editor_120x18.snap
+new file mode 100644
+index 0000000..6adfc08
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__notes_editor_120x18.snap
+@@ -0,0 +1,22 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(editor, 120, 18)"
++---
++ Mire review │ split │ b/docs/guide.md:1-1 │ file 1/3 · 3/17 │ 2 open
++ Files                1/3 │ ▾ docs/guide.md                                                                    added +2█
++▌ A docs/guide.md       +2│ ▾ @@ -0,0 +1,2 @@                                                                          █
++  M src/lib.rs   !1 Medium│                                             │     1 ># Guide                               █
++  M …/parse/mod.rs !1 Note│          ┌──────────────────────────────────────────────────────────────────────┐          █
++                          │ ▾ src/lib│New note · b/docs/guide.md:1-1                                        │fied +1 -1█
++                          │ ▾ @@ -1,3│› Body:                                                               │          █
++                          │    1  pub│Check the port range.█                                                │          █
++                          │    2 -pub│  Severity: Note                                                      │          █
++                          │ open Medi│  Kind: comment                                                       │          █
++                          │    3  pub│                                                                      │lhost";   █
++                          │ ▾ src/par│Enter newline · Ctrl-Enter save · Tab focus · ↑↓ change field · Esc ca│fied +2 -1█
++                          │ ▾ @@ -1,3└──────────────────────────────────────────────────────────────────────┘          █
++                          │    1  pub fn split(line: &str) -> Option<(& │     1  pub fn split(line: &str) -> Option<(&s█
++                          │    2 -    line.split_once('=')              │     2 +    let (key, value) = line.split_once█
++                          │                                             │     3 ◆    Some((key.trim(), value.trim()))  █
++                          │ open Note question · reviewer: Should an empty value be accepted?                          █
++ editor  Enter newline  Ctrl-Enter save  Tab field  ↑↓ change  Esc cancel
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__notes_filters_120x18.snap b/crates/ui/src/snapshots/mire_tui__view__tests__notes_filters_120x18.snap
+new file mode 100644
+index 0000000..f096aa4
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__notes_filters_120x18.snap
+@@ -0,0 +1,22 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(filters, 120, 18)"
++---
++ Mire review │ split │ author=all status=all severity=all kind=all file=all │ file 1/3 · 1/17 │ 2 open
++ Files                1/3 │ ▾ docs/guide.md                                                                    added +2█
++▌ A docs/guide.md       +2│ ▾ @@ -0,0 +1,2 @@                                                                          █
++  M src/lib.rs   !1 Medium│                                             │     1 +# Guide                               █
++  M …/parse/mod.rs !1 Note│                                             │     2 +Read key = value lines.               █
++                          │ ▾ src/lib.rs                                                                 modified +1 -1█
++                          │ ▾ @@ -1,3┌──────────────────────────────────────────────────────────────────────┐          █
++                          │    1  pub│Note filters                                                          │          █
++                          │    2 -pub│author=all status=all severity=all kind=all file=all                  │          █
++                          │ open Medi│                                                                      │          █
++                          │    3  pub└──────────────────────────────────────────────────────────────────────┘lhost";   █
++                          │ ▾ src/parse/mod.rs                                                           modified +2 -1█
++                          │ ▾ @@ -1,3 +1,4 @@                                                                          █
++                          │    1  pub fn split(line: &str) -> Option<(& │     1  pub fn split(line: &str) -> Option<(&s█
++                          │    2 -    line.split_once('=')              │     2 +    let (key, value) = line.split_once█
++                          │                                             │     3 ◆    Some((key.trim(), value.trim()))  █
++                          │ open Note question · reviewer: Should an empty value be accepted?                          █
++ filter  a/s/v/k/i filter  c clear  Esc close
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__notes_focused_120x18.snap b/crates/ui/src/snapshots/mire_tui__view__tests__notes_focused_120x18.snap
+new file mode 100644
+index 0000000..1a0aef3
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__notes_focused_120x18.snap
+@@ -0,0 +1,22 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(focused, 120, 18)"
++---
++ Mire review │ split │ focus review │ context 3 │ wrap off │ file 2/3 · 9/17 │ 2 open
++ Files                2/3 │ ▾ docs/guide.md                                                                    added +2█
++  A docs/guide.md       +2│ ▾ @@ -0,0 +1,2 @@                                                                          █
++▌ M src/lib.rs   !1 Medium│                                             │     1 +# Guide                               █
++  M …/parse/mod.rs !1 Note│                                             │     2 +Read key = value lines.               █
++                          │ ▾ src/lib.rs                                                                 modified +1 -1█
++                          │ ▾ @@ -1,3 +1,3 @@                                                                          █
++                          │    1  pub mod parse;                        │     1  pub mod parse;                        █
++                          │    2 -pub const PORT: u16 = 80;             │     2 ◆pub const PORT: u16 = 8080;           █
++                          │ open Medium defect · reviewer: Port 8080 collides with the dev server. [e][o][r][d][a]     █
++                          │    3  pub const HOST: &str = "localhost";   │     3  pub const HOST: &str = "localhost";   █
++                          │ ▾ src/parse/mod.rs                                                           modified +2 -1█
++                          │ ▾ @@ -1,3 +1,4 @@                                                                          █
++                          │    1  pub fn split(line: &str) -> Option<(& │     1  pub fn split(line: &str) -> Option<(&s█
++                          │    2 -    line.split_once('=')              │     2 +    let (key, value) = line.split_once█
++                          │                                             │     3 ◆    Some((key.trim(), value.trim()))  █
++                          │ open Note question · reviewer: Should an empty value be accepted?                          █
++ finding  e edit  r/d/o/a status  p/P findings  Esc clear focus  q quit
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__notes_inline_120x18.snap b/crates/ui/src/snapshots/mire_tui__view__tests__notes_inline_120x18.snap
+new file mode 100644
+index 0000000..c1d3bc3
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__notes_inline_120x18.snap
+@@ -0,0 +1,22 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(App::review_with_options(&review, crate::AppOptions::default()), 120,\n18)"
++---
++ Mire review │ split │ focus review │ context 3 │ wrap off │ file 1/3 · 1/17 │ 2 open
++ Files                1/3 │ ▾ docs/guide.md                                                                    added +2█
++▌ A docs/guide.md       +2│ ▾ @@ -0,0 +1,2 @@                                                                          █
++  M src/lib.rs   !1 Medium│                                             │     1 +# Guide                               █
++  M …/parse/mod.rs !1 Note│                                             │     2 +Read key = value lines.               █
++                          │ ▾ src/lib.rs                                                                 modified +1 -1█
++                          │ ▾ @@ -1,3 +1,3 @@                                                                          █
++                          │    1  pub mod parse;                        │     1  pub mod parse;                        █
++                          │    2 -pub const PORT: u16 = 80;             │     2 ◆pub const PORT: u16 = 8080;           █
++                          │ open Medium defect · reviewer: Port 8080 collides with the dev server.                     █
++                          │    3  pub const HOST: &str = "localhost";   │     3  pub const HOST: &str = "localhost";   █
++                          │ ▾ src/parse/mod.rs                                                           modified +2 -1█
++                          │ ▾ @@ -1,3 +1,4 @@                                                                          █
++                          │    1  pub fn split(line: &str) -> Option<(& │     1  pub fn split(line: &str) -> Option<(&s█
++                          │    2 -    line.split_once('=')              │     2 +    let (key, value) = line.split_once█
++                          │                                             │     3 ◆    Some((key.trim(), value.trim()))  █
++                          │ open Note question · reviewer: Should an empty value be accepted?                          █
++ source  j/k move  v range  c note  / search  ? help  q quit
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__search_prompt_100x16.snap b/crates/ui/src/snapshots/mire_tui__view__tests__search_prompt_100x16.snap
+new file mode 100644
+index 0000000..e736882
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__search_prompt_100x16.snap
+@@ -0,0 +1,20 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(search, 100, 16)"
++---
++ Mire review │ split │ /trim█ │ file 1/3 · 1/15
++ Files            1/3 │ ▾ docs/guide.md                                                    added +2█
++▌ A docs/guide.md   +2│ ▾ @@ -0,0 +1,2 @@                                                          █
++  M src/lib.rs   +1 -1│                                     │     1 +# Guide                       █
++  M …arse/mod.rs +2 -1│                                     │     2 +Read key = value lines.       █
++                      │ ▾ src/lib.rs                                                 modified +1 -1█
++                      │ ▾ @@ -1,3 +1,3 @@                                                          █
++                      │    1  pub mod parse;                │     1  pub mod parse;                █
++                      │    2 -pub const PORT: u16 = 80;     │     2 +pub const PORT: u16 = 8080;   █
++                      │    3  pub const HOST: &str = "local │     3  pub const HOST: &str = "localh█
++                      │ ▾ src/parse/mod.rs                                           modified +2 -1█
++                      │ ▾ @@ -1,3 +1,4 @@                                                          █
++                      │    1  pub fn split(line: &str) -> O │     1  pub fn split(line: &str) -> Op█
++                      │    2 -    line.split_once('=')      │     2 +    let (key, value) = line.sp█
++                      │                                     │     3 +    Some((key.trim(), value.tr█
++ search  Enter find  Esc cancel
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__sidebar_files_100x16.snap b/crates/ui/src/snapshots/mire_tui__view__tests__sidebar_files_100x16.snap
+new file mode 100644
+index 0000000..6f614e0
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__sidebar_files_100x16.snap
+@@ -0,0 +1,20 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(App::ready(&changeset), 100, 16)"
++---
++ Mire review │ split │ focus review │ context 3 │ wrap off │ file 1/3 · 1/15
++ Files            1/3 │ ▾ docs/guide.md                                                    added +2█
++▌ A docs/guide.md   +2│ ▾ @@ -0,0 +1,2 @@                                                          █
++  M src/lib.rs   +1 -1│                                     │     1 +# Guide                       █
++  M …arse/mod.rs +2 -1│                                     │     2 +Read key = value lines.       █
++                      │ ▾ src/lib.rs                                                 modified +1 -1█
++                      │ ▾ @@ -1,3 +1,3 @@                                                          █
++                      │    1  pub mod parse;                │     1  pub mod parse;                █
++                      │    2 -pub const PORT: u16 = 80;     │     2 +pub const PORT: u16 = 8080;   █
++                      │    3  pub const HOST: &str = "local │     3  pub const HOST: &str = "localh█
++                      │ ▾ src/parse/mod.rs                                           modified +2 -1█
++                      │ ▾ @@ -1,3 +1,4 @@                                                          █
++                      │    1  pub fn split(line: &str) -> O │     1  pub fn split(line: &str) -> Op█
++                      │    2 -    line.split_once('=')      │     2 +    let (key, value) = line.sp█
++                      │                                     │     3 +    Some((key.trim(), value.tr█
++ source  j/k move  v range  c note  / search  ? help  q quit
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__sidebar_focused_100x16.snap b/crates/ui/src/snapshots/mire_tui__view__tests__sidebar_focused_100x16.snap
+new file mode 100644
+index 0000000..34ca7dd
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__sidebar_focused_100x16.snap
+@@ -0,0 +1,20 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(focused, 100, 16)"
++---
++ Mire review │ split │ focus files │ context 3 │ wrap off │ file 2/3 · 5/15
++ Files            2/3 │ ▾ @@ -0,0 +1,2 @@                                                          █
++  A docs/guide.md   +2│                                     │     1 +# Guide                       █
++▌ M src/lib.rs   +1 -1│                                     │     2 +Read key = value lines.       █
++  M …arse/mod.rs +2 -1│ ▾ src/lib.rs                                                 modified +1 -1█
++                      │ ▾ @@ -1,3 +1,3 @@                                                          █
++                      │    1  pub mod parse;                │     1  pub mod parse;                █
++                      │    2 -pub const PORT: u16 = 80;     │     2 +pub const PORT: u16 = 8080;   █
++                      │    3  pub const HOST: &str = "local │     3  pub const HOST: &str = "localh█
++                      │ ▾ src/parse/mod.rs                                           modified +2 -1█
++                      │ ▾ @@ -1,3 +1,4 @@                                                          █
++                      │    1  pub fn split(line: &str) -> O │     1  pub fn split(line: &str) -> Op█
++                      │    2 -    line.split_once('=')      │     2 +    let (key, value) = line.sp█
++                      │                                     │     3 +    Some((key.trim(), value.tr█
++                      │    3  }                             │     4  }                             █
++ files  j/k files  Tab review  Esc review  q quit
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__sidebar_hidden_100x16.snap b/crates/ui/src/snapshots/mire_tui__view__tests__sidebar_hidden_100x16.snap
+new file mode 100644
+index 0000000..adffea8
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__sidebar_hidden_100x16.snap
+@@ -0,0 +1,20 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(hidden, 100, 16)"
++---
++ Mire review │ split │ focus review │ context 3 │ wrap off │ file 1/3 · 1/15
++ ▾ docs/guide.md                                                                           added +2█
++ ▾ @@ -0,0 +1,2 @@                                                                                 █
++                                                 │     1 +# Guide                                  █
++                                                 │     2 +Read key = value lines.                  █
++ ▾ src/lib.rs                                                                        modified +1 -1█
++ ▾ @@ -1,3 +1,3 @@                                                                                 █
++    1  pub mod parse;                            │     1  pub mod parse;                           █
++    2 -pub const PORT: u16 = 80;                 │     2 +pub const PORT: u16 = 8080;              █
++    3  pub const HOST: &str = "localhost";       │     3  pub const HOST: &str = "localhost";      █
++ ▾ src/parse/mod.rs                                                                  modified +2 -1█
++ ▾ @@ -1,3 +1,4 @@                                                                                 █
++    1  pub fn split(line: &str) -> Option<(&str, │     1  pub fn split(line: &str) -> Option<(&str,█
++    2 -    line.split_once('=')                  │     2 +    let (key, value) = line.split_once('=█
++                                                 │     3 +    Some((key.trim(), value.trim()))     █
++ source  j/k move  v range  c note  / search  ? help  q quit
+diff --git a/crates/ui/src/snapshots/mire_tui__view__tests__walkthrough_started_120x18.snap b/crates/ui/src/snapshots/mire_tui__view__tests__walkthrough_started_120x18.snap
+new file mode 100644
+index 0000000..bc3df92
+--- /dev/null
++++ b/crates/ui/src/snapshots/mire_tui__view__tests__walkthrough_started_120x18.snap
+@@ -0,0 +1,22 @@
++---
++source: crates/ui/src/view.rs
++expression: "snapshot(app, 120, 18)"
++---
++ Mire review │ split │ focus review │ context 3 │ wrap off │ file 2/3 · 9/17 │ 2 open │ walkthrough 1/2 · session stop
++ Files                2/3 │ ▾ docs/guide.md                                                                    added +2█
++  A docs/guide.md       +2│ ▾ @@ -0,0 +1,2 @@                                                                          █
++▌ M src/lib.rs   !1 Medium│                                             │     1 +# Guide                               █
++  M …/parse/mod.rs !1 Note│                                             │     2 +Read key = value lines.               █
++                          │ ▾ src/lib.rs                                                                 modified +1 -1█
++                          │ ▾ @@ -1,3 +1,3 @@                                                                          █
++                          │    1  pub mod parse;                        │     1  pub mod parse;                        █
++                          │    2 -pub const PORT: u16 = 80;             │     2 ◆pub const PORT: u16 = 8080;           █
++                          │ open Medium defect · reviewer: Port 8080 collides with the dev server. [e][o][r][d][a]     █
++                          │    3  pub const HOST: &str = "localhost";   │     3  pub const HOST: &str = "localhost";   █
++                          │ ▾ src/parse/mod.rs                                                           modified +2 -1█
++                          │ ▾ @@ -1,3 +1,4 @@                                                                          █
++                          │    1  pub fn split(line: &str) -> Option<(& │     1  pub fn split(line: &str) -> Option<(&s█
++                          │    2 -    line.split_once('=')              │     2 +    let (key, value) = line.split_once█
++                          │                                             │     3 ◆    Some((key.trim(), value.trim()))  █
++                          │ open Note question · reviewer: Should an empty value be accepted?                          █
++ finding  e edit  r/d/o/a status  p/P findings  Esc clear focus  q quit
+diff --git a/crates/ui/src/view.rs b/crates/ui/src/view.rs
+index 0da9531..470492d 100644
+--- a/crates/ui/src/view.rs
++++ b/crates/ui/src/view.rs
+@@ -672,6 +672,31 @@ mod tests {
+     use super::*;
+ 
+     const PATCH: &[u8] = b"diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1,2 +1,2 @@ heading\n-old\n+new\n context\n\\ No newline at end of file\ndiff --git a/image.bin b/image.bin\nBinary files a/image.bin and b/image.bin differ\n";
++    const NESTED_PATCH: &[u8] = b"diff --git a/src/lib.rs b/src/lib.rs
++--- a/src/lib.rs
+++++ b/src/lib.rs
++@@ -1,3 +1,3 @@
++ pub mod parse;
++-pub const PORT: u16 = 80;
+++pub const PORT: u16 = 8080;
++ pub const HOST: &str = \"localhost\";
++diff --git a/src/parse/mod.rs b/src/parse/mod.rs
++--- a/src/parse/mod.rs
+++++ b/src/parse/mod.rs
++@@ -1,3 +1,4 @@
++ pub fn split(line: &str) -> Option<(&str, &str)> {
++-    line.split_once('=')
+++    let (key, value) = line.split_once('=')?;
+++    Some((key.trim(), value.trim()))
++ }
++diff --git a/docs/guide.md b/docs/guide.md
++new file mode 100644
++--- /dev/null
+++++ b/docs/guide.md
++@@ -0,0 +1,2 @@
+++# Guide
+++Read key = value lines.
++";
+ 
+     #[test]
+     fn state_snapshots_are_deterministic() {
+@@ -847,6 +872,184 @@ mod tests {
+         assert!(addition_styles.iter().all(|style| style.fg == theme.addition.fg));
+     }
+ 
++    #[test]
++    fn sidebar_snapshots_cover_the_file_list_focus_and_hidden_states() {
++        let changeset = nested_changeset();
++        insta::assert_snapshot!("sidebar_files_100x16", snapshot(App::ready(&changeset), 100, 16));
++
++        let mut focused = App::ready(&changeset);
++        press(&mut focused, KeyCode::Tab);
++        press(&mut focused, KeyCode::Down);
++        insta::assert_snapshot!("sidebar_focused_100x16", snapshot(focused, 100, 16));
++
++        let mut hidden = App::ready(&changeset);
++        press(&mut hidden, KeyCode::Char('b'));
++        insta::assert_snapshot!("sidebar_hidden_100x16", snapshot(hidden, 100, 16));
++    }
++
++    #[test]
++    fn layout_snapshots_cover_forced_unified_and_split_modes() {
++        let changeset = nested_changeset();
++
++        let mut unified = App::ready(&changeset);
++        press(&mut unified, KeyCode::Char('1'));
++        insta::assert_snapshot!("layout_unified_120x16", snapshot(unified, 120, 16));
++
++        let mut split = App::ready(&changeset);
++        press(&mut split, KeyCode::Char('2'));
++        insta::assert_snapshot!("layout_split_120x16", snapshot(split, 120, 16));
++    }
++
++    #[test]
++    fn collapse_snapshots_cover_a_collapsed_file_and_a_collapsed_hunk() {
++        let changeset = nested_changeset();
++
++        let mut file = App::ready(&changeset);
++        press(&mut file, KeyCode::Enter);
++        insta::assert_snapshot!("collapsed_file_100x16", snapshot(file, 100, 16));
++
++        let mut hunk = App::ready(&changeset);
++        hunk.resize(100, 16);
++        press(&mut hunk, KeyCode::Down);
++        press(&mut hunk, KeyCode::Enter);
++        insta::assert_snapshot!("collapsed_hunk_100x16", snapshot(hunk, 100, 16));
++    }
++
++    #[test]
++    fn note_snapshots_cover_inline_findings_focus_editor_and_filters() {
++        let review = notes_review();
++        insta::assert_snapshot!(
++            "notes_inline_120x18",
++            snapshot(App::review_with_options(&review, crate::AppOptions::default()), 120, 18)
++        );
++
++        let mut focused = App::review_with_options(&review, crate::AppOptions::default());
++        press(&mut focused, KeyCode::Char('p'));
++        insta::assert_snapshot!("notes_focused_120x18", snapshot(focused, 120, 18));
++
++        let mut editor = App::review_with_options(&review, crate::AppOptions::default());
++        editor.resize(120, 18);
++        for _ in 0..2 {
++            press(&mut editor, KeyCode::Down);
++        }
++        press(&mut editor, KeyCode::Char('c'));
++        editor.handle_paste("Check the port range.");
++        insta::assert_snapshot!("notes_editor_120x18", snapshot(editor, 120, 18));
++
++        let mut filters = App::review_with_options(&review, crate::AppOptions::default());
++        press(&mut filters, KeyCode::Char('f'));
++        insta::assert_snapshot!("notes_filters_120x18", snapshot(filters, 120, 18));
++    }
++
++    #[test]
++    fn walkthrough_snapshot_shows_progress_in_the_header() {
++        let review = notes_review();
++        let mut app = App::review_with_options(&review, crate::AppOptions::default());
++        app.start_walkthrough().unwrap();
++        insta::assert_snapshot!("walkthrough_started_120x18", snapshot(app, 120, 18));
++    }
++
++    #[test]
++    fn overlay_snapshots_cover_the_file_picker_and_search() {
++        let changeset = nested_changeset();
++
++        let mut picker = App::ready(&changeset);
++        picker.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
++        insta::assert_snapshot!("file_picker_100x16", snapshot(picker, 100, 16));
++
++        let mut search = App::ready(&changeset);
++        press(&mut search, KeyCode::Char('/'));
++        for character in "trim".chars() {
++            press(&mut search, KeyCode::Char(character));
++        }
++        insta::assert_snapshot!("search_prompt_100x16", snapshot(search, 100, 16));
++    }
++
++    fn nested_changeset() -> mire_core::Changeset {
++        parse_patch(
++            NESTED_PATCH,
++            ChangesetSource::Patch { label: None },
++            PatchLimits::default(),
++        )
++        .unwrap()
++    }
++
++    /// A review of the nested patch with an open defect and an open question.
++    fn notes_review() -> mire_core::Review {
++        use mire_core::{
++            Anchor, AnchorSide, AnnotationKind, Author, BytePath, FileContent, LineNumber, LineRange, NoteEvent,
++            NoteEventKind, NoteId, NoteSeverity, NoteStatus, Provenance, Review, ReviewNote, ReviewRevision,
++        };
++
++        let changeset = nested_changeset();
++        let author = Author::new("reviewer", None).unwrap();
++        let note = |sequence: u64, path: &str, line: u64, id: &str, severity, kind, body: &str| {
++            let file = changeset
++                .files()
++                .iter()
++                .find(|file| {
++                    file.new_side()
++                        .is_some_and(|side| side.path.as_bytes() == path.as_bytes())
++                })
++                .expect("fixture has the file");
++            let FileContent::Text { hunks } = file.content() else {
++                panic!("fixture is textual");
++            };
++            let line = LineNumber::new(line).unwrap();
++            let anchor = Anchor::new(
++                &changeset,
++                BytePath::new(path.as_bytes().to_vec()).unwrap(),
++                AnchorSide::New,
++                LineRange::new(line, line).unwrap(),
++                hunks[0].fingerprint(),
++            )
++            .unwrap();
++            let note = ReviewNote::new(
++                NoteId::new(id).unwrap(),
++                anchor,
++                author.clone(),
++                severity,
++                NoteStatus::Open,
++                body.to_owned(),
++                Provenance::Agent { producer: "fixture".to_owned() },
++            )
++            .unwrap()
++            .with_annotation_kind(kind);
++            let created = NoteEventKind::Created { status: NoteStatus::Open };
++            let event = NoteEvent::new(sequence, NoteId::new(id).unwrap(), author.clone(), created).unwrap();
++            (note, event)
++        };
++        let (port, port_event) = note(
++            1,
++            "src/lib.rs",
++            2,
++            "port",
++            NoteSeverity::Medium,
++            AnnotationKind::Defect,
++            "Port 8080 collides with the dev server.",
++        );
++        let (trim, trim_event) = note(
++            2,
++            "src/parse/mod.rs",
++            3,
++            "trim",
++            NoteSeverity::Note,
++            AnnotationKind::Question,
++            "Should an empty value be accepted?",
++        );
++        Review::new(
++            ReviewRevision::new(1).unwrap(),
++            changeset.clone(),
++            vec![port, trim],
++            vec![port_event, trim_event],
++        )
++        .unwrap()
++    }
++
++    fn press(app: &mut App<'_>, code: KeyCode) {
++        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
++    }
++
+     fn snapshot(mut app: App<'_>, width: u16, height: u16) -> String {
+         app.resize(width, height);
+         let backend = TestBackend::new(width, height);
+diff --git a/justfile b/justfile
+index 7ab1186..fee08f4 100644
+--- a/justfile
++++ b/justfile
+@@ -18,6 +18,16 @@ fix:
+     cargo clippy --workspace --all-targets --fix --allow-dirty
+     just fmt
+ 
++# Capture a terminal UI as a PNG with .github/storm/shot.sh (needs tmux and freeze)
++[positional-arguments]
++shot +args:
++    @.github/storm/shot.sh "$@"
++
++# Capture Mire's TUI scenarios, or the named ones, against a fixture repository
++[positional-arguments]
++shots *names:
++    @scripts/shots.sh "$@"
++
+ # Print the changelog entries for commits since the last tag
+ changelog:
+     git cliff --unreleased
+diff --git a/packages/docs/src/content/docs/guides/local-development.md b/packages/docs/src/content/docs/guides/local-development.md
+index 26681cc..deb1b90 100644
+--- a/packages/docs/src/content/docs/guides/local-development.md
++++ b/packages/docs/src/content/docs/guides/local-development.md
+@@ -44,6 +44,55 @@ request titles are conventional commits, because the squash commit uses the
+ title and [git-cliff](https://git-cliff.org) builds the changelog from those
+ subjects. `just changelog` previews the entries since the last tag.
+ 
++## Snapshot tests
++
++The TUI tests render each state into a text buffer and compare it with an
++[insta](https://insta.rs) snapshot under `crates/ui/src/snapshots`. The CLI
++tests compare JSON output with snapshots under `crates/cli/tests/snapshots`.
++When a change alters what Mire draws or prints, the tests fail and insta
++writes the new output next to the old one as a `.snap.new` file.
++
++Review the changes with [cargo-insta](https://insta.rs/docs/cli/):
++
++```sh
++cargo install cargo-insta
++cargo insta test --workspace --review
++```
++
++Accept a snapshot only when the new output is what you meant, and commit it
++with the change.
++
++## Capture the TUI as images
++
++`just shots` builds Mire, creates a fixture repository with a staged change
++and a review holding two findings, and captures each scenario as a PNG and an
++ANSI text file:
++
++```sh
++just shots                 # every scenario
++just shots split note      # the named scenarios
++scripts/shots.sh --list    # the scenario names
++```
++
++The scenarios cover the unified, split, and narrow layouts, help, a hidden
++sidebar, a collapsed file, a focused finding, a live walkthrough, and
++`NO_COLOR`. Each run prints the PNG paths. The files go to `$FAB_SHOT_DIR`, or
++to a directory under `$TMPDIR` named after the branch, never inside the
++repository.
++
++`just shot <name> <cols> <rows> <command...>` captures one command of your own
++through `.github/storm/shot.sh`. Pass `--wait-for <text>` to wait for text on
++the screen, and `--keys <key>` to press keys before the capture.
++
++The captures need tmux, [freeze](https://github.com/charmbracelet/freeze), and
++jq. Where freeze crashes while writing a PNG, install `rsvg-convert` (the
++`librsvg2-bin` package on Debian and Ubuntu); freeze uses it when it is on the
++`PATH`.
++
++When a change alters the TUI, the implementer and both reviewers capture the
++affected states and report the PNG paths in the pull request, as fabrial's
++`storm` skill describes. CI does not run the captures.
++
+ ## Start the servers
+ 
+ Open two terminals from the repository root.
+diff --git a/scripts/shots.sh b/scripts/shots.sh
+new file mode 100755
+index 0000000..0caddde
+--- /dev/null
++++ b/scripts/shots.sh
+@@ -0,0 +1,152 @@
++#!/usr/bin/env bash
++# Capture Mire's TUI states as PNG and ANSI files with .github/storm/shot.sh.
++# Needs tmux, freeze and jq.
++# Usage: scripts/shots.sh [<scenario>...]
++#        scripts/shots.sh --list
++#
++# With no scenario, captures every one. Each scenario runs the debug build of
++# mire against a fixture repository created in a temporary directory, so the
++# captures do not depend on the checkout's own changes. shot.sh writes the
++# files under $FAB_SHOT_DIR, or a temporary directory named after the branch,
++# and prints each PNG's path.
++set -euo pipefail
++
++SCENARIOS=(unified split narrow help sidebar-hidden collapsed note walkthrough no-color)
++
++usage() {
++  echo "usage: scripts/shots.sh [--list | <scenario>...]" >&2
++  echo "scenarios: ${SCENARIOS[*]}" >&2
++  exit 2
++}
++
++if [ "${1:-}" = --list ]; then
++  printf '%s\n' "${SCENARIOS[@]}"
++  exit 0
++fi
++for name in "$@"; do
++  [[ " ${SCENARIOS[*]} " == *" $name "* ]] || usage
++done
++[ "$#" -gt 0 ] || set -- "${SCENARIOS[@]}"
++
++repo=$(git rev-parse --show-toplevel)
++shot=$repo/.github/storm/shot.sh
++cargo build --quiet --manifest-path "$repo/Cargo.toml" -p mire --bin mire
++mire=$repo/target/debug/mire
++
++fixture=$(mktemp -d)
++trap 'rm -rf "$fixture"' EXIT
++
++# A small Rust project with one commit and a worktree change that edits,
++# adds, and deletes files. Fixed names, dates, and contents keep the
++# captures stable between runs.
++build_fixture() {
++  local g=(git -C "$fixture" -c user.name=Mire -c user.email=mire@example.invalid)
++  export GIT_AUTHOR_DATE=2026-01-01T00:00:00Z GIT_COMMITTER_DATE=2026-01-01T00:00:00Z
++  git -C "$fixture" init --quiet --initial-branch=main
++  mkdir -p "$fixture/src"
++  cat >"$fixture/src/lib.rs" <<'EOF'
++//! Parses key-value configuration.
++
++pub mod parse;
++
++/// Returns the default port.
++pub fn default_port() -> u16 {
++    8080
++}
++
++/// Returns the default host.
++pub fn default_host() -> &'static str {
++    "localhost"
++}
++EOF
++  cat >"$fixture/src/parse.rs" <<'EOF'
++/// Splits one `key=value` line.
++pub fn split(line: &str) -> Option<(&str, &str)> {
++    let mut parts = line.splitn(2, '=');
++    let key = parts.next()?;
++    let value = parts.next()?;
++    Some((key, value))
++}
++EOF
++  printf 'Old notes about the parser.\n' >"$fixture/NOTES.md"
++  "${g[@]}" add -A
++  "${g[@]}" commit --quiet -m "Add the parser"
++
++  cat >"$fixture/src/lib.rs" <<'EOF'
++//! Parses key-value configuration.
++
++pub mod parse;
++
++/// Returns the default port, or `MIRE_PORT` when it is set.
++pub fn default_port() -> u16 {
++    std::env::var("MIRE_PORT")
++        .ok()
++        .and_then(|value| value.parse().ok())
++        .unwrap_or(8080)
++}
++
++/// Returns the default host.
++pub fn default_host() -> &'static str {
++    "127.0.0.1"
++}
++EOF
++  cat >"$fixture/src/parse.rs" <<'EOF'
++/// Splits one `key = value` line, trimming spaces around both parts.
++pub fn split(line: &str) -> Option<(&str, &str)> {
++    let (key, value) = line.split_once('=')?;
++    let key = key.trim();
++    if key.is_empty() {
++        return None;
++    }
++    Some((key, value.trim()))
++}
++EOF
++  printf '# Config\n\nRead `key = value` lines with `parse::split`.\n' >"$fixture/README.md"
++  rm "$fixture/NOTES.md"
++  "${g[@]}" add -A
++
++  (cd "$fixture" && "$mire" review init review.json --staged >/dev/null)
++  (cd "$fixture" && "$mire" note add review.json --revision 1 --file src/lib.rs --new-line 8 \
++    --author reviewer --provenance agent --producer shots --severity medium --kind defect \
++    --body "A port outside 1-65535 falls back silently. Report it instead." >/dev/null)
++  (cd "$fixture" && "$mire" note add review.json --revision 2 --file src/parse.rs --new-line 4 \
++    --author reviewer --provenance agent --producer shots --severity note --kind question \
++    --body "Should an empty value be accepted?" >/dev/null)
++}
++
++# Runs one scenario: shot.sh options, the name, the size, then the command.
++capture() {
++  local name=$1
++  local diff=("$mire" diff --staged --theme eldritch)
++  local review=("$mire" review review.json --theme eldritch)
++  case "$name" in
++    unified) run --keys 1 unified 120 32 "${diff[@]}" ;;
++    split) run --keys 2 split 160 32 "${diff[@]}" ;;
++    narrow) run narrow 60 24 "${diff[@]}" ;;
++    help) run --keys '?' help 100 32 "${diff[@]}" ;;
++    sidebar-hidden) run --keys b sidebar-hidden 120 32 "${diff[@]}" ;;
++    collapsed) run --keys Enter collapsed 120 32 "${diff[@]}" ;;
++    note) run --keys p note 120 32 "${review[@]}" ;;
++    walkthrough)
++      # The live-session command needs a running TUI, so it starts in the
++      # background and drives the TUI that replaces the shell.
++      run --wait-for "walkthrough 1/" walkthrough 120 32 bash -c '
++        (sleep 2
++          session=$("$0" session list | jq -r ".sessions[0].id")
++          "$0" session walkthrough start "$session" >/dev/null) &
++        exec "$0" review review.json --theme eldritch' "$mire"
++      ;;
++    no-color) run no-color 120 32 env NO_COLOR=1 "$mire" diff --staged ;;
++  esac
++}
++
++run() {
++  (cd "$fixture" && COLORTERM=truecolor "$shot" --wait-for Mire --timeout 20 "$@")
++}
++
++build_fixture
++status=0
++for name in "$@"; do
++  capture "$name" || status=$?
++done
++exit "$status"
+
+From ad4106befaf060c0c85cf22eb7565019970d951c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 25 Oct 2026 16:53:25 +0000
+Subject: [PATCH 2/4] chore: complete the visual verification task
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01McED3zcaewkwybS2P4vZya
+---
+ .arcl/workspace/tasks/arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5.md | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/.arcl/workspace/tasks/arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5.md b/.arcl/workspace/tasks/arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5.md
+index d9b4c5c..9a8baab 100644
+--- a/.arcl/workspace/tasks/arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5.md
++++ b/.arcl/workspace/tasks/arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5.md
+@@ -2,9 +2,10 @@
+ id = "arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5"
+ plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
+ title = "Visual verification and snapshot coverage"
+-status = "in_progress"
++status = "completed"
+ priority = "high"
+ position = 0
++evidence = "just check passes. just shots captured all nine scenarios locally (unified, split, narrow, help, sidebar-hidden, collapsed, note, walkthrough, no-color). Changing the header title failed 9 TUI snapshot tests; reverting passed all 49. CLI JSON snapshots pass under a different TMPDIR."
+ +++
+ 
+ Capture the TUI as images locally and widen snapshot test coverage, so UI changes carry visual evidence that reviewers can check.
+
+From bdade8f71cf47a3ed06f12e3fd1b47eedf2e6b95 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 25 Oct 2026 17:06:15 +0000
+Subject: [PATCH 3/4] fix: find the mire binary in cargo's target directory
+
+shots.sh assumed target/debug under the repository, so CARGO_TARGET_DIR or
+build.target-dir left the binary missing or stale.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01McED3zcaewkwybS2P4vZya
+---
+ scripts/shots.sh | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/scripts/shots.sh b/scripts/shots.sh
+index 0caddde..62c207b 100755
+--- a/scripts/shots.sh
++++ b/scripts/shots.sh
+@@ -31,7 +31,9 @@ done
+ repo=$(git rev-parse --show-toplevel)
+ shot=$repo/.github/storm/shot.sh
+ cargo build --quiet --manifest-path "$repo/Cargo.toml" -p mire --bin mire
+-mire=$repo/target/debug/mire
++# CARGO_TARGET_DIR or build.target-dir can move the build out of the repo.
++target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$repo/Cargo.toml" | jq -r .target_directory)
++mire=$target/debug/mire
+ 
+ fixture=$(mktemp -d)
+ trap 'rm -rf "$fixture"' EXIT
+
+From 5eb548d04f2315ea55ff53539d08d22cfa40219c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 25 Oct 2026 17:15:47 +0000
+Subject: [PATCH 4/4] fix: resolve shot output and session discovery outside
+ the fixture
+
+shots.sh now resolves FAB_SHOT_DIR, or the branch-named default, against
+the Mire checkout before entering the fixture, refuses a directory inside
+the checkout, and passes shot.sh the absolute path. The captures run with
+a private XDG_RUNTIME_DIR so the walkthrough scenario cannot pick another
+open mire review session.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01McED3zcaewkwybS2P4vZya
+---
+ .../content/docs/guides/local-development.md  |  9 ++--
+ scripts/shots.sh                              | 41 ++++++++++++++++---
+ 2 files changed, 41 insertions(+), 9 deletions(-)
+
+diff --git a/packages/docs/src/content/docs/guides/local-development.md b/packages/docs/src/content/docs/guides/local-development.md
+index deb1b90..0715119 100644
+--- a/packages/docs/src/content/docs/guides/local-development.md
++++ b/packages/docs/src/content/docs/guides/local-development.md
+@@ -76,9 +76,12 @@ scripts/shots.sh --list    # the scenario names
+ 
+ The scenarios cover the unified, split, and narrow layouts, help, a hidden
+ sidebar, a collapsed file, a focused finding, a live walkthrough, and
+-`NO_COLOR`. Each run prints the PNG paths. The files go to `$FAB_SHOT_DIR`, or
+-to a directory under `$TMPDIR` named after the branch, never inside the
+-repository.
++`NO_COLOR`. Each run prints the PNG paths. The files go to `$FAB_SHOT_DIR`,
++resolved against the current directory, or else to
++`$TMPDIR/fabrial-shots/<branch>`, named after the checkout's branch. The script
++refuses an output directory inside the repository. The live walkthrough uses a
++private `XDG_RUNTIME_DIR`, so other open `mire review` sessions do not affect
++it.
+ 
+ `just shot <name> <cols> <rows> <command...>` captures one command of your own
+ through `.github/storm/shot.sh`. Pass `--wait-for <text>` to wait for text on
+diff --git a/scripts/shots.sh b/scripts/shots.sh
+index 62c207b..d44e109 100755
+--- a/scripts/shots.sh
++++ b/scripts/shots.sh
+@@ -6,9 +6,11 @@
+ #
+ # With no scenario, captures every one. Each scenario runs the debug build of
+ # mire against a fixture repository created in a temporary directory, so the
+-# captures do not depend on the checkout's own changes. shot.sh writes the
+-# files under $FAB_SHOT_DIR, or a temporary directory named after the branch,
+-# and prints each PNG's path.
++# captures do not depend on the checkout's own changes. The files go under
++# $FAB_SHOT_DIR, resolved against the current directory, or else under
++# ${TMPDIR:-/tmp}/fabrial-shots/<branch>, named after the Mire checkout's
++# branch. A directory inside the checkout is refused. shot.sh prints each
++# PNG's path.
+ set -euo pipefail
+ 
+ SCENARIOS=(unified split narrow help sidebar-hidden collapsed note walkthrough no-color)
+@@ -28,15 +30,42 @@ for name in "$@"; do
+ done
+ [ "$#" -gt 0 ] || set -- "${SCENARIOS[@]}"
+ 
+-repo=$(git rev-parse --show-toplevel)
++repo=$(cd "$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)" && pwd -P)
+ shot=$repo/.github/storm/shot.sh
++
++# shot.sh runs inside the fixture, so it would name and check the output
++# directory against the fixture. Resolve it here against the Mire checkout,
++# through its nearest existing parent, and hand shot.sh the absolute path.
++ref=$(git -C "$repo" symbolic-ref --short -q HEAD || git -C "$repo" rev-parse --short HEAD)
++out=${FAB_SHOT_DIR:-${TMPDIR:-/tmp}/fabrial-shots/${ref//\//-}}
++case "$out" in /*) ;; *) out=$PWD/$out ;; esac
++dir=${out%/} rest=''
++while [ ! -d "$dir" ]; do
++  rest=/${dir##*/}$rest
++  dir=$(dirname "$dir")
++done
++out=$(cd "$dir" && pwd -P)$rest
++case "$out/" in
++  "$repo/"*)
++    echo "shots: $out is inside the repository" >&2
++    exit 2
++    ;;
++esac
++export FAB_SHOT_DIR=$out
++
+ cargo build --quiet --manifest-path "$repo/Cargo.toml" -p mire --bin mire
+ # CARGO_TARGET_DIR or build.target-dir can move the build out of the repo.
+ target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$repo/Cargo.toml" | jq -r .target_directory)
+ mire=$target/debug/mire
+ 
+-fixture=$(mktemp -d)
+-trap 'rm -rf "$fixture"' EXIT
++# The fixture and a private XDG_RUNTIME_DIR share one temporary directory.
++# Live sessions register under $XDG_RUNTIME_DIR/mire, so the walkthrough
++# scenario sees only the session it starts, not other open reviews.
++work=$(mktemp -d)
++trap 'rm -rf "$work"' EXIT
++fixture=$work/repo
++mkdir -m 700 "$fixture" "$work/runtime"
++export XDG_RUNTIME_DIR=$work/runtime
+ 
+ # A small Rust project with one commit and a worktree change that edits,
+ # adds, and deletes files. Fixed names, dates, and contents keep the

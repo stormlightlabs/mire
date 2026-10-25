@@ -1,0 +1,16 @@
+# fabrial's settings for this repository. The Branch PR workflow, the Review
+# gate and the skills read them. Each value is one line: key = "value".
+
+# GitHub login of the person who approves pull requests; `fab init` writes
+# CODEOWNERS from it.
+owner = "desertthunder"
+
+# The Co-authored-by trailer on every squash commit.
+trailer = "Owais <desertthunder.dev@gmail.com>"
+
+# The command agents run before pushing.
+gates = "just check"
+
+# The fabrial version that wrote the installed files. `fab check`
+# compares it with its own.
+version = "0.3.3"

@@ -1,0 +1,4 @@
+# Every pull request requests a review from the owner. Pull requests are
+# opened by stormlight-thunderbot, so the owner is never the author and can
+# approve them. `fab init` writes this file from `.github/fabrial.toml`.
+* @desertthunder

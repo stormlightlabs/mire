@@ -15,7 +15,7 @@ runs the delivery loop, arclightning tracks the work, and Mire shows the change.
   GitHub or `gh` itself. The caller supplies any pull-request context, such as
   the title and description.
 - **Agent-written walkthroughs.** An agent reads the change through `mire
-  context` or an MCP server and writes a walkthrough: ordered steps with a
+context` or an MCP server and writes a walkthrough: ordered steps with a
   narrative, each anchored to hunks. Mire stores, re-anchors, and renders it
   in the TUI and the browser. Mire does not call a model; the agent authors
   the content.
@@ -113,24 +113,30 @@ The implementation must also cover these states:
 - visible focus, disabled, pending, success, and error states that do not rely on
   color alone.
 
-## Useful CodeRabbit ideas
+## Review tool ideas
 
-CodeRabbit is most useful here as interaction research, not as a feature target.
+Greptile, hunk, and CodeRabbit are interaction research, not feature targets.
+[Walkthrough design](packages/docs/src/content/docs/concepts/walkthrough-design.md)
+records what Mire adopts, adapts, and skips from each, with sources, and the
+walkthrough fields.
 
-| Idea                                              | Mire adaptation                                                                    | Timing                     |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------- |
-| Structured overview before inline findings        | Deterministic source, change, finding, and re-anchor summary                       | First complete review loop |
-| Finding types and severity                        | Existing annotation intent and severity, with filters and accessible labels        | Initial finding experience |
-| Incremental review of new pushes                  | Source-backed refresh plus durable note re-anchoring                               | Refresh/watch phase        |
-| Review status and pre-merge checks                | Local readiness summary for open findings, unsafe anchors, and unviewed files      | Completion phase           |
-| Guided change order instead of alphabetical files | Optional logical file groups when Mire has real relationship metadata              | Later exploration          |
-| Contextual navigation from summary to line        | Finding queue selects the file, scrolls to the anchor, and focuses the inline card | Initial finding experience |
+| Idea                                       | Source               | Mire adaptation                                                                |
+| ------------------------------------------ | -------------------- | ------------------------------------------------------------------------------ |
+| Overview before inline findings            | All three            | Deterministic review summary, plus the agent's walkthrough overview            |
+| Steps in explanation order, not path order | CodeRabbit           | Ordered walkthrough steps that the agent writes and Mire never reorders        |
+| One step spans contract, code, and tests   | CodeRabbit           | Each step anchors to line ranges in any number of files                        |
+| Narrative beside the code                  | hunk, CodeRabbit     | Step narrative renders next to its anchored hunks, with next and previous keys |
+| Agent order sets file order                | hunk                 | In walkthrough mode, covered files come first, in step order                   |
+| Diagrams only where they help              | Greptile, CodeRabbit | Optional agent-written Mermaid source on a step                                |
+| Findings linked from the summary           | Greptile             | A step shows the notes whose anchors overlap its anchors                       |
+| Finding types and severity                 | Greptile, CodeRabbit | Existing annotation intent and severity, with filters and accessible labels    |
+| Incremental review of new pushes           | CodeRabbit           | Source-backed refresh re-anchors notes and walkthrough steps                   |
+| Review status and pre-merge checks         | CodeRabbit           | Local readiness summary for open findings, unsafe anchors, and unviewed files  |
 
-Ideas not to copy now include PR automation, reviewer assignment, generated
-labels, chat, one-click fixes, AI summaries, and model-selected review profiles.
-They require remote or generative capabilities outside this local human-review
-surface. Estimated effort and change diagrams should also wait until Mire can
-derive them honestly rather than presenting guesses as review facts.
+Mire skips confidence scores, effort estimates, merge risk, related issues and
+pull requests, generated labels, reviewer assignment, chat, one-click fixes,
+and cohorts of parallel steps. They need a model inside Mire, a remote service,
+or a need Mire has not shown yet.
 
 ## User flow
 
@@ -421,7 +427,10 @@ output.
 
 ## Research references
 
-Consulted on 2026-08-16:
+Consulted on 2026-08-16. Greptile, hunk, and the CodeRabbit
+Change Stack sources are in
+[Walkthrough design](packages/docs/src/content/docs/concepts/walkthrough-design.md),
+read on 2026-10-25.
 
 - [CodeRabbit review walkthrough](https://docs.coderabbit.ai/pr-reviews/walkthroughs)
 - [CodeRabbit review feedback and workflow](https://docs.coderabbit.ai/guides/code-review-overview)

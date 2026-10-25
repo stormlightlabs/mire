@@ -2,9 +2,10 @@
 id = "arcl-t-01M5SXD4ZQV5YW9TF0093A640S"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
 title = "Research review tools for walkthrough design"
-status = "pending"
+status = "completed"
 priority = "high"
 position = 1
+evidence = "Added concepts/walkthrough-design.md: adopt/adapt/skip tables for Greptile, hunk (modem-dev/hunk), and CodeRabbit with source links, and proposed walkthrough fields (overview, steps with id, title, narrative, anchors, depends_on, diagram) and ordering rules. Replaced ROADMAP 'Useful CodeRabbit ideas' with 'Review tool ideas'. just check passes; docs vite build renders the page."
 +++
 
 Study how Greptile, hunk, and CodeRabbit present a change for review, and decide what Mire's walkthroughs should borrow before the walkthrough model is designed.

@@ -81,7 +81,7 @@ by what blocks a merge.
 | Adopt    | Narrative renders beside the anchored lines, with keys to jump between steps.                       |
 | Adapt    | Notes that vanish with the window become durable steps that re-anchor on refresh.                   |
 | Adapt    | hunk attaches a note without a range to the first hunk. Mire rejects a step without an anchor.      |
-| Skip     | STML markup. Narrative is Markdown, which the TUI and browser already render.                       |
+| Skip     | STML markup. Narrative is Markdown. Neither the TUI nor the browser renders it yet.                 |
 | Skip     | Hiding agent notes by default. A walkthrough is opened on purpose, so its steps show when it opens. |
 
 ### CodeRabbit
@@ -129,7 +129,8 @@ Ordering follows these rules:
 - `depends_on` may point only backward, so the list has no cycles and reading
   in order never meets a step before its dependency.
 - Hunks no step covers are listed after the last step, so the reader can see
-  what the walkthrough left out. Mire computes this from the anchors.
+  what the walkthrough left out. Mire computes this from the anchors. A hunk
+  counts as covered when any step anchor overlaps it, even by one line.
 - In walkthrough mode the file list puts covered files first, in the order of
   the first step that touches each.
 

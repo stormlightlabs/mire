@@ -13,9 +13,9 @@ Study how Greptile, hunk, and CodeRabbit present a change for review, and decide
 Look at walkthrough structure, change ordering and grouping, when summaries and diagrams help, how findings are presented, and how a reviewer moves through a pull request. Repository mapping and codebase indexing are out of scope; they belong to dalil, and Mire uses only the context an agent supplies.
 
 Acceptance criteria:
-- [ ] A concepts page in `packages/docs` records what to adopt, adapt, and skip for each tool, with sources.
-- [ ] It proposes the walkthrough fields (overview, steps, narrative, anchors, ordering) the model task will implement.
-- [ ] The ROADMAP "Useful CodeRabbit ideas" table is updated or replaced to match.
+- [x] A concepts page in `packages/docs` records what to adopt, adapt, and skip for each tool, with sources.
+- [x] It proposes the walkthrough fields (overview, steps, narrative, anchors, ordering) the model task will implement.
+- [x] The ROADMAP "Useful CodeRabbit ideas" table is updated or replaced to match.
 
 Verification:
 - `just check` passes, including the docs build checks.

@@ -1,0 +1,46 @@
+# Posts a comment on a pull request as stormlight-thunderbot. Agent sessions
+# never hold the App's key, so they post through this workflow instead of with
+# their own GitHub access, which would show the comment as the person whose
+# account the session uses:
+#
+#   gh workflow run comment.yml -f pr=<n> -f body="$(cat comment.md)"
+#
+# or, through the GitHub MCP tools, actions_run_trigger with method
+# run_workflow, workflow_id comment.yml, ref main and the same inputs.
+name: Bot comment
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number
+        required: true
+      body:
+        description: Comment text, in Markdown
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  comment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ secrets.THUNDERBOT_APP_ID }}
+          private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
+
+      - name: Post the comment
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PR: ${{ inputs.pr }}
+          BODY: ${{ inputs.body }}
+        run: |
+          if [[ ! $PR =~ ^[0-9]+$ ]]; then
+            echo "::error title=pr::'$PR' is not a pull request number."
+            exit 1
+          fi
+          printf '%s\n' "$BODY" > body.md
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file body.md

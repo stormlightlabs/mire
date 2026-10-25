@@ -670,7 +670,7 @@ async fn get_review(State(state): State<AppState>) -> Response<Body> {
             overview.watch = watch_status(&state);
             Json(overview).into_response()
         }
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -698,7 +698,7 @@ async fn get_file(State(state): State<AppState>, AxumPath(file_id): AxumPath<Str
                     "This file is not part of the review.",
                 )
             }),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -725,7 +725,7 @@ async fn get_finding(State(state): State<AppState>, AxumPath(note_id): AxumPath<
                     "This finding is not part of the review.",
                 )
             }),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -964,7 +964,7 @@ async fn export_notes_json(State(state): State<AppState>) -> Response<Body> {
             Ok(bytes) => download(bytes, "application/json; charset=utf-8", "mire-notes.json"),
             Err(error) => protocol_problem(error),
         },
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -976,7 +976,7 @@ async fn export_notes_json(State(state): State<AppState>) -> Response<Body> {
 async fn export_notes_markdown(State(state): State<AppState>) -> Response<Body> {
     match load_current_review(&state).await {
         Ok(review) => download(notes_markdown(&review), "text/markdown; charset=utf-8", "mire-notes.md"),
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
@@ -991,19 +991,19 @@ async fn export_context(State(state): State<AppState>) -> Response<Body> {
             Ok(bytes) => download(bytes, "application/json; charset=utf-8", "mire-context.json"),
             Err(error) => protocol_problem(error),
         },
-        Err(response) => response,
+        Err(response) => *response,
     }
 }
 
-async fn load_current_review(state: &AppState) -> Result<Review, Response<Body>> {
+async fn load_current_review(state: &AppState) -> Result<Review, Box<Response<Body>>> {
     let path = state.review_path.clone();
     match tokio::task::spawn_blocking(move || read_review(&path)).await {
         Ok(Ok(review)) => Ok(review),
-        Ok(Err(_)) | Err(_) => Err(problem(
+        Ok(Err(_)) | Err(_) => Err(Box::new(problem(
             StatusCode::INTERNAL_SERVER_ERROR,
             "review_unavailable",
             "The review file could not be read.",
-        )),
+        ))),
     }
 }
 

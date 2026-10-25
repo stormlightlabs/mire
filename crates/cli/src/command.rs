@@ -787,11 +787,11 @@ fn read_input(input: &OsStr, limit: usize) -> Result<Vec<u8>, AppError> {
 
     let path = Path::new(input);
     let file = File::open(path).map_err(|source| AppError::InputIo { input: input.to_owned(), source })?;
-    if let Ok(metadata) = file.metadata() {
-        if metadata.len() > limit as u64 {
-            let actual = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
-            return Err(AppError::Patch(PatchError::InputTooLarge { actual, limit }));
-        }
+    if let Ok(metadata) = file.metadata()
+        && metadata.len() > limit as u64
+    {
+        let actual = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
+        return Err(AppError::Patch(PatchError::InputTooLarge { actual, limit }));
     }
     read_bounded(file, limit).map_err(|source| AppError::InputIo { input: input.to_owned(), source })
 }

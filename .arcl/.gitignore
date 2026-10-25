@@ -1,0 +1,4 @@
+/arcl.db
+/arcl.db-*
+/*.tmp
+/conflicts/

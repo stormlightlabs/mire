@@ -358,7 +358,7 @@ fn parse_hunk_header(line: &str) -> std::result::Result<(u64, u64, u64, u64, &st
 }
 
 fn parse_range(range: &str) -> std::result::Result<(u64, u64), &'static str> {
-    let (start, count) = range.split_once(',').map_or((range, "1"), |parts| parts);
+    let (start, count) = range.split_once(',').unwrap_or((range, "1"));
     let start = start.parse().map_err(|_| "invalid hunk line number")?;
     let count = count.parse().map_err(|_| "invalid hunk line count")?;
     Ok((start, count))
@@ -639,7 +639,7 @@ fn fingerprint_range(block: &[RawLine<'_>], start: usize, end: usize) -> Fingerp
     let bytes = block
         .iter()
         .filter(|line| line.start >= start && line.start < end)
-        .flat_map(|line| line.raw.as_bytes().iter().copied().chain([b'\n']))
+        .flat_map(|line| line.raw.as_bytes().iter().copied().chain(*b"\n"))
         .collect::<Vec<_>>();
     fingerprint(&bytes)
 }

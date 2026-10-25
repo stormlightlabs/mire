@@ -1,0 +1,5 @@
+format-version = 1
+
+[workspace]
+enabled = true
+path = ".arcl/workspace"

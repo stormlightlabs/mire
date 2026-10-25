@@ -1482,16 +1482,16 @@ fn validate_imported_notes(review: &Review, imported: &[ReviewNote]) -> Vec<Note
         .map(|note| note.id.as_str())
         .collect::<BTreeSet<_>>();
     let mut failures = Vec::new();
-    if review.notes.len().saturating_add(imported.len()) > MAX_REVIEW_NOTES {
-        if let Some(note) = imported.first() {
-            failures.push(NoteImportFailure {
-                note_id: note.id.clone(),
-                error: ReviewError::TooManyNotes {
-                    actual: review.notes.len().saturating_add(imported.len()),
-                    limit: MAX_REVIEW_NOTES,
-                },
-            });
-        }
+    if review.notes.len().saturating_add(imported.len()) > MAX_REVIEW_NOTES
+        && let Some(note) = imported.first()
+    {
+        failures.push(NoteImportFailure {
+            note_id: note.id.clone(),
+            error: ReviewError::TooManyNotes {
+                actual: review.notes.len().saturating_add(imported.len()),
+                limit: MAX_REVIEW_NOTES,
+            },
+        });
     }
     for note in imported {
         if !identifiers.insert(note.id.as_str()) {

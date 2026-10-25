@@ -55,9 +55,7 @@ impl TuiProcess {
     }
 
     fn spawn(directory: &Path, arguments: &[&str]) -> Self {
-        let mut child = Command::new("script")
-            .args(["-q", "/dev/null", binary()])
-            .args(arguments)
+        let mut child = script_command(arguments)
             .env("NO_COLOR", "1")
             .env("XDG_RUNTIME_DIR", directory)
             .stdin(Stdio::piped())
@@ -224,4 +222,21 @@ fn session_command(directory: &Path, arguments: &[&str]) -> Value {
 
 fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_mire")
+}
+
+/// Runs Mire under `script` so it gets a PTY. BSD `script` takes the command as
+/// trailing arguments, while util-linux `script` takes one shell string with `-c`.
+fn script_command(arguments: &[&str]) -> Command {
+    let mut command = Command::new("script");
+    if cfg!(target_os = "linux") {
+        let line = std::iter::once(binary())
+            .chain(arguments.iter().copied())
+            .map(|argument| format!("'{}'", argument.replace('\'', r"'\''")))
+            .collect::<Vec<_>>()
+            .join(" ");
+        command.args(["-q", "-e", "-c", &line, "/dev/null"]);
+    } else {
+        command.args(["-q", "/dev/null", binary()]).args(arguments);
+    }
+    command
 }

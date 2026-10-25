@@ -1,4 +1,39 @@
-# Mire web review roadmap
+# Mire roadmap
+
+Open work lives in arcl, in `.arcl/workspace`. Run `arcl tree` to see it and
+`arcl ready` for what can start now. This file holds the product direction and
+the decisions behind it.
+
+## Direction
+
+Mire is the diff and review surface for the Stormlight agent tools: fabrial
+runs the delivery loop, arclightning tracks the work, and Mire shows the change.
+
+- **View any diff, including pull requests.** Mire reads worktrees, revisions,
+  commits, and patch files. A GitHub pull request reaches Mire as a patch from
+  `gh`, for example `gh pr diff 123 | mire patch -`. Mire never calls
+  GitHub or `gh` itself. The caller supplies any pull-request context, such as
+  the title and description.
+- **Agent-written walkthroughs.** An agent reads the change through `mire
+  context` or an MCP server and writes a walkthrough: ordered steps with a
+  narrative, each anchored to hunks. Mire stores, re-anchors, and renders it
+  in the TUI and the browser. Mire does not call a model; the agent authors
+  the content.
+
+Out of scope:
+
+- GitHub, GitLab, or other account integration, including fetching pull
+  requests, posting comments, approvals, and status checks.
+- Hosted services, bots, and multi-user collaboration.
+- Generating findings or walkthroughs with a model inside Mire.
+- Repository mapping and codebase indexing. That belongs to
+  [dalil](https://github.com/stormlightlabs/dalil); Mire uses only the
+  context an agent supplies.
+
+The rest of this file records the web review effort, which `mire serve`
+delivered.
+
+# Web review
 
 ## Outcome
 

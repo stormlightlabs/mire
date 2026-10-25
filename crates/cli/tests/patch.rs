@@ -245,7 +245,9 @@ fn decode_hex(input: &str) -> Vec<u8> {
     let encoded = input.lines().filter(|line| !line.starts_with('#')).collect::<String>();
     encoded
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).expect("hex is ASCII"), 16).expect("valid hex"))
         .collect()
 }

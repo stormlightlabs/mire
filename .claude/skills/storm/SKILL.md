@@ -57,27 +57,48 @@ in a cloud session.
 ## Review
 
 The sequence is fixed: one standard pass, its revise, one adversarial pass,
-its revise. It runs once per pull request, never in a loop.
+its revise. It runs once per pull request, never in a loop. Reviewers check
+their own findings before reporting them. Dispatch the `verifier` agent only
+when the driver asks for it.
 
 1. **Standard pass.** Fetch the branch and pin its head SHA. Dispatch the
    `reviewer` agent with the pull request, the SHA and the task ID.
-2. **Verify.** When it found anything, dispatch the `verifier` agent with the
-   findings. Keep the ones it does not refute, at the severity it gives.
-3. **Post.** One comment with the kept findings, in the `review` skill's
-   format, most severe first, under 200 words. Open it with
-   `Standard pass on <short sha> · <model>`, and end with how many findings
-   the verifier refuted, if any.
-4. **Revise.** When anything above `nit` was kept, dispatch the `reviser`
+2. **Post.** One comment with its findings, in the `review` skill's format,
+   most severe first, under 200 words. Open it with
+   `Standard pass on <short sha> · <model>`.
+3. **Revise.** When anything above `nit` was found, dispatch the `reviser`
    agent with the pull request, the worktree and the findings. It fixes,
    pushes and replies.
-5. **Adversarial pass.** Pin the new head. Dispatch the `adversarial-reviewer`
+4. **Adversarial pass.** Pin the new head. Dispatch the `adversarial-reviewer`
    agent with it, the standard pass's findings and the reviser's reply.
-6. **Verify and revise** as in steps 2 and 4, but tell the reviser to report
-   back rather than reply on the pull request. The findings and its report
-   go in the Finish comment, under `Adversarial pass on <short sha> ·
-   <model>`, so the run posts one comment fewer.
+5. **Revise** as in step 3, but tell the reviser to report back rather than
+   reply on the pull request. The findings and its report go in the Finish
+   comment, under `Adversarial pass on <short sha> · <model>`, so the run
+   posts one comment fewer.
 
 Nits are left in the comments for the owner; they start no revise.
+
+If a blocker prevents finishing a stage, report it and hand off. Do not
+dispatch more agents to work around it, and never post `Review finished` for
+an incomplete review.
+
+The implementer and the reviser work in the task worktree. Each reviewer,
+standard and adversarial, works in its own detached worktree at the pinned
+head, so it has its own build output and reads exactly the commit it reviews:
+
+```sh
+git worktree add --detach ../<repo>-worktrees/<name>-review <sha>
+```
+
+Remove it with `git worktree remove` when the reviewer returns.
+
+**UI changes.** For a change to terminal UI, the implementer and both
+reviewers capture each affected state with `.github/storm/shot.sh <name>
+<cols> <rows> <command...>`, which needs tmux and freeze. Before the name,
+`--wait-for <text>` waits for the screen to show that text and `--keys <key>`,
+repeated, types or presses keys before the capture. They read the PNGs
+and report each PNG's absolute path. Pass those
+paths to the owner, who can `open` them.
 
 Dispatch each agent fresh. On Claude Code, use the Agent tool with the
 agent's name; on Codex, `spawn_agent` with `fork_turns` set to `"none"` and the
@@ -97,6 +118,10 @@ Review finished at <full head sha>
 Below a blank line, the same comment carries the adversarial pass's findings
 and what the revise did about them. Each comment is one Bot comment run.
 
+For an arcl task, first complete it on the branch and push, as the
+`implement` skill's **Complete the task** says, so the checks below and the
+gate read the final head.
+
 Before posting it, check that the pull request still merges. The review
 passes read the diff, not the base, so they do not see a conflict. `gh pr
 view <n> --json mergeable` must say `MERGEABLE`. In `pull_request_read`, a
@@ -111,8 +136,9 @@ merge commit, not a rebase, and resolve it. Regenerate a generated file with
 its tool rather than editing it, as `fab update` does for
 `.github/fabrial.toml`. Stop and report when both sides changed the same
 logic. Run the gates and push. A resolved conflict changes the branch's own
-diff, so the gate takes the new head as unreviewed: run both passes again on
-it before posting, or ask the owner to accept it with `/storm:ready <sha>`.
+diff, so the gate takes the new head as unreviewed. Report the resolution and
+ask the driver whether to run both passes again or to have the owner accept
+the head with `/storm:ready <sha>`; do neither unasked.
 The `resync` skill does not resolve conflicts; this step does, for the pull
 request this run reviews.
 

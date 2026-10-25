@@ -31,6 +31,10 @@ how far you got: reproduced with a test you ran, traced through the code, or
 suspected. Mark the third kind `unverified` and keep it below `high`. A few
 findings you can support beat a list you cannot.
 
+For a change to terminal UI, capture each affected state with
+`.github/storm/shot.sh <name> <cols> <rows> <command...>`, which needs tmux
+and freeze. Read the PNGs, and report each PNG's absolute path.
+
 You do not edit code. Return findings in the `review` skill's format, one per
 line, most severe first, under 200 words in total. When ten do not fit, cut one
 and say how many you left out.

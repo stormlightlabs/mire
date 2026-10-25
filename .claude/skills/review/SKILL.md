@@ -10,8 +10,8 @@ Review a diff and report findings. Do not edit code during a review pass; the
 `revise` skill owns changes.
 
 The `storm` skill runs one standard pass and then one adversarial pass, each in
-a fresh agent and each followed by a verifier and a revise. A pass reports to
-whoever invoked it, and posts only when they ask.
+a fresh agent and each followed by a revise. A pass checks its own findings,
+reports to whoever invoked it, and posts only when they ask.
 
 ## Pick the target and the pass
 

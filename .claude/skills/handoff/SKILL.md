@@ -28,12 +28,18 @@ belongs.
 arcl task handoff <id> --note-file <file>
 ```
 
-For an arcl task, this stores the note and parks the task, which takes it out
-of `arcl ready` until someone unparks it. For an issue or a pull request, post
-the note as a comment opening with `Handoff:`, through the Bot comment workflow
-on a pull request and with `gh issue comment` or `add_issue_comment` on an
-issue. Write the note in the session's scratch directory, never inside the
-repository.
+For an arcl task, this stores the note and parks the task until someone
+unparks it. Where `.arcl/config.toml` sets `enabled = true` under
+`[workspace]`, both live in tracked files under `.arcl/workspace`: run it in
+the task's worktree, never the primary checkout, and commit and push the
+changed files to the task's branch. The park then holds only on that branch,
+so `arcl ready` on `main` still offers the task until the branch merges.
+Without that setting, run it from the primary checkout.
+
+For an issue or a pull request, post the note as a comment opening with
+`Handoff:`, through the Bot comment workflow on a pull request and with
+`gh issue comment` or `add_issue_comment` on an issue. Write the note in the
+session's scratch directory, never inside the repository.
 
 ```markdown
 Written <YYYY-MM-DD> from <branch or worktree>.
@@ -79,6 +85,9 @@ arcl task explain <id>
 arcl task unpark <id>
 arcl task start <id>
 ```
+
+Run these in the task's worktree too, and commit the changed task file with
+the work.
 
 Unpark only when `arcl task explain` gives parking as the only reason the task
 is not ready. Any other reason, such as a blocker added while it was parked,

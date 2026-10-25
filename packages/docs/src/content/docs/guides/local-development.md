@@ -44,6 +44,58 @@ request titles are conventional commits, because the squash commit uses the
 title and [git-cliff](https://git-cliff.org) builds the changelog from those
 subjects. `just changelog` previews the entries since the last tag.
 
+## Snapshot tests
+
+The TUI tests render each state into a text buffer and compare it with an
+[insta](https://insta.rs) snapshot under `crates/ui/src/snapshots`. The CLI
+tests compare JSON output with snapshots under `crates/cli/tests/snapshots`.
+When a change alters what Mire draws or prints, the tests fail and insta
+writes the new output next to the old one as a `.snap.new` file.
+
+Review the changes with [cargo-insta](https://insta.rs/docs/cli/):
+
+```sh
+cargo install cargo-insta
+cargo insta test --workspace --review
+```
+
+Accept a snapshot only when the new output is what you meant, and commit it
+with the change.
+
+## Capture the TUI as images
+
+`just shots` builds Mire, creates a fixture repository with a staged change
+and a review holding two findings, and captures each scenario as a PNG and an
+ANSI text file:
+
+```sh
+just shots                 # every scenario
+just shots split note      # the named scenarios
+scripts/shots.sh --list    # the scenario names
+```
+
+The scenarios cover the unified, split, and narrow layouts, help, a hidden
+sidebar, a collapsed file, a focused finding, a live walkthrough, and
+`NO_COLOR`. Each run prints the PNG paths. The files go to `$FAB_SHOT_DIR`,
+resolved against the current directory, or else to
+`$TMPDIR/fabrial-shots/<branch>`, named after the checkout's branch. The script
+refuses an output directory inside the repository. The live walkthrough uses a
+private `XDG_RUNTIME_DIR`, so other open `mire review` sessions do not affect
+it.
+
+`just shot <name> <cols> <rows> <command...>` captures one command of your own
+through `.github/storm/shot.sh`. Pass `--wait-for <text>` to wait for text on
+the screen, and `--keys <key>` to press keys before the capture.
+
+The captures need tmux, [freeze](https://github.com/charmbracelet/freeze), and
+jq. Where freeze crashes while writing a PNG, install `rsvg-convert` (the
+`librsvg2-bin` package on Debian and Ubuntu); freeze uses it when it is on the
+`PATH`.
+
+When a change alters the TUI, the implementer and both reviewers capture the
+affected states and report the PNG paths in the pull request, as fabrial's
+`storm` skill describes. CI does not run the captures.
+
 ## Start the servers
 
 Open two terminals from the repository root.

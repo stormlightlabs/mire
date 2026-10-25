@@ -1,0 +1,30 @@
+---
+source: crates/cli/tests/live_session.rs
+expression: inspected
+---
+{
+  "result": {
+    "filter": "author=all status=all severity=all kind=all file=all",
+    "layout": "automatic",
+    "review_revision": 2,
+    "scroll_row": 0,
+    "selected_note_id": null,
+    "selected_path": [
+      102,
+      105,
+      108,
+      101,
+      46,
+      114,
+      115
+    ],
+    "state": "ready",
+    "walkthrough_active": false,
+    "walkthrough_progress": null
+  },
+  "schema_version": {
+    "major": 1,
+    "minor": 0
+  },
+  "status": "ok"
+}

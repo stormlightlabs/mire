@@ -1,0 +1,78 @@
+---
+source: crates/cli/tests/json_output.rs
+expression: "fixture.json(&[\"context\", \"review.json\"])"
+---
+{
+  "payload": {
+    "files": [
+      {
+        "fingerprint": "7ba5dce248f0a76fa485ab1f48c9fd6f8e070d0b404023b90bcf6d57010d410e",
+        "hunks": [
+          {
+            "fingerprint": "d5e14d952d6ea2e706bb2d02ae5a4af9c0abb16c2cffc689b8cb4eabfd5a67a0",
+            "new_line_count": 3,
+            "new_start": 1,
+            "old_line_count": 2,
+            "old_start": 1
+          }
+        ],
+        "new_path": [
+          99,
+          111,
+          110,
+          102,
+          105,
+          103,
+          46,
+          114,
+          115
+        ],
+        "old_path": [
+          99,
+          111,
+          110,
+          102,
+          105,
+          103,
+          46,
+          114,
+          115
+        ],
+        "status": "modified"
+      }
+    ],
+    "kind": "manifest",
+    "notes": [
+      {
+        "annotation_kind": "defect",
+        "end": 1,
+        "id": "note-1",
+        "path": [
+          99,
+          111,
+          110,
+          102,
+          105,
+          103,
+          46,
+          114,
+          115
+        ],
+        "provenance": {
+          "kind": "agent",
+          "producer": "fixture"
+        },
+        "reanchor_outcome": null,
+        "severity": "medium",
+        "side": "new",
+        "start": 1,
+        "status": "open"
+      }
+    ]
+  },
+  "review_revision": 2,
+  "schema_version": {
+    "major": 1,
+    "minor": 2
+  }
+}

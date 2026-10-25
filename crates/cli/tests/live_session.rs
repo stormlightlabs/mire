@@ -104,6 +104,7 @@ fn live_session_inspects_and_navigates_an_open_review_without_writing_it() {
         panic!("inspect failed: {inspected}");
     }
     assert_eq!(inspected["result"]["review_revision"], 2);
+    insta::assert_json_snapshot!("session_inspect", inspected);
 
     let focused = session_command(&directory.0, &["focus", &session, "--note", "note-1"]);
     assert_eq!(focused["status"], "ok");

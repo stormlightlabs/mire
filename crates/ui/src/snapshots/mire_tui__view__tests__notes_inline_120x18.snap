@@ -1,0 +1,22 @@
+---
+source: crates/ui/src/view.rs
+expression: "snapshot(App::review_with_options(&review, crate::AppOptions::default()), 120,\n18)"
+---
+ Mire review │ split │ focus review │ context 3 │ wrap off │ file 1/3 · 1/17 │ 2 open
+ Files                1/3 │ ▾ docs/guide.md                                                                    added +2█
+▌ A docs/guide.md       +2│ ▾ @@ -0,0 +1,2 @@                                                                          █
+  M src/lib.rs   !1 Medium│                                             │     1 +# Guide                               █
+  M …/parse/mod.rs !1 Note│                                             │     2 +Read key = value lines.               █
+                          │ ▾ src/lib.rs                                                                 modified +1 -1█
+                          │ ▾ @@ -1,3 +1,3 @@                                                                          █
+                          │    1  pub mod parse;                        │     1  pub mod parse;                        █
+                          │    2 -pub const PORT: u16 = 80;             │     2 ◆pub const PORT: u16 = 8080;           █
+                          │ open Medium defect · reviewer: Port 8080 collides with the dev server.                     █
+                          │    3  pub const HOST: &str = "localhost";   │     3  pub const HOST: &str = "localhost";   █
+                          │ ▾ src/parse/mod.rs                                                           modified +2 -1█
+                          │ ▾ @@ -1,3 +1,4 @@                                                                          █
+                          │    1  pub fn split(line: &str) -> Option<(& │     1  pub fn split(line: &str) -> Option<(&s█
+                          │    2 -    line.split_once('=')              │     2 +    let (key, value) = line.split_once█
+                          │                                             │     3 ◆    Some((key.trim(), value.trim()))  █
+                          │ open Note question · reviewer: Should an empty value be accepted?                          █
+ source  j/k move  v range  c note  / search  ? help  q quit

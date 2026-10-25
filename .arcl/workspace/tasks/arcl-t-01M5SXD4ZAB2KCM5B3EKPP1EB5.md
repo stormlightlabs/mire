@@ -2,9 +2,10 @@
 id = "arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
 title = "Visual verification and snapshot coverage"
-status = "in_progress"
+status = "completed"
 priority = "high"
 position = 0
+evidence = "just check passes. just shots captured all nine scenarios locally (unified, split, narrow, help, sidebar-hidden, collapsed, note, walkthrough, no-color). Changing the header title failed 9 TUI snapshot tests; reverting passed all 49. CLI JSON snapshots pass under a different TMPDIR."
 +++
 
 Capture the TUI as images locally and widen snapshot test coverage, so UI changes carry visual evidence that reviewers can check.

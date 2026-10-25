@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use mire_core::{ChangesetSource, FileContent, FileStatus, LineKind, PatchLimits, parse_patch, write_patch};
+use mire_core::{ChangesetSource, FileContent, FileDiff, FileStatus, LineKind, PatchLimits, parse_patch, write_patch};
 
 static TEST_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -299,4 +299,194 @@ fn github_pull_request_patch_folds_to_one_entry_per_file() {
         .map(|line| format!("{}\n", String::from_utf8_lossy(line.content())))
         .collect::<String>();
     assert_eq!(added, GITHUB_PR_SHOTS, "the folded script is the final version");
+}
+
+/// Builds a series of commits, each a list of `(path, diff body)` pairs.
+fn series(commits: &[&[(&str, String)]]) -> String {
+    let mut text = String::new();
+    for (number, files) in commits.iter().enumerate() {
+        text.push_str(&format!(
+            "From {:040x} Mon Sep 17 00:00:00 2001\nSubject: [PATCH {}/{}] Commit\n---\n",
+            number + 1,
+            number + 1,
+            commits.len()
+        ));
+        for (path, body) in *files {
+            text.push_str(&format!(
+                "diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n{body}"
+            ));
+        }
+    }
+    text
+}
+
+fn hunk_starts(changeset: &mire_core::Changeset) -> Vec<(u64, u64)> {
+    changeset
+        .files()
+        .iter()
+        .flat_map(|file| match file.content() {
+            FileContent::Text { hunks } => hunks.iter().map(|hunk| (hunk.old_start(), hunk.new_start())).collect(),
+            FileContent::Binary => Vec::new(),
+        })
+        .collect()
+}
+
+#[test]
+fn hunks_at_large_line_numbers_fold_without_a_line_per_number() {
+    for line in [40_000_000_u64, 1_000_000_000, 1 << 40] {
+        let first = "@@ -1 +1 @@\n-one\n+two\n".to_owned();
+        let second = format!("@@ -{line},2 +{line},2 @@\n far\n-x\n+y\n");
+        let text = series(&[&[("file.txt", first)], &[("file.txt", second)]]);
+        let started = std::time::Instant::now();
+        let changeset = parse_patch(
+            text.as_bytes(),
+            ChangesetSource::Patch { label: None },
+            PatchLimits::default(),
+        )
+        .unwrap_or_else(|error| panic!("line {line}: {error}"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "line {line}");
+        assert_eq!(hunk_starts(&changeset), [(1, 1), (line, line)], "line {line}");
+        let FileContent::Text { hunks } = changeset.files()[0].content() else {
+            panic!("the file is text");
+        };
+        let kinds = hunks[1].lines().iter().map(|line| line.kind()).collect::<Vec<_>>();
+        assert_eq!(kinds, [LineKind::Context, LineKind::Deletion, LineKind::Addition]);
+    }
+}
+
+#[test]
+fn hunk_past_the_largest_line_number_is_rejected() {
+    let first = "@@ -1 +1 @@\n-one\n+two\n".to_owned();
+    let second = format!("@@ -{max},2 +{max},2 @@\n far\n-x\n+y\n", max = u64::MAX);
+    let text = series(&[&[("file.txt", first)], &[("file.txt", second)]]);
+    let result = parse_patch(
+        text.as_bytes(),
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    );
+    assert!(result.is_err(), "{result:?}");
+}
+
+#[test]
+fn series_with_many_hunks_folds_in_linear_time() {
+    // Quadratic work over this many hunks takes over twenty seconds in a debug
+    // build; linear work takes about two.
+    const HUNKS: u64 = 20_000;
+    let first = "@@ -1 +1 @@\n-line 1\n+changed 1\n".to_owned();
+    let second = (1..=HUNKS)
+        .map(|index| {
+            let line = index * 8 + 1;
+            format!("@@ -{line} +{line} @@\n-line {line}\n+changed {line}\n")
+        })
+        .collect::<String>();
+    let text = series(&[&[("file.txt", first)], &[("file.txt", second)]]);
+    let started = std::time::Instant::now();
+    let changeset = parse_patch(
+        text.as_bytes(),
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .expect("the series parses");
+    let elapsed = started.elapsed();
+    assert_eq!(hunk_starts(&changeset).len(), HUNKS as usize + 1);
+    assert!(elapsed < std::time::Duration::from_secs(10), "folding took {elapsed:?}");
+}
+
+#[test]
+fn copy_starts_from_its_source_before_the_same_commit_changes_it() {
+    let repository = Repository::new();
+    let numbered = |count: usize| (1..=count).map(|line| format!("line {line}\n")).collect::<String>();
+    repository.write("a.txt", numbered(30).as_bytes());
+    let base = repository.commit("base");
+
+    let a = numbered(30).replace("line 10\n", "line 10 first\n");
+    repository.write("a.txt", a.as_bytes());
+    repository.commit("first");
+
+    repository.write("a.txt", a.replace("line 19\n", "line 19 second\n").as_bytes());
+    repository.write("c.txt", a.replace("line 1\n", "line 1 copy\n").as_bytes());
+    let head = repository.commit("second");
+
+    let series = repository.git(&[
+        "format-patch",
+        "-C",
+        "--find-copies-harder",
+        "--stdout",
+        &format!("{base}..{head}"),
+    ]);
+    assert!(
+        series.contains("copy from a.txt"),
+        "the series records a copy:\n{series}"
+    );
+    let changeset = parse_patch(
+        series.as_bytes(),
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .expect("the series parses");
+    let statuses = changeset.files().iter().map(FileDiff::status).collect::<Vec<_>>();
+    assert_eq!(statuses, [FileStatus::Modified, FileStatus::Copied]);
+
+    let patch = write_patch(&changeset).expect("the folded series is text");
+    assert!(
+        repository.applies_to(&base, &head, &patch),
+        "the folded diff turns the base into the final tree:\n{}",
+        String::from_utf8_lossy(&patch)
+    );
+}
+
+#[test]
+fn copy_overlapping_its_source_change_in_the_same_commit_folds() {
+    let repository = Repository::new();
+    let numbered = |count: usize| (1..=count).map(|line| format!("line {line}\n")).collect::<String>();
+    repository.write("a.txt", numbered(30).as_bytes());
+    let base = repository.commit("base");
+
+    let a = numbered(30).replace("line 10\n", "line 10 first\n");
+    repository.write("a.txt", a.as_bytes());
+    repository.commit("first");
+
+    repository.write("a.txt", a.replace("line 2\n", "line 2 source\n").as_bytes());
+    repository.write("c.txt", a.replace("line 2\n", "line 2 copy\n").as_bytes());
+    let head = repository.commit("second");
+
+    let series = repository.git(&[
+        "format-patch",
+        "-C",
+        "--find-copies-harder",
+        "--stdout",
+        &format!("{base}..{head}"),
+    ]);
+    assert!(
+        series.contains("copy from a.txt"),
+        "the series records a copy:\n{series}"
+    );
+    let changeset = parse_patch(
+        series.as_bytes(),
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .expect("the copy applies to its source as the commit found it");
+    let patch = write_patch(&changeset).expect("the folded series is text");
+    assert!(
+        repository.applies_to(&base, &head, &patch),
+        "the folded diff turns the base into the final tree:\n{}",
+        String::from_utf8_lossy(&patch)
+    );
+}
+
+#[test]
+fn insertion_without_context_splits_an_unseen_run() {
+    let text = series(&[
+        &[("file.txt", "@@ -1 +1 @@\n-one\n+two\n".to_owned())],
+        &[("file.txt", "@@ -10,0 +11 @@\n+inserted\n".to_owned())],
+        &[("file.txt", "@@ -20 +20 @@\n-x\n+y\n".to_owned())],
+    ]);
+    let changeset = parse_patch(
+        text.as_bytes(),
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .expect("the series parses");
+    assert_eq!(hunk_starts(&changeset), [(1, 1), (10, 11), (19, 20)]);
 }

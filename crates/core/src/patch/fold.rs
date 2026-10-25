@@ -1,17 +1,18 @@
 //! Folds the per-commit diffs of a patch series into one net diff.
 //!
 //! No commit diff carries the whole file, so each file is tracked as a list of
-//! cells: a known line, or a placeholder for a base line no diff has shown yet.
-//! Each commit's hunks apply to that list and fill in placeholders as their
-//! context and deletions reveal lines. Placeholders never change, so the net
-//! diff compares base and result between them and treats them as unchanged.
+//! cells: a known line, or a run of base lines no diff has shown yet. Each
+//! commit's hunks apply to that list, splitting runs and filling in lines as
+//! their context and deletions reveal them. Runs never change, so the net diff
+//! compares base and result between them and treats each run as unchanged.
+//! Memory and time follow the size of the input, not its line numbers.
 //!
 //! Statuses can differ from `git diff` of the same range. A file renamed and
 //! then re-added under its old path folds to a rename plus an addition. A
 //! binary file changed and then reverted folds to a modification, because the
 //! parser keeps no blob ids to show it is back to its base.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use similar::{Algorithm, DiffOp, capture_diff_slices};
 
@@ -25,27 +26,30 @@ use super::{PatchError, Result, parser, writer};
 
 const CONTEXT: usize = 3;
 
-/// A line of the file after some commits: known, or the base line with this
-/// placeholder index that no diff has shown.
+/// A line of the file after some commits: known, or a run of `len` base lines,
+/// starting at base line index `id`, that no diff has shown.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum Cell {
     Known(Line),
-    Unknown(usize),
+    Unknown { id: usize, len: usize },
 }
 
-/// One base or result line as the net diff compares it.
+/// One base or result line, or run of unseen base lines, as the net diff
+/// compares them.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 enum Item<'a> {
     Known(&'a Line),
-    Unknown(usize),
+    Unknown { id: usize, len: usize },
 }
 
-/// One row of the net diff: an unchanged, deleted, or added line.
+/// One row of the net diff: an unchanged, deleted, or added line, or an
+/// unchanged run of unseen lines. `old` and `new` count the lines of each side
+/// before the row.
 #[derive(Clone, Copy)]
 enum Row<'a> {
     Equal { old: usize, new: usize, item: Item<'a> },
-    Delete { old: usize, line: &'a Line },
-    Insert { new: usize, line: &'a Line },
+    Delete { old: usize, new: usize, line: &'a Line },
+    Insert { old: usize, new: usize, line: &'a Line },
 }
 
 /// One source line and whether a line terminator follows it.
@@ -53,6 +57,13 @@ enum Row<'a> {
 struct Line {
     content: Vec<u8>,
     newline: bool,
+}
+
+/// The cells a commit's hunks have not reached yet.
+struct Pending {
+    cells: VecDeque<Cell>,
+    /// The number of lines the cells cover.
+    lines: usize,
 }
 
 /// One file followed through the series, across renames and copies.
@@ -66,14 +77,91 @@ struct Chain {
     last_path: Vec<u8>,
     copied: bool,
     binary: bool,
-    /// Base lines by placeholder index, filled in as diffs reveal them.
-    base: Vec<Option<Line>>,
+    /// Base lines the diffs have revealed, by base line index. Every base line
+    /// outside an unknown cell is here.
+    base: BTreeMap<usize, Line>,
+    /// The number of base lines the diffs have shown to exist.
+    base_len: usize,
     cells: Vec<Cell>,
     /// Whether the file may hold unseen lines after the last cell.
     open_end: bool,
     /// The only commit diff for this file, kept while there is exactly one.
     single: Option<FileDiff>,
     touches: usize,
+}
+
+impl Cell {
+    /// The number of lines the cell covers.
+    const fn len(&self) -> usize {
+        match self {
+            Self::Known(_) => 1,
+            Self::Unknown { len, .. } => *len,
+        }
+    }
+}
+
+impl Item<'_> {
+    /// The number of lines the item covers.
+    const fn len(&self) -> usize {
+        match self {
+            Self::Known(_) => 1,
+            Self::Unknown { len, .. } => *len,
+        }
+    }
+}
+
+impl Row<'_> {
+    /// The number of old lines before the row.
+    const fn old_before(&self) -> usize {
+        match self {
+            Self::Equal { old, .. } | Self::Delete { old, .. } | Self::Insert { old, .. } => *old,
+        }
+    }
+
+    /// The number of new lines before the row.
+    const fn new_before(&self) -> usize {
+        match self {
+            Self::Equal { new, .. } | Self::Delete { new, .. } | Self::Insert { new, .. } => *new,
+        }
+    }
+}
+
+impl Pending {
+    /// Moves the next `count` lines to `result`, splitting a run if needed.
+    fn move_lines(&mut self, mut count: usize, result: &mut Vec<Cell>) -> std::result::Result<(), ()> {
+        while count > 0 {
+            let cell = self.cells.pop_front().ok_or(())?;
+            let len = cell.len();
+            if len <= count {
+                result.push(cell);
+                count -= len;
+                self.lines -= len;
+                continue;
+            }
+            let Cell::Unknown { id, len } = cell else {
+                unreachable!("a known cell covers one line");
+            };
+            result.push(Cell::Unknown { id, len: count });
+            self.cells
+                .push_front(Cell::Unknown { id: id + count, len: len - count });
+            self.lines -= count;
+            count = 0;
+        }
+        Ok(())
+    }
+
+    /// Takes the next line, as a known cell or a one-line run.
+    fn take_line(&mut self) -> Option<Cell> {
+        let cell = self.cells.pop_front()?;
+        self.lines -= 1;
+        match cell {
+            Cell::Unknown { id, len } if len > 1 => {
+                self.cells.push_front(Cell::Unknown { id: id + 1, len: len - 1 });
+                Some(Cell::Unknown { id, len: 1 })
+            }
+            other => Some(other),
+        }
+    }
 }
 
 impl Chain {
@@ -84,7 +172,8 @@ impl Chain {
             last_path: side.path.as_bytes().to_vec(),
             copied: false,
             binary: false,
-            base: Vec::new(),
+            base: BTreeMap::new(),
+            base_len: 0,
             cells: Vec::new(),
             open_end: true,
             single: None,
@@ -99,7 +188,8 @@ impl Chain {
             last_path: Vec::new(),
             copied: false,
             binary: false,
-            base: Vec::new(),
+            base: BTreeMap::new(),
+            base_len: 0,
             cells: Vec::new(),
             open_end: false,
             single: None,
@@ -129,30 +219,33 @@ impl Chain {
     }
 
     fn apply_hunks(&mut self, hunks: &[Hunk]) -> std::result::Result<(), ()> {
-        let mut result = Vec::with_capacity(self.cells.len());
-        let mut cursor = 0;
+        let lines = self.cells.iter().map(Cell::len).sum();
+        let mut pending = Pending { cells: std::mem::take(&mut self.cells).into(), lines };
+        let mut result = Vec::with_capacity(pending.cells.len());
+        let mut cursor = 0_usize;
         for hunk in hunks {
-            let start = if hunk.old_line_count() == 0 {
-                usize::try_from(hunk.old_start()).map_err(|_| ())?
-            } else {
-                usize::try_from(hunk.old_start() - 1).map_err(|_| ())?
-            };
-            let needed = start + usize::try_from(hunk.old_line_count()).map_err(|_| ())?;
-            self.extend_to(needed)?;
+            let count = usize::try_from(hunk.old_line_count()).map_err(|_| ())?;
+            let start = usize::try_from(hunk.old_start()).map_err(|_| ())?;
+            let start = if count == 0 { start } else { start.checked_sub(1).ok_or(())? };
+            let needed = start.checked_add(count).ok_or(())?;
             if start < cursor {
                 return Err(());
             }
-            result.extend(self.cells[cursor..start].iter().cloned());
+            let known_end = cursor + pending.lines;
+            if needed > known_end {
+                self.extend(&mut pending, needed - known_end)?;
+            }
+            pending.move_lines(start - cursor, &mut result)?;
             cursor = start;
             for line in hunk.lines() {
                 match line.kind() {
                     LineKind::Context | LineKind::Deletion => {
                         let old = old_side(line);
-                        let last = cursor + 1 == self.cells.len();
-                        if !old.newline && !last {
+                        let cell = pending.take_line().ok_or(())?;
+                        if !old.newline && pending.lines > 0 {
                             return Err(());
                         }
-                        self.reveal(cursor, old.clone())?;
+                        self.reveal(&cell, &old)?;
                         if !old.newline {
                             self.open_end = false;
                         }
@@ -165,7 +258,7 @@ impl Chain {
                 }
             }
         }
-        result.extend(self.cells[cursor..].iter().cloned());
+        result.extend(pending.cells);
 
         if let Some(position) = result
             .iter()
@@ -180,29 +273,25 @@ impl Chain {
         Ok(())
     }
 
-    /// Adds placeholders at the end until the file has `length` lines.
-    fn extend_to(&mut self, length: usize) -> std::result::Result<(), ()> {
-        if self.cells.len() >= length {
-            return Ok(());
-        }
+    /// Adds a run of `count` unseen base lines after the last pending cell.
+    fn extend(&mut self, pending: &mut Pending, count: usize) -> std::result::Result<(), ()> {
         if !self.open_end {
             return Err(());
         }
-        while self.cells.len() < length {
-            self.cells.push(Cell::Unknown(self.base.len()));
-            self.base.push(None);
-        }
+        pending.cells.push_back(Cell::Unknown { id: self.base_len, len: count });
+        pending.lines = pending.lines.checked_add(count).ok_or(())?;
+        self.base_len = self.base_len.checked_add(count).ok_or(())?;
         Ok(())
     }
 
-    /// Checks a line a diff shows against the cell, and fills in a placeholder.
-    fn reveal(&mut self, index: usize, line: Line) -> std::result::Result<(), ()> {
-        match &self.cells[index] {
-            Cell::Known(known) if *known == line => Ok(()),
+    /// Checks a line a diff shows against its cell, and records a base line the
+    /// diff reveals.
+    fn reveal(&mut self, cell: &Cell, line: &Line) -> std::result::Result<(), ()> {
+        match cell {
+            Cell::Known(known) if known == line => Ok(()),
             Cell::Known(_) => Err(()),
-            Cell::Unknown(id) => {
-                self.base[*id] = Some(line.clone());
-                self.cells[index] = Cell::Known(line);
+            Cell::Unknown { id, .. } => {
+                self.base.insert(*id, line.clone());
                 Ok(())
             }
         }
@@ -244,21 +333,25 @@ impl Chain {
         .ok()
     }
 
+    /// Diffs base and result. Both sides hold the same unknown runs in the
+    /// same order, with the revealed base lines between them on the old side.
     fn hunks(&self) -> Vec<Hunk> {
-        let old = self
-            .base
-            .iter()
-            .enumerate()
-            .map(|(id, line)| line.as_ref().map_or(Item::Unknown(id), Item::Known))
-            .collect::<Vec<_>>();
-        let new = self
-            .cells
-            .iter()
-            .map(|cell| match cell {
-                Cell::Known(line) => Item::Known(line),
-                Cell::Unknown(id) => Item::Unknown(*id),
-            })
-            .collect::<Vec<_>>();
+        let mut old = Vec::new();
+        let mut new = Vec::with_capacity(self.cells.len());
+        let mut next = 0;
+        for cell in &self.cells {
+            match cell {
+                Cell::Known(line) => new.push(Item::Known(line)),
+                Cell::Unknown { id, len } => {
+                    old.extend(self.base.range(next..*id).map(|(_, line)| Item::Known(line)));
+                    let item = Item::Unknown { id: *id, len: *len };
+                    old.push(item);
+                    new.push(item);
+                    next = id + len;
+                }
+            }
+        }
+        old.extend(self.base.range(next..).map(|(_, line)| Item::Known(line)));
         build_hunks(&rows(&old, &new))
     }
 }
@@ -285,6 +378,19 @@ pub fn fold(diffs: &[CommitDiff<'_>]) -> Result<String> {
             .map(|(index, chain)| (chain.last_path.clone(), index))
             .collect::<HashMap<_, _>>();
 
+        // A copy starts from its source as the commit found it, before the
+        // commit's own change to the source applies.
+        let sources = changeset
+            .files()
+            .iter()
+            .filter(|file| file.status() == FileStatus::Copied)
+            .filter_map(|file| {
+                let path = file.old_side()?.path.as_bytes().to_vec();
+                let source = chains[*live.get(&path)?].clone();
+                Some((path, source))
+            })
+            .collect::<HashMap<_, _>>();
+
         for file in changeset.files() {
             let old_path = file.old_side().map(|side| side.path.as_bytes().to_vec());
             let new_path = file.new_side().map(|side| side.path.as_bytes().to_vec());
@@ -297,8 +403,8 @@ pub fn fold(diffs: &[CommitDiff<'_>]) -> Result<String> {
                     }
                 },
                 FileStatus::Copied => {
-                    let mut copy = match old_path.and_then(|path| live.get(&path).copied()) {
-                        Some(source) => chains[source].clone(),
+                    let mut copy = match old_path.and_then(|path| sources.get(&path)) {
+                        Some(source) => source.clone(),
                         None => Chain::from_origin(file.old_side().expect("a copy has an old side")),
                     };
                     copy.copied = true;
@@ -353,13 +459,13 @@ fn new_side(line: &DiffLine) -> Line {
     }
 }
 
-/// Diffs base and result between placeholders, which always line up.
+/// Diffs base and result between unknown runs, which always line up.
 fn rows<'a>(old: &[Item<'a>], new: &[Item<'a>]) -> Vec<Row<'a>> {
     let anchors = |items: &[Item<'a>]| {
         items
             .iter()
             .enumerate()
-            .filter(|(_, item)| matches!(item, Item::Unknown(_)))
+            .filter(|(_, item)| matches!(item, Item::Unknown { .. }))
             .map(|(index, _)| index)
             .collect::<Vec<_>>()
     };
@@ -368,15 +474,26 @@ fn rows<'a>(old: &[Item<'a>], new: &[Item<'a>]) -> Vec<Row<'a>> {
 
     let mut rows = Vec::with_capacity(old.len().max(new.len()));
     let (mut old_start, mut new_start) = (0, 0);
+    let (mut old_line, mut new_line) = (0, 0);
     for (old_anchor, new_anchor) in old_anchors
         .iter()
         .copied()
         .zip(new_anchors.iter().copied())
         .chain(std::iter::once((old.len(), new.len())))
     {
-        segment_rows(old, new, old_start..old_anchor, new_start..new_anchor, &mut rows);
-        if old_anchor < old.len() {
-            rows.push(Row::Equal { old: old_anchor, new: new_anchor, item: old[old_anchor] });
+        segment_rows(
+            &old[old_start..old_anchor],
+            &new[new_start..new_anchor],
+            old_line,
+            new_line,
+            &mut rows,
+        );
+        old_line += old_anchor - old_start;
+        new_line += new_anchor - new_start;
+        if let Some(&item) = old.get(old_anchor) {
+            rows.push(Row::Equal { old: old_line, new: new_line, item });
+            old_line += item.len();
+            new_line += item.len();
         }
         old_start = old_anchor + 1;
         new_start = new_anchor + 1;
@@ -384,32 +501,40 @@ fn rows<'a>(old: &[Item<'a>], new: &[Item<'a>]) -> Vec<Row<'a>> {
     rows
 }
 
-fn segment_rows<'a>(
-    old: &[Item<'a>], new: &[Item<'a>], old_range: std::ops::Range<usize>, new_range: std::ops::Range<usize>,
-    rows: &mut Vec<Row<'a>>,
-) {
-    let (old_offset, new_offset) = (old_range.start, new_range.start);
+/// Diffs one stretch of known lines that starts after `old_line` old lines and
+/// `new_line` new lines.
+fn segment_rows<'a>(old: &[Item<'a>], new: &[Item<'a>], old_line: usize, new_line: usize, rows: &mut Vec<Row<'a>>) {
     let known = |item: Item<'a>| match item {
         Item::Known(line) => line,
-        Item::Unknown(_) => unreachable!("segments hold no placeholders"),
+        Item::Unknown { .. } => unreachable!("segments hold no unknown runs"),
     };
-    for op in capture_diff_slices(Algorithm::Myers, &old[old_range], &new[new_range]) {
+    for op in capture_diff_slices(Algorithm::Myers, old, new) {
         let (_, old_span, new_span) = op.as_tag_tuple();
         match op {
             DiffOp::Equal { .. } => {
                 for (old_index, new_index) in old_span.zip(new_span) {
-                    let (old_index, new_index) = (old_index + old_offset, new_index + new_offset);
-                    rows.push(Row::Equal { old: old_index, new: new_index, item: old[old_index] });
+                    rows.push(Row::Equal {
+                        old: old_line + old_index,
+                        new: new_line + new_index,
+                        item: old[old_index],
+                    });
                 }
             }
             DiffOp::Delete { .. } | DiffOp::Insert { .. } | DiffOp::Replace { .. } => {
+                let (old_end, new_start) = (old_span.end, new_span.start);
                 for old_index in old_span {
-                    let old_index = old_index + old_offset;
-                    rows.push(Row::Delete { old: old_index, line: known(old[old_index]) });
+                    rows.push(Row::Delete {
+                        old: old_line + old_index,
+                        new: new_line + new_start,
+                        line: known(old[old_index]),
+                    });
                 }
                 for new_index in new_span {
-                    let new_index = new_index + new_offset;
-                    rows.push(Row::Insert { new: new_index, line: known(new[new_index]) });
+                    rows.push(Row::Insert {
+                        old: old_line + old_end,
+                        new: new_line + new_index,
+                        line: known(new[new_index]),
+                    });
                 }
             }
         }
@@ -417,7 +542,7 @@ fn segment_rows<'a>(
 }
 
 /// Groups changed rows into hunks with up to three known lines of context.
-/// Context stops at placeholders, whose content is unknown.
+/// Context stops at unknown runs, whose content is unknown.
 fn build_hunks(rows: &[Row<'_>]) -> Vec<Hunk> {
     let is_change = |row: &Row<'_>| !matches!(row, Row::Equal { .. });
     let is_known_context = |row: &Row<'_>| matches!(row, Row::Equal { item: Item::Known(_), .. });
@@ -457,12 +582,9 @@ fn build_hunks(rows: &[Row<'_>]) -> Vec<Hunk> {
     hunks
 }
 
+/// Builds the hunk for `rows[start..end]`, which hold no unknown runs.
 fn hunk(rows: &[Row<'_>], start: usize, end: usize) -> Hunk {
-    let (old_before, new_before) = rows[..start].iter().fold((0, 0), |(old, new), row| match row {
-        Row::Equal { .. } => (old + 1, new + 1),
-        Row::Delete { .. } => (old + 1, new),
-        Row::Insert { .. } => (old, new + 1),
-    });
+    let (old_before, new_before) = (rows[start].old_before() as u64, rows[start].new_before() as u64);
     let number = |index: usize| LineNumber::new(index as u64 + 1);
     let lines = rows[start..end]
         .iter()
@@ -472,12 +594,12 @@ fn hunk(rows: &[Row<'_>], start: usize, end: usize) -> Hunk {
                     let missing = if line.newline { MissingNewline::None } else { MissingNewline::Both };
                     (LineKind::Context, number(old), number(new), line, missing)
                 }
-                Row::Equal { item: Item::Unknown(_), .. } => unreachable!("hunks hold no placeholders"),
-                Row::Delete { old, line } => {
+                Row::Equal { item: Item::Unknown { .. }, .. } => unreachable!("hunks hold no unknown runs"),
+                Row::Delete { old, line, .. } => {
                     let missing = if line.newline { MissingNewline::None } else { MissingNewline::Old };
                     (LineKind::Deletion, number(old), None, line, missing)
                 }
-                Row::Insert { new, line } => {
+                Row::Insert { new, line, .. } => {
                     let missing = if line.newline { MissingNewline::None } else { MissingNewline::New };
                     (LineKind::Addition, None, number(new), line, missing)
                 }

@@ -636,9 +636,10 @@ fn fingerprint(bytes: &[u8]) -> Fingerprint {
 }
 
 fn fingerprint_range(block: &[RawLine<'_>], start: usize, end: usize) -> Fingerprint {
-    let bytes = block
+    let first = block.partition_point(|line| line.start < start);
+    let last = block.partition_point(|line| line.start < end);
+    let bytes = block[first..last.max(first)]
         .iter()
-        .filter(|line| line.start >= start && line.start < end)
         .flat_map(|line| line.raw.as_bytes().iter().copied().chain(*b"\n"))
         .collect::<Vec<_>>();
     fingerprint(&bytes)

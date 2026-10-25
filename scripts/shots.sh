@@ -31,7 +31,9 @@ done
 repo=$(git rev-parse --show-toplevel)
 shot=$repo/.github/storm/shot.sh
 cargo build --quiet --manifest-path "$repo/Cargo.toml" -p mire --bin mire
-mire=$repo/target/debug/mire
+# CARGO_TARGET_DIR or build.target-dir can move the build out of the repo.
+target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$repo/Cargo.toml" | jq -r .target_directory)
+mire=$target/debug/mire
 
 fixture=$(mktemp -d)
 trap 'rm -rf "$fixture"' EXIT

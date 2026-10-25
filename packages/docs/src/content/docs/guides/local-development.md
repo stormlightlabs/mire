@@ -15,6 +15,33 @@ requests from the frontend to the Rust server.
 - Rust 1.88 or newer
 - Node.js 22 or newer
 - pnpm 11 or newer
+- [just](https://github.com/casey/just), to run the gates
+
+## Run every check
+
+```sh
+pnpm install
+just check
+```
+
+`just check` builds the web app into `crates/cli/assets/web`, then runs
+`cargo fmt --check`, clippy with warnings denied, the Rust tests, and the
+frontend type checks, lint, and unit tests. CI runs the same recipe, and a pull
+request needs it to pass. `just fmt` formats Rust and frontend sources, and
+`just fix` applies clippy's automatic fixes first.
+
+## Track and deliver work
+
+Open work lives in [arclightning](https://github.com/stormlightlabs/arclightning)
+under `.arcl/workspace`. With `arcl` installed, `arcl ready` lists the tasks that
+can start now and `arcl context <id>` prints one task's details.
+
+Changes go through [fabrial](https://github.com/stormlightlabs/fabrial): push a
+`claude/`, `codex/` or `storm/` branch, and the pull request goes through a
+standard review and an adversarial review before the owner merges it. Pull
+request titles are conventional commits, because the squash commit uses the
+title and [git-cliff](https://git-cliff.org) builds the changelog from those
+subjects. `just changelog` previews the entries since the last tag.
 
 ## Start the servers
 

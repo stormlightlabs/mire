@@ -13,6 +13,30 @@
 - The TUI can and should be verified with a herdr pane. Open a background tab
   and send key/mouse events. Use the current working tree as the diff to check.
 
+## Gates
+
+```sh
+just check    # web app build, fmt --check, clippy -D warnings, tests, frontend checks
+```
+
+`gates` in `.github/fabrial.toml` names this command. CI runs the same recipe
+as the `check` job. Clippy warnings fail it whether or not your change caused
+them.
+
+## Plan
+
+- Open work lives in arcl, in `.arcl/workspace`. Use the `arclightning` skill
+  to pick up, hand off, and complete tasks. Put task status updates and new
+  tasks in the PR they describe.
+- [ROADMAP.md](ROADMAP.md) holds the product direction and scope.
+
+## Commits and changelog
+
+- PR titles are conventional commits (`feat: ...`, `fix: ...`, `docs: ...`).
+  The squash commit uses the PR title, and git-cliff (`cliff.toml`) builds the
+  changelog from those subjects on `main`.
+- Leave `CHANGELOG.md` alone in feature PRs. The release process writes it.
+
 <!-- fabrial:begin -->
 ## Branches and pull requests
 

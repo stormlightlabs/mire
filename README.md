@@ -8,7 +8,8 @@ Mire is a terminal-based diffing and collaborative code review tool for humans a
 
 ## Features
 
-- Review worktree changes, staged changes, revisions, commits, and patch files.
+- Review worktree changes, staged changes, revisions, commits, and patch files,
+  including GitHub pull requests piped in from `gh`.
 - Move through every changed file in one continuous stream.
 - Use unified, split, or responsive layouts with syntax and intraline highlighting.
 - Create durable review files with anchored findings, attribution, and decisions.
@@ -50,6 +51,9 @@ mire show HEAD
 
 # A patch file
 mire patch changes.diff
+
+# A GitHub pull request, as a patch from gh
+gh pr diff 123 | mire patch -
 ```
 
 Place repository-relative path filters after `--`:
@@ -98,6 +102,11 @@ tells the agent to inspect the compact manifest, expand only named context
 within a byte limit, and apply location-based findings.
 
 ## Local development
+
+`just check` runs every gate CI runs. Open work is tracked with
+[arclightning](https://github.com/stormlightlabs/arclightning) (`arcl ready`),
+and changes go through [fabrial](https://github.com/stormlightlabs/fabrial)'s
+review loop. [ROADMAP.md](ROADMAP.md) holds the product direction.
 
 The browser review surface lives in `packages/app`. See the
 [local development guide](packages/docs/src/content/docs/guides/local-development.md)

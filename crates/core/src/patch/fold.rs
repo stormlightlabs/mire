@@ -5,6 +5,11 @@
 //! Each commit's hunks apply to that list and fill in placeholders as their
 //! context and deletions reveal lines. Placeholders never change, so the net
 //! diff compares base and result between them and treats them as unchanged.
+//!
+//! Statuses can differ from `git diff` of the same range. A file renamed and
+//! then re-added under its old path folds to a rename plus an addition. A
+//! binary file changed and then reverted folds to a modification, because the
+//! parser keeps no blob ids to show it is back to its base.
 
 use std::collections::HashMap;
 
@@ -19,13 +24,6 @@ use super::mbox::CommitDiff;
 use super::{PatchError, Result, parser, writer};
 
 const CONTEXT: usize = 3;
-
-/// One source line and whether a line terminator follows it.
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct Line {
-    content: Vec<u8>,
-    newline: bool,
-}
 
 /// A line of the file after some commits: known, or the base line with this
 /// placeholder index that no diff has shown.
@@ -48,6 +46,13 @@ enum Row<'a> {
     Equal { old: usize, new: usize, item: Item<'a> },
     Delete { old: usize, line: &'a Line },
     Insert { new: usize, line: &'a Line },
+}
+
+/// One source line and whether a line terminator follows it.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct Line {
+    content: Vec<u8>,
+    newline: bool,
 }
 
 /// One file followed through the series, across renames and copies.

@@ -116,12 +116,29 @@ Step         id, title, narrative, anchors, depends_on, diagram
 | `steps`      | ordered list     | Required, one or more. List order is reading order.                      |
 | `author`     | string           | Who wrote the walkthrough, as on notes.                                  |
 | `provenance` | producer record  | The same producer provenance notes carry.                                |
-| `id`         | string           | Stable within the walkthrough. Mire generates one if the agent omits it. |
+| `id`         | string           | Unique within the walkthrough. Mire generates one if the agent omits it. |
 | `title`      | string           | Required, one line.                                                      |
 | `narrative`  | Markdown         | Required. Why this part changed and what to check.                       |
 | `anchors`    | list of anchors  | Required, one or more. The note anchor type: path, side, and line range. |
-| `depends_on` | list of step ids | Optional. Each id must name an earlier step.                             |
+| `depends_on` | list of step ids | Optional. Each id must name an earlier step with an agent-supplied id.   |
 | `diagram`    | Mermaid source   | Optional. Drawn only when the step has a flow or schema worth showing.   |
+
+Mire generates ids only when it stores the write, so an agent cannot name a
+generated id in `depends_on` in the same write. A step that another step
+depends on needs an id from the agent. Each write replaces the whole
+walkthrough. Supplied ids are kept as written, and omitted ids are generated
+again.
+
+The model sets explicit bounds, as notes do, and rejects a write that exceeds
+one. The proposed values mirror the note limits:
+
+| Bound                       | Proposed value | Mirrors               |
+| --------------------------- | -------------- | --------------------- |
+| Steps per walkthrough       | 10,000         | `MAX_REVIEW_NOTES`    |
+| Anchors across all steps    | 10,000         | `MAX_REVIEW_NOTES`    |
+| `overview` bytes            | 1 MiB          | `MAX_NOTE_BODY_BYTES` |
+| `narrative` bytes, per step | 1 MiB          | `MAX_NOTE_BODY_BYTES` |
+| `diagram` bytes, per step   | 1 MiB          | `MAX_NOTE_BODY_BYTES` |
 
 Ordering follows these rules:
 
@@ -130,7 +147,11 @@ Ordering follows these rules:
   in order never meets a step before its dependency.
 - Hunks no step covers are listed after the last step, so the reader can see
   what the walkthrough left out. Mire computes this from the anchors. A hunk
-  counts as covered when any step anchor overlaps it, even by one line.
+  counts as covered when any step anchor overlaps it, even by one line. Only
+  exact and moved anchors count; stale and ambiguous anchors cover nothing.
+- Binary, rename-only, and mode-only files have no hunks, so no anchor can
+  point at them. They are listed after the uncovered hunks as files no step
+  covers.
 - In walkthrough mode the file list puts covered files first, in the order of
   the first step that touches each.
 

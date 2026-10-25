@@ -672,6 +672,31 @@ mod tests {
     use super::*;
 
     const PATCH: &[u8] = b"diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1,2 +1,2 @@ heading\n-old\n+new\n context\n\\ No newline at end of file\ndiff --git a/image.bin b/image.bin\nBinary files a/image.bin and b/image.bin differ\n";
+    const NESTED_PATCH: &[u8] = b"diff --git a/src/lib.rs b/src/lib.rs
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,3 +1,3 @@
+ pub mod parse;
+-pub const PORT: u16 = 80;
++pub const PORT: u16 = 8080;
+ pub const HOST: &str = \"localhost\";
+diff --git a/src/parse/mod.rs b/src/parse/mod.rs
+--- a/src/parse/mod.rs
++++ b/src/parse/mod.rs
+@@ -1,3 +1,4 @@
+ pub fn split(line: &str) -> Option<(&str, &str)> {
+-    line.split_once('=')
++    let (key, value) = line.split_once('=')?;
++    Some((key.trim(), value.trim()))
+ }
+diff --git a/docs/guide.md b/docs/guide.md
+new file mode 100644
+--- /dev/null
++++ b/docs/guide.md
+@@ -0,0 +1,2 @@
++# Guide
++Read key = value lines.
+";
 
     #[test]
     fn state_snapshots_are_deterministic() {
@@ -845,6 +870,184 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!addition_styles.is_empty());
         assert!(addition_styles.iter().all(|style| style.fg == theme.addition.fg));
+    }
+
+    #[test]
+    fn sidebar_snapshots_cover_the_file_list_focus_and_hidden_states() {
+        let changeset = nested_changeset();
+        insta::assert_snapshot!("sidebar_files_100x16", snapshot(App::ready(&changeset), 100, 16));
+
+        let mut focused = App::ready(&changeset);
+        press(&mut focused, KeyCode::Tab);
+        press(&mut focused, KeyCode::Down);
+        insta::assert_snapshot!("sidebar_focused_100x16", snapshot(focused, 100, 16));
+
+        let mut hidden = App::ready(&changeset);
+        press(&mut hidden, KeyCode::Char('b'));
+        insta::assert_snapshot!("sidebar_hidden_100x16", snapshot(hidden, 100, 16));
+    }
+
+    #[test]
+    fn layout_snapshots_cover_forced_unified_and_split_modes() {
+        let changeset = nested_changeset();
+
+        let mut unified = App::ready(&changeset);
+        press(&mut unified, KeyCode::Char('1'));
+        insta::assert_snapshot!("layout_unified_120x16", snapshot(unified, 120, 16));
+
+        let mut split = App::ready(&changeset);
+        press(&mut split, KeyCode::Char('2'));
+        insta::assert_snapshot!("layout_split_120x16", snapshot(split, 120, 16));
+    }
+
+    #[test]
+    fn collapse_snapshots_cover_a_collapsed_file_and_a_collapsed_hunk() {
+        let changeset = nested_changeset();
+
+        let mut file = App::ready(&changeset);
+        press(&mut file, KeyCode::Enter);
+        insta::assert_snapshot!("collapsed_file_100x16", snapshot(file, 100, 16));
+
+        let mut hunk = App::ready(&changeset);
+        hunk.resize(100, 16);
+        press(&mut hunk, KeyCode::Down);
+        press(&mut hunk, KeyCode::Enter);
+        insta::assert_snapshot!("collapsed_hunk_100x16", snapshot(hunk, 100, 16));
+    }
+
+    #[test]
+    fn note_snapshots_cover_inline_findings_focus_editor_and_filters() {
+        let review = notes_review();
+        insta::assert_snapshot!(
+            "notes_inline_120x18",
+            snapshot(App::review_with_options(&review, crate::AppOptions::default()), 120, 18)
+        );
+
+        let mut focused = App::review_with_options(&review, crate::AppOptions::default());
+        press(&mut focused, KeyCode::Char('p'));
+        insta::assert_snapshot!("notes_focused_120x18", snapshot(focused, 120, 18));
+
+        let mut editor = App::review_with_options(&review, crate::AppOptions::default());
+        editor.resize(120, 18);
+        for _ in 0..2 {
+            press(&mut editor, KeyCode::Down);
+        }
+        press(&mut editor, KeyCode::Char('c'));
+        editor.handle_paste("Check the port range.");
+        insta::assert_snapshot!("notes_editor_120x18", snapshot(editor, 120, 18));
+
+        let mut filters = App::review_with_options(&review, crate::AppOptions::default());
+        press(&mut filters, KeyCode::Char('f'));
+        insta::assert_snapshot!("notes_filters_120x18", snapshot(filters, 120, 18));
+    }
+
+    #[test]
+    fn walkthrough_snapshot_shows_progress_in_the_header() {
+        let review = notes_review();
+        let mut app = App::review_with_options(&review, crate::AppOptions::default());
+        app.start_walkthrough().unwrap();
+        insta::assert_snapshot!("walkthrough_started_120x18", snapshot(app, 120, 18));
+    }
+
+    #[test]
+    fn overlay_snapshots_cover_the_file_picker_and_search() {
+        let changeset = nested_changeset();
+
+        let mut picker = App::ready(&changeset);
+        picker.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        insta::assert_snapshot!("file_picker_100x16", snapshot(picker, 100, 16));
+
+        let mut search = App::ready(&changeset);
+        press(&mut search, KeyCode::Char('/'));
+        for character in "trim".chars() {
+            press(&mut search, KeyCode::Char(character));
+        }
+        insta::assert_snapshot!("search_prompt_100x16", snapshot(search, 100, 16));
+    }
+
+    fn nested_changeset() -> mire_core::Changeset {
+        parse_patch(
+            NESTED_PATCH,
+            ChangesetSource::Patch { label: None },
+            PatchLimits::default(),
+        )
+        .unwrap()
+    }
+
+    /// A review of the nested patch with an open defect and an open question.
+    fn notes_review() -> mire_core::Review {
+        use mire_core::{
+            Anchor, AnchorSide, AnnotationKind, Author, BytePath, FileContent, LineNumber, LineRange, NoteEvent,
+            NoteEventKind, NoteId, NoteSeverity, NoteStatus, Provenance, Review, ReviewNote, ReviewRevision,
+        };
+
+        let changeset = nested_changeset();
+        let author = Author::new("reviewer", None).unwrap();
+        let note = |sequence: u64, path: &str, line: u64, id: &str, severity, kind, body: &str| {
+            let file = changeset
+                .files()
+                .iter()
+                .find(|file| {
+                    file.new_side()
+                        .is_some_and(|side| side.path.as_bytes() == path.as_bytes())
+                })
+                .expect("fixture has the file");
+            let FileContent::Text { hunks } = file.content() else {
+                panic!("fixture is textual");
+            };
+            let line = LineNumber::new(line).unwrap();
+            let anchor = Anchor::new(
+                &changeset,
+                BytePath::new(path.as_bytes().to_vec()).unwrap(),
+                AnchorSide::New,
+                LineRange::new(line, line).unwrap(),
+                hunks[0].fingerprint(),
+            )
+            .unwrap();
+            let note = ReviewNote::new(
+                NoteId::new(id).unwrap(),
+                anchor,
+                author.clone(),
+                severity,
+                NoteStatus::Open,
+                body.to_owned(),
+                Provenance::Agent { producer: "fixture".to_owned() },
+            )
+            .unwrap()
+            .with_annotation_kind(kind);
+            let created = NoteEventKind::Created { status: NoteStatus::Open };
+            let event = NoteEvent::new(sequence, NoteId::new(id).unwrap(), author.clone(), created).unwrap();
+            (note, event)
+        };
+        let (port, port_event) = note(
+            1,
+            "src/lib.rs",
+            2,
+            "port",
+            NoteSeverity::Medium,
+            AnnotationKind::Defect,
+            "Port 8080 collides with the dev server.",
+        );
+        let (trim, trim_event) = note(
+            2,
+            "src/parse/mod.rs",
+            3,
+            "trim",
+            NoteSeverity::Note,
+            AnnotationKind::Question,
+            "Should an empty value be accepted?",
+        );
+        Review::new(
+            ReviewRevision::new(1).unwrap(),
+            changeset.clone(),
+            vec![port, trim],
+            vec![port_event, trim_event],
+        )
+        .unwrap()
+    }
+
+    fn press(app: &mut App<'_>, code: KeyCode) {
+        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
     }
 
     fn snapshot(mut app: App<'_>, width: u16, height: u16) -> String {

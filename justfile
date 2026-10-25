@@ -18,6 +18,16 @@ fix:
     cargo clippy --workspace --all-targets --fix --allow-dirty
     just fmt
 
+# Capture a terminal UI as a PNG with .github/storm/shot.sh (needs tmux and freeze)
+[positional-arguments]
+shot +args:
+    @.github/storm/shot.sh "$@"
+
+# Capture Mire's TUI scenarios, or the named ones, against a fixture repository
+[positional-arguments]
+shots *names:
+    @scripts/shots.sh "$@"
+
 # Print the changelog entries for commits since the last tag
 changelog:
     git cliff --unreleased

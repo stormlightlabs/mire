@@ -747,6 +747,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86f0f8fee8c926415c58d6ae43a08523a26faccb2323f5e6b644fe7dd4ef6b82"
 dependencies = [
  "once_cell",
+ "serde",
  "similar",
  "tempfile",
 ]
@@ -933,6 +934,7 @@ dependencies = [
  "clap_mangen",
  "getrandom 0.3.4",
  "include_dir",
+ "insta",
  "mire-core",
  "mire-tui",
  "notify",

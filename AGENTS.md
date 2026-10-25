@@ -12,6 +12,9 @@
   - Keep packages/docs/ up to date with usage instructions, again with the writing skill
 - The TUI can and should be verified with a herdr pane. Open a background tab
   and send key/mouse events. Use the current working tree as the diff to check.
+- For a TUI change, run `just shots` (or `just shot` for a state it lacks) and
+  report the PNG paths. Review snapshot changes with `cargo insta review` and
+  commit only the ones you meant.
 
 ## Gates
 

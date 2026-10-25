@@ -1,0 +1,37 @@
+---
+source: crates/cli/tests/json_output.rs
+expression: "fixture.json(&[\"review\", \"status\", \"review.json\", \"--format\", \"json\"])"
+---
+{
+  "additions": 3,
+  "changeset_fingerprint": "7ba5dce248f0a76fa485ab1f48c9fd6f8e070d0b404023b90bcf6d57010d410e",
+  "deletions": 2,
+  "files": 1,
+  "findings": {
+    "accepted_risk": 0,
+    "dismissed": 0,
+    "open": 1,
+    "resolved": 0,
+    "total": 1
+  },
+  "reanchor": {
+    "ambiguous": 0,
+    "exact": 0,
+    "moved": 0,
+    "original": 1,
+    "stale": 0
+  },
+  "review_revision": 2,
+  "schema_version": {
+    "major": 1,
+    "minor": 2
+  },
+  "source": {
+    "kind": "git",
+    "operation": {
+      "kind": "worktree",
+      "paths": [],
+      "staged": false
+    }
+  }
+}

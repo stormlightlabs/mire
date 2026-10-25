@@ -119,11 +119,11 @@ fn render_scroll_indicator(frame: &mut Frame<'_>, area: Rect, total_rows: usize,
         .clamp(1, height);
     let travel = height.saturating_sub(thumb_height);
     let maximum_offset = total_rows.saturating_sub(height);
-    let thumb_start = if maximum_offset == 0 {
-        0
-    } else {
-        offset.min(maximum_offset).saturating_mul(travel) / maximum_offset
-    };
+    let thumb_start = offset
+        .min(maximum_offset)
+        .saturating_mul(travel)
+        .checked_div(maximum_offset)
+        .unwrap_or(0);
     let lines = (0..height)
         .map(|row| {
             Line::styled(

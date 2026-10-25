@@ -4,7 +4,7 @@ import { absoluteUrl } from '$lib/site';
 export const prerender = true;
 
 function escapeXml(value: string): string {
-	return value.replace(/[<>&'\"]/g, (character) => {
+	return value.replace(/[<>&'"]/g, (character) => {
 		switch (character) {
 			case '<':
 				return '&lt;';

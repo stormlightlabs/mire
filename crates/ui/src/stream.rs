@@ -504,25 +504,25 @@ fn row_note_placements(row: RowKey, changeset: &Changeset) -> Vec<NotePlacement>
     };
     let source = &hunks[hunk];
     let mut placements = Vec::with_capacity(2);
-    if let (Some(line), Some(side)) = (old, diff.old_side()) {
-        if let Some(number) = source.lines()[line].old_line() {
-            placements.push(note_placement(
-                side.path.as_bytes(),
-                AnchorSide::Old,
-                source,
-                number.get(),
-            ));
-        }
+    if let (Some(line), Some(side)) = (old, diff.old_side())
+        && let Some(number) = source.lines()[line].old_line()
+    {
+        placements.push(note_placement(
+            side.path.as_bytes(),
+            AnchorSide::Old,
+            source,
+            number.get(),
+        ));
     }
-    if let (Some(line), Some(side)) = (new, diff.new_side()) {
-        if let Some(number) = source.lines()[line].new_line() {
-            placements.push(note_placement(
-                side.path.as_bytes(),
-                AnchorSide::New,
-                source,
-                number.get(),
-            ));
-        }
+    if let (Some(line), Some(side)) = (new, diff.new_side())
+        && let Some(number) = source.lines()[line].new_line()
+    {
+        placements.push(note_placement(
+            side.path.as_bytes(),
+            AnchorSide::New,
+            source,
+            number.get(),
+        ));
     }
     placements
 }

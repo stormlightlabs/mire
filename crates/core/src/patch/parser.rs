@@ -639,7 +639,7 @@ fn fingerprint_range(block: &[RawLine<'_>], start: usize, end: usize) -> Fingerp
     let bytes = block
         .iter()
         .filter(|line| line.start >= start && line.start < end)
-        .flat_map(|line| line.raw.as_bytes().iter().copied().chain([b'\n']))
+        .flat_map(|line| line.raw.as_bytes().iter().copied().chain(*b"\n"))
         .collect::<Vec<_>>();
     fingerprint(&bytes)
 }

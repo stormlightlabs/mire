@@ -367,10 +367,10 @@ impl FileDiff {
         fingerprint: Fingerprint,
     ) -> Result<Self, ModelError> {
         validate_file_sides(status, old.as_ref(), new.as_ref())?;
-        if let Some(value) = similarity {
-            if value > 100 || !matches!(status, FileStatus::Renamed | FileStatus::Copied) {
-                return Err(ModelError::InvalidSimilarity { status, value });
-            }
+        if let Some(value) = similarity
+            && (value > 100 || !matches!(status, FileStatus::Renamed | FileStatus::Copied))
+        {
+            return Err(ModelError::InvalidSimilarity { status, value });
         }
         Ok(Self { status, old, new, similarity, content, fingerprint })
     }

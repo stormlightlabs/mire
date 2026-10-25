@@ -56,14 +56,14 @@ pub enum ReviewFileError {
 pub fn read_review(path: impl AsRef<Path>) -> Result<Review, ReviewFileError> {
     let path = path.as_ref();
     let file = File::open(path).map_err(|source| ReviewFileError::Read { path: path.to_owned(), source })?;
-    if let Ok(metadata) = file.metadata() {
-        if metadata.len() > DEFAULT_MAX_REVIEW_FILE_BYTES as u64 {
-            return Err(ReviewFileError::InputTooLarge {
-                path: path.to_owned(),
-                actual: metadata.len(),
-                limit: DEFAULT_MAX_REVIEW_FILE_BYTES,
-            });
-        }
+    if let Ok(metadata) = file.metadata()
+        && metadata.len() > DEFAULT_MAX_REVIEW_FILE_BYTES as u64
+    {
+        return Err(ReviewFileError::InputTooLarge {
+            path: path.to_owned(),
+            actual: metadata.len(),
+            limit: DEFAULT_MAX_REVIEW_FILE_BYTES,
+        });
     }
     let mut bytes = Vec::new();
     file.take(DEFAULT_MAX_REVIEW_FILE_BYTES.saturating_add(1) as u64)

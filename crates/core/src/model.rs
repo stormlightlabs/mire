@@ -809,8 +809,8 @@ fn decode_fingerprint(encoded: &str) -> Result<Fingerprint, &'static str> {
         return Err("fingerprint must contain 64 hexadecimal characters");
     }
     let mut bytes = [0_u8; 32];
-    for (index, pair) in encoded.as_bytes().chunks_exact(2).enumerate() {
-        bytes[index] = (hex_value(pair[0])? << 4) | hex_value(pair[1])?;
+    for (index, [high, low]) in encoded.as_bytes().as_chunks::<2>().0.iter().enumerate() {
+        bytes[index] = (hex_value(*high)? << 4) | hex_value(*low)?;
     }
     Ok(Fingerprint::new(bytes))
 }

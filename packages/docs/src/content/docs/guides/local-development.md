@@ -12,7 +12,8 @@ requests from the frontend to the Rust server.
 
 ## Prerequisites
 
-- Rust 1.88 or newer
+- Rust through rustup. `rust-toolchain.toml` pins the version CI uses, so
+  clippy reports the same lints locally and in CI.
 - Node.js 22 or newer
 - pnpm 11 or newer
 - [just](https://github.com/casey/just), to run the gates

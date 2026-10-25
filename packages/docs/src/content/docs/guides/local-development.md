@@ -76,9 +76,12 @@ scripts/shots.sh --list    # the scenario names
 
 The scenarios cover the unified, split, and narrow layouts, help, a hidden
 sidebar, a collapsed file, a focused finding, a live walkthrough, and
-`NO_COLOR`. Each run prints the PNG paths. The files go to `$FAB_SHOT_DIR`, or
-to a directory under `$TMPDIR` named after the branch, never inside the
-repository.
+`NO_COLOR`. Each run prints the PNG paths. The files go to `$FAB_SHOT_DIR`,
+resolved against the current directory, or else to
+`$TMPDIR/fabrial-shots/<branch>`, named after the checkout's branch. The script
+refuses an output directory inside the repository. The live walkthrough uses a
+private `XDG_RUNTIME_DIR`, so other open `mire review` sessions do not affect
+it.
 
 `just shot <name> <cols> <rows> <command...>` captures one command of your own
 through `.github/storm/shot.sh`. Pass `--wait-for <text>` to wait for text on

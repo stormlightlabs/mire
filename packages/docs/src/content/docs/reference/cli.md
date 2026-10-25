@@ -51,6 +51,11 @@ mire patch PATH|- [--format json] [--language LANGUAGE] [--watch]
 `-` reads a patch from standard input and produces JSON. `--watch` works only
 with a file-backed patch in an interactive terminal.
 
+A patch series in mbox form, as `git format-patch --stdout` and
+`gh pr diff --patch` print it, is read as one net diff: commit headers and
+messages are skipped, and each file's changes across the commits are folded
+together.
+
 ### `mire review`
 
 ```text

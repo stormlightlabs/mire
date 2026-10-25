@@ -50,6 +50,31 @@ git diff --no-color | mire patch - > changeset.json
 
 Redirecting output also selects JSON automatically.
 
+## Review a GitHub pull request
+
+Mire does not talk to GitHub. Let [`gh`](https://cli.github.com) fetch the pull
+request as a patch, and pass it to Mire as a file, so standard input stays free
+for the viewer:
+
+```sh
+mire patch <(gh pr diff 123)
+mire patch <(gh pr diff 123 --patch)
+```
+
+`gh pr diff` prints the pull request's net diff. `gh pr diff --patch` prints
+one patch per commit, as `git format-patch --stdout` does. Mire reads that
+series as one net diff: it skips each commit's headers and message and folds
+the commits' changes to each file together, so every file appears once, as it
+would in the plain diff. A file that one commit adds and a later commit deletes
+does not appear. Mire rejects a series whose commits do not apply on top of
+each other.
+
+The same works for any `git format-patch` series:
+
+```sh
+mire patch <(git format-patch --stdout main..HEAD)
+```
+
 ## Override syntax detection
 
 Mire detects syntax from file names, extensions, and supported shebangs. Apply

@@ -11,7 +11,7 @@ runs the delivery loop, arclightning tracks the work, and Mire shows the change.
 
 - **View any diff, including pull requests.** Mire reads worktrees, revisions,
   commits, and patch files. A GitHub pull request reaches Mire as a patch from
-  `gh`, for example `gh pr diff 123 | mire patch -`. Mire never calls
+  `gh`, for example `mire patch <(gh pr diff 123)`. Mire never calls
   GitHub or `gh` itself. The caller supplies any pull-request context, such as
   the title and description.
 - **Agent-written walkthroughs.** An agent reads the change through `mire

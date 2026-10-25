@@ -26,7 +26,14 @@ mire diff main...HEAD
 
 # Latest commit
 mire show
+
+# A GitHub pull request, through gh
+mire patch <(gh pr diff 123)
+mire patch <(gh pr diff 123 --patch)
 ```
+
+The `--patch` form lists each commit; Mire folds the commits into one net diff.
+See [Reviewing changes](/docs/guides/review-changes/) for details.
 
 Place repository-relative path filters after `--`:
 

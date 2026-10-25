@@ -44,11 +44,18 @@ pub fn write_patch(changeset: &Changeset) -> Result<Vec<u8>, PatchWriteError> {
         return Err(PatchWriteError::BinaryContent { paths: binary_paths });
     }
 
+    Ok(write_files(changeset.files()))
+}
+
+/// Serializes file diffs as Git-style text, writing a binary change as a
+/// `Binary files ... differ` line without payload. The parser reads that line
+/// back as a binary change.
+pub fn write_files(files: &[FileDiff]) -> Vec<u8> {
     let mut output = Vec::new();
-    for file in changeset.files() {
+    for file in files {
         write_file(&mut output, file);
     }
-    Ok(output)
+    output
 }
 
 fn write_file(output: &mut Vec<u8>, file: &FileDiff) {
@@ -76,6 +83,7 @@ fn write_file(output: &mut Vec<u8>, file: &FileDiff) {
     }
 
     let FileContent::Text { hunks } = file.content() else {
+        write_binary_marker(output, old_path, new_path);
         return;
     };
     if hunks.is_empty() {
@@ -147,6 +155,20 @@ fn write_file_headers(output: &mut Vec<u8>, old_path: Option<&[u8]>, new_path: O
         None => output.extend_from_slice(b"/dev/null"),
     }
     output.push(b'\n');
+}
+
+fn write_binary_marker(output: &mut Vec<u8>, old_path: Option<&[u8]>, new_path: Option<&[u8]>) {
+    output.extend_from_slice(b"Binary files ");
+    match old_path {
+        Some(path) => write_prefixed_path(output, b"a/", path),
+        None => output.extend_from_slice(b"/dev/null"),
+    }
+    output.extend_from_slice(b" and ");
+    match new_path {
+        Some(path) => write_prefixed_path(output, b"b/", path),
+        None => output.extend_from_slice(b"/dev/null"),
+    }
+    output.extend_from_slice(b" differ\n");
 }
 
 fn write_hunk(output: &mut Vec<u8>, hunk: &Hunk) {

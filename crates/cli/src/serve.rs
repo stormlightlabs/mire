@@ -74,6 +74,10 @@ struct ReviewOverview {
     review_identity: String,
     revision: u64,
     source: String,
+    /// Caller-supplied one-line title, such as a pull request title.
+    title: Option<String>,
+    /// Caller-supplied plain-text description, such as a pull request body.
+    description: Option<String>,
     files: Vec<FileSummary>,
     findings: Vec<FindingSummary>,
     totals: ReviewTotals,
@@ -1135,6 +1139,8 @@ fn review_overview(identity: &str, review: &Review) -> ReviewOverview {
         review_identity: identity.to_owned(),
         revision: review.revision().get(),
         source: source_summary(review.changeset().source()),
+        title: review.title().map(str::to_owned),
+        description: review.description().map(str::to_owned),
         files,
         findings,
         totals,
@@ -1516,6 +1522,19 @@ mod tests {
         state
     }
 
+    async fn overview_json(state: AppState) -> serde_json::Value {
+        let mut request = request("/api/v1/review");
+        request
+            .headers_mut()
+            .insert(AUTHORIZATION, HeaderValue::from_static("Bearer secret"));
+        let response = app(state).oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), MAX_REQUEST_BODY_BYTES)
+            .await
+            .expect("body");
+        serde_json::from_slice(&bytes).expect("overview json")
+    }
+
     fn request(path: &str) -> Request<Body> {
         Request::builder()
             .uri(path)
@@ -1557,6 +1576,26 @@ mod tests {
             response.headers().get("referrer-policy"),
             Some(&HeaderValue::from_static("no-referrer"))
         );
+    }
+
+    #[tokio::test]
+    async fn api_overview_reports_the_review_title_and_description() {
+        let state = state();
+        let overview = overview_json(state.clone()).await;
+        assert_eq!(overview["title"], serde_json::Value::Null);
+        assert_eq!(overview["description"], serde_json::Value::Null);
+
+        let review = read_review(&state.review_path)
+            .expect("review")
+            .with_metadata(
+                Some("Add caching".to_owned()),
+                Some("First line\n\n<b>not html</b>".to_owned()),
+            )
+            .expect("valid metadata");
+        crate::write_review_atomic(&state.review_path, &review).expect("review is written");
+        let overview = overview_json(state).await;
+        assert_eq!(overview["title"], "Add caching");
+        assert_eq!(overview["description"], "First line\n\n<b>not html</b>");
     }
 
     #[tokio::test]

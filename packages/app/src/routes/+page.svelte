@@ -6,7 +6,13 @@
 	import Overlay from '$lib/Overlay.svelte';
 	import { loadDevelopmentSessionSecret, parseSessionSecret, saveDevelopmentSessionSecret } from '$lib/session';
 	import { applyTheme, loadTheme, saveTheme, type Theme } from '$lib/theme';
-	import { completionSummary, defaultFindingFilters, filterFindings } from '$lib/review';
+	import {
+		completionSummary,
+		defaultFindingFilters,
+		filterFindings,
+		reviewDescription,
+		reviewTitle
+	} from '$lib/review';
 	import type {
 		FileDetail,
 		FindingDetail,
@@ -33,6 +39,7 @@
 	let conflictRevision = $state<number | null>(null);
 	let refreshState = $state<RefreshState>('idle');
 	let finishReviewOpen = $state(false);
+	let descriptionOpen = $state(false);
 	let sessionSecretInput = $state('');
 	let theme = $state<Theme>('light');
 	let themeReady = $state(false);
@@ -44,6 +51,8 @@
 
 	const completion = $derived(review ? completionSummary(review, viewedFileIds) : null);
 	const visibleFindings = $derived(review ? filterFindings(review.findings, filters) : []);
+	const title = $derived(reviewTitle(review));
+	const description = $derived(reviewDescription(review));
 	const themeLabel = $derived(theme === 'dark' ? 'Use light mode' : 'Use dark mode');
 
 	$effect(() => {
@@ -375,7 +384,7 @@
 			<strong>mire</strong>
 		</div>
 		<div class="review-meta">
-			<strong>Local review</strong><span aria-hidden="true">·</span>
+			<strong class="review-title" {title}>{title}</strong><span aria-hidden="true">·</span>
 			<span class="review-detail">
 				{#if review}
 					{review.source} · revision {review.revision} {@render refreshLabel(refreshState)}
@@ -391,6 +400,11 @@
 				</button>
 				<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'findings')}>
 					<span class="i-lucide-list-checks icon" aria-hidden="true"></span>Findings
+				</button>
+			{/if}
+			{#if review && description}
+				<button class="topbar-button" aria-haspopup="dialog" onclick={() => (descriptionOpen = true)}>
+					<span class="i-lucide-file-text icon" aria-hidden="true"></span>Description
 				</button>
 			{/if}
 			{#if review}
@@ -529,6 +543,20 @@
 			</section>
 		</Overlay>
 	{/if}
+	{#if review && description}
+		<Overlay
+			open={descriptionOpen}
+			labelledBy="description-heading"
+			variant="dialog"
+			onClose={() => (descriptionOpen = false)}>
+			<section class="dialog-content">
+				<h1 id="description-heading" class="description-heading">{title}</h1>
+				<p class="description-label">Description</p>
+				<div class="description-body">{description}</div>
+				<button class="close" onclick={() => (descriptionOpen = false)}>Close</button>
+			</section>
+		</Overlay>
+	{/if}
 	{#if conflictRevision !== null}
 		<Overlay open={true} labelledBy="conflict-heading" variant="dialog" onClose={() => (conflictRevision = null)}>
 			<section class="dialog-content">
@@ -600,6 +628,14 @@
 	}
 	.review-detail {
 		min-width: 0;
+	}
+	.review-meta .review-title {
+		min-width: 0;
+		max-width: 60%;
+		flex: 0 1 auto;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.topbar-button {
 		min-height: 1.85rem;
@@ -758,6 +794,25 @@
 		line-height: 1.5;
 		margin-top: 0.4rem;
 	}
+	.description-heading {
+		overflow-wrap: anywhere;
+	}
+	.dialog-content .description-label {
+		margin: 0.25rem 0 0;
+		font-size: 0.75rem;
+	}
+	.description-body {
+		max-height: min(60vh, 28rem);
+		overflow: auto;
+		margin: 1rem 0;
+		border: 1px solid var(--line);
+		padding: 0.75rem;
+		background: var(--paper);
+		font-size: 0.82rem;
+		line-height: 1.55;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
 	.dialog-content ul {
 		margin: 1rem 0;
 		padding-left: 1.2rem;
@@ -855,6 +910,19 @@
 		}
 	}
 	@media (max-width: 32rem) {
+		.topbar-actions {
+			flex-wrap: wrap;
+			gap: 0.35rem;
+		}
+		.topbar-actions .mobile-pane-button {
+			width: 2.75rem;
+			padding-inline: 0;
+			font-size: 0;
+		}
+		.status {
+			gap: 0;
+			font-size: 0;
+		}
 		.message {
 			padding: 2rem 1rem;
 		}

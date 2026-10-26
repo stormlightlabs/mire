@@ -2,7 +2,7 @@
 id = "arcl-t-01M5SXDG5ZN2YBPY7D46G2J592"
 plan = "arcl-pl-01M5SXDG5F6QV83EW8GZ6VFSSP"
 title = "Rust API and server tests"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 0
 +++

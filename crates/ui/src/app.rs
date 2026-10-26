@@ -8,6 +8,7 @@ use mire_core::{
 };
 use ratatui::layout::{Position, Rect};
 
+use crate::description::{DescriptionDialog, EMPTY_DESCRIPTION, single_line, wrap_text};
 use crate::layout::UiAreas;
 use crate::live::{LiveAction, PresentationKind, PresentationState};
 use crate::navigation::{Action, Focus, action_for};
@@ -20,6 +21,7 @@ use crate::theme::ThemeFamily;
 const DEFAULT_TERMINAL_HEIGHT: u16 = 24;
 const DEFAULT_TERMINAL_WIDTH: u16 = 80;
 const DEFAULT_CONTEXT_LINES: usize = 3;
+const DESCRIPTION_WIDTH: u16 = 80;
 const MAX_CONTEXT_LINES: usize = 100;
 const MAX_SEARCH_MATCHES: usize = 100_000;
 const NOTE_ACTIONS_WIDTH: u16 = 16;
@@ -46,6 +48,8 @@ pub enum InteractionMode {
     Search,
     /// A changed-file picker is filtering and selecting files.
     FilePicker,
+    /// The changeset title and description dialog is open.
+    Description,
     /// A source range is being selected for a new finding.
     RangeSelection,
     /// The keyboard reference is visible.
@@ -79,6 +83,8 @@ pub struct AppPosition {
     collapsed_files: BTreeSet<Vec<u8>>,
     collapsed_hunks: BTreeSet<CollapsedHunk>,
     context_lines: usize,
+    description_scroll: usize,
+    description_visible: bool,
     focus: Focus,
     help_visible: bool,
     layout_mode: LayoutMode,
@@ -101,6 +107,12 @@ pub struct AppOptions {
     pub theme: ThemeFamily,
     /// Human identity attributed to notes and decisions created in this session.
     pub human_author: Option<Author>,
+    /// Caller-supplied title, such as a pull request title. A review's own
+    /// title takes precedence.
+    pub title: Option<String>,
+    /// Caller-supplied description, such as a pull request body. A review's
+    /// own description takes precedence.
+    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -168,6 +180,10 @@ pub struct App<'a> {
     terminal_width: u16,
     terminal_height: u16,
     help_visible: bool,
+    title: Option<String>,
+    description: Option<String>,
+    description_visible: bool,
+    description_scroll: usize,
     search_input: bool,
     search_query: String,
     search_matches: Vec<RowAnchor>,
@@ -246,6 +262,12 @@ impl<'a> App<'a> {
             ))
         };
         let mut app = Self::with_state(state, options);
+        if let Some(title) = review.title() {
+            app.title = Some(single_line(title));
+        }
+        if let Some(description) = review.description() {
+            app.description = Some(description.to_owned());
+        }
         app.review = Some(review.clone());
         app
     }
@@ -391,6 +413,40 @@ impl<'a> App<'a> {
         self.help_visible
     }
 
+    /// Returns the changeset title, from the review or else the session options.
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Returns the changeset description, from the review or else the session options.
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    /// Reports whether the title and description dialog is open.
+    pub const fn description_visible(&self) -> bool {
+        self.description_visible
+    }
+
+    /// Returns the description dialog's area, wrapped text, and scroll offset.
+    pub fn description_dialog(&self) -> DescriptionDialog {
+        let body = self.areas().body;
+        let width = body.width.clamp(1, DESCRIPTION_WIDTH);
+        let text = self.description.as_deref().unwrap_or(EMPTY_DESCRIPTION);
+        let lines = wrap_text(text, usize::from(width.saturating_sub(4)));
+        let wanted = u16::try_from(lines.len().saturating_add(2)).unwrap_or(u16::MAX);
+        let height = wanted.min(body.height).max(1);
+        let area = Rect::new(
+            body.x + body.width.saturating_sub(width) / 2,
+            body.y + body.height.saturating_sub(height) / 2,
+            width,
+            height,
+        );
+        let mut dialog = DescriptionDialog { area, lines, scroll: 0 };
+        dialog.scroll = self.description_scroll.min(dialog.max_scroll());
+        dialog
+    }
+
     /// Reports whether the file sidebar is visible.
     pub const fn sidebar_visible(&self) -> bool {
         self.sidebar_visible
@@ -416,6 +472,8 @@ impl<'a> App<'a> {
             InteractionMode::Search
         } else if self.file_picker.is_some() {
             InteractionMode::FilePicker
+        } else if self.description_visible {
+            InteractionMode::Description
         } else if self.line_selection.is_some() {
             InteractionMode::RangeSelection
         } else if self.help_visible {
@@ -765,6 +823,8 @@ impl<'a> App<'a> {
             collapsed_files: self.collapsed_files.clone(),
             collapsed_hunks: self.collapsed_hunks.clone(),
             context_lines: self.context_lines,
+            description_scroll: self.description_scroll,
+            description_visible: self.description_visible,
             focus: self.focus,
             help_visible: self.help_visible,
             layout_mode: self.layout_mode,
@@ -784,6 +844,8 @@ impl<'a> App<'a> {
         self.collapsed_files = position.collapsed_files.clone();
         self.collapsed_hunks = position.collapsed_hunks.clone();
         self.context_lines = position.context_lines;
+        self.description_scroll = position.description_scroll;
+        self.description_visible = position.description_visible;
         self.focus = position.focus;
         self.help_visible = position.help_visible;
         self.layout_mode = position.layout_mode;
@@ -887,6 +949,8 @@ impl<'a> App<'a> {
             self.handle_search_key(key);
         } else if self.file_picker.is_some() {
             self.handle_file_picker_key(key);
+        } else if self.description_visible {
+            self.handle_description_key(key);
         } else if self.handle_note_key(key) {
         } else if let Some(action) = action_for(key) {
             self.apply(action);
@@ -910,6 +974,14 @@ impl<'a> App<'a> {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) {
         if self.file_picker.is_some() {
             self.handle_file_picker_mouse(mouse);
+            return;
+        }
+        if self.description_visible {
+            match mouse.kind {
+                MouseEventKind::ScrollDown => self.scroll_description(3),
+                MouseEventKind::ScrollUp => self.scroll_description(-3),
+                _ => {}
+            }
             return;
         }
         let areas = self.areas();
@@ -940,6 +1012,8 @@ impl<'a> App<'a> {
 
     fn with_state(state: AppState<'a>, options: AppOptions) -> Self {
         let syntax_cache = RefCell::new(SyntaxCache::new(options.language_override.as_deref()));
+        let title = options.title.as_deref().map(single_line);
+        let description = options.description;
         let author = options.human_author.unwrap_or_else(|| {
             Author::new("local-human", Some("Local reviewer".to_owned())).expect("static author is valid")
         });
@@ -956,6 +1030,10 @@ impl<'a> App<'a> {
             terminal_width: DEFAULT_TERMINAL_WIDTH,
             terminal_height: DEFAULT_TERMINAL_HEIGHT,
             help_visible: false,
+            title,
+            description,
+            description_visible: false,
+            description_scroll: 0,
             search_input: false,
             search_query: String::new(),
             search_matches: Vec::new(),
@@ -1007,6 +1085,10 @@ impl<'a> App<'a> {
             self.file_picker = None;
             return true;
         }
+        if self.description_visible {
+            self.description_visible = false;
+            return true;
+        }
         if self.line_selection.is_some() {
             self.line_selection = None;
             return true;
@@ -1030,6 +1112,10 @@ impl<'a> App<'a> {
             }
             Action::Quit => self.should_quit = true,
             Action::ToggleHelp => self.help_visible = !self.help_visible,
+            Action::ToggleDescription => {
+                self.description_visible = true;
+                self.description_scroll = 0;
+            }
             Action::ToggleFocus => self.focus = self.focus.toggle(),
             Action::ToggleSidebar => self.toggle_sidebar(),
             Action::MoveDown if matches!(self.focus, Focus::Sidebar) => self.select_file_by(1),
@@ -1213,6 +1299,26 @@ impl<'a> App<'a> {
 
     fn file_picker_result_height(&self) -> usize {
         usize::from(self.file_picker_area().height.saturating_sub(5)).max(1)
+    }
+
+    fn handle_description_key(&mut self, key: KeyEvent) {
+        let page = self.description_dialog().text_height().max(1) as isize;
+        match key.code {
+            KeyCode::Char('i') => self.description_visible = false,
+            KeyCode::Char('q') => self.apply(Action::Quit),
+            KeyCode::Down | KeyCode::Char('j') => self.scroll_description(1),
+            KeyCode::Up | KeyCode::Char('k') => self.scroll_description(-1),
+            KeyCode::PageDown => self.scroll_description(page),
+            KeyCode::PageUp => self.scroll_description(-page),
+            KeyCode::Home | KeyCode::Char('g') => self.description_scroll = 0,
+            KeyCode::End | KeyCode::Char('G') => self.description_scroll = self.description_dialog().max_scroll(),
+            _ => {}
+        }
+    }
+
+    fn scroll_description(&mut self, delta: isize) {
+        let dialog = self.description_dialog();
+        self.description_scroll = dialog.scroll.saturating_add_signed(delta).min(dialog.max_scroll());
     }
 
     fn handle_note_key(&mut self, key: KeyEvent) -> bool {
@@ -2702,6 +2808,98 @@ mod tests {
 
         app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
         assert!(app.save_requested());
+    }
+
+    #[test]
+    fn description_key_opens_scrolls_and_closes_the_dialog() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let description = (1..=40)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let options = AppOptions {
+            title: Some("Add the parser".to_owned()),
+            description: Some(description),
+            ..AppOptions::default()
+        };
+        let mut app = App::ready_with_options(&changeset, options);
+        app.resize(100, 20);
+        let press = |app: &mut App<'_>, code| app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+
+        press(&mut app, KeyCode::Char('i'));
+        assert!(app.description_visible());
+        assert_eq!(app.interaction_mode(), InteractionMode::Description);
+        let dialog = app.description_dialog();
+        assert_eq!(dialog.lines.len(), 40);
+        assert_eq!(dialog.scroll, 0);
+        let max = dialog.max_scroll();
+        assert!(max > 0);
+
+        press(&mut app, KeyCode::Char('j'));
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.description_dialog().scroll, 2);
+        press(&mut app, KeyCode::Char('k'));
+        assert_eq!(app.description_dialog().scroll, 1);
+        press(&mut app, KeyCode::PageDown);
+        assert_eq!(app.description_dialog().scroll, (1 + dialog.text_height()).min(max));
+        for _ in 0..10 {
+            press(&mut app, KeyCode::PageDown);
+        }
+        assert_eq!(app.description_dialog().scroll, max);
+        press(&mut app, KeyCode::PageUp);
+        assert_eq!(app.description_dialog().scroll, max - dialog.text_height());
+        press(&mut app, KeyCode::Char('g'));
+        assert_eq!(app.description_dialog().scroll, 0);
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.description_dialog().scroll, 0);
+        assert_eq!(app.scroll(), 0, "the review stream does not move behind the dialog");
+
+        press(&mut app, KeyCode::Char('i'));
+        assert!(!app.description_visible());
+        press(&mut app, KeyCode::Char('i'));
+        press(&mut app, KeyCode::Esc);
+        assert!(!app.description_visible());
+        assert!(!app.should_quit());
+    }
+
+    #[test]
+    fn description_prefers_the_review_and_survives_reload() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let review = Review::new(ReviewRevision::new(1).unwrap(), changeset, Vec::new(), Vec::new())
+            .unwrap()
+            .with_metadata(Some("Review title".to_owned()), Some("Review body".to_owned()))
+            .unwrap();
+        let options = AppOptions {
+            title: Some("Option title".to_owned()),
+            description: Some("Option body".to_owned()),
+            ..AppOptions::default()
+        };
+        let mut app = App::review_with_options(&review, options.clone());
+        assert_eq!(app.title(), Some("Review title"));
+        assert_eq!(app.description(), Some("Review body"));
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
+        let position = app.position();
+
+        let mut reloaded = App::review_with_options(&review, options.clone());
+        reloaded.restore_position(&position);
+        assert!(reloaded.description_visible());
+        assert_eq!(reloaded.title(), Some("Review title"));
+
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let plain = App::ready_with_options(&changeset, options);
+        assert_eq!(plain.title(), Some("Option title"));
+        assert_eq!(plain.description(), Some("Option body"));
+    }
+
+    #[test]
+    fn description_dialog_without_a_description_shows_a_placeholder() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let mut app = App::ready(&changeset);
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE));
+
+        assert!(app.description_visible());
+        assert_eq!(app.description_dialog().lines, vec![EMPTY_DESCRIPTION.to_owned()]);
+        assert_eq!(app.description_dialog().max_scroll(), 0);
     }
 
     fn review() -> Review {

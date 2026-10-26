@@ -7,8 +7,8 @@ use std::process::ExitCode;
 use clap::Parser;
 use mire_core::{
     AnchorSide, Author, BytePath, BytePathError, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, LineNumber,
-    LineRange, NoteId, NoteInput, NoteStatus, PatchError, PatchLimits, PatchWriteError, Provenance, Review,
-    ReviewError, ReviewRevision, parse_patch, write_patch,
+    LineRange, MAX_REVIEW_DESCRIPTION_BYTES, NoteId, NoteInput, NoteStatus, PatchError, PatchLimits, PatchWriteError,
+    Provenance, Review, ReviewError, ReviewRevision, parse_patch, validate_review_metadata, write_patch,
 };
 use mire_tui::ThemeFamily;
 use thiserror::Error;
@@ -80,6 +80,16 @@ enum AppError {
     WatchRequiresTerminal,
     #[error("watch mode cannot read a patch from standard input")]
     WatchStdin,
+    #[error("the patch and the description cannot both come from standard input")]
+    DescriptionStdin,
+    #[error("cannot read description from {input:?}: {source}")]
+    DescriptionIo { input: OsString, source: io::Error },
+    #[error("description from {input:?} exceeds the {limit}-byte limit")]
+    DescriptionTooLarge { input: OsString, limit: usize },
+    #[error("description from {input:?} is not valid UTF-8")]
+    DescriptionEncoding { input: OsString },
+    #[error("invalid title or description: {0}")]
+    Metadata(ReviewError),
     #[error("cannot create web review runtime: {0}")]
     WebReviewRuntime(io::Error),
     #[error("cannot serve review: {0}")]
@@ -97,7 +107,12 @@ impl From<&AppError> for u8 {
 impl AppError {
     const fn exit_code(&self) -> u8 {
         match self {
-            Self::InputIo { .. } => 3,
+            Self::InputIo { .. }
+            | Self::DescriptionStdin
+            | Self::DescriptionIo { .. }
+            | Self::DescriptionTooLarge { .. }
+            | Self::DescriptionEncoding { .. }
+            | Self::Metadata(_) => 3,
             Self::Patch(_) => 4,
             Self::Output(_)
             | Self::OutputIo(_)
@@ -194,14 +209,18 @@ fn execute(cli: Cli) -> Result<(), AppError> {
             };
             run_changeset(changeset, format, language, theme, source)
         }
-        Command::Patch(PatchArgs { input, format, language, watch }) => {
+        Command::Patch(PatchArgs { input, format, language, watch, title, description_file }) => {
             if watch && input == "-" {
                 return Err(AppError::WatchStdin);
             }
+            if input == "-" && description_file.as_deref() == Some(OsStr::new("-")) {
+                return Err(AppError::DescriptionStdin);
+            }
+            let metadata = load_metadata(title, description_file.as_deref())?;
             let changeset = load_patch(&input)?;
             let source =
                 watch.then(|| ReloadSource::Patch { watch_path: watched_file_parent(Path::new(&input)), input });
-            run_changeset(changeset, format, language, theme, source)
+            run_changeset_with_metadata(changeset, format, language, theme, source, metadata)
         }
         Command::Note(NoteArgs { command }) => execute_note(command),
         Command::Notes(NotesArgs { command }) => execute_notes(command),
@@ -258,7 +277,8 @@ fn serve_review(arguments: ServeArgs) -> Result<(), AppError> {
 }
 
 fn initialize_review(arguments: ReviewInitArgs) -> Result<(), AppError> {
-    let ReviewInitArgs { review: destination, staged, revisions, paths } = arguments;
+    let ReviewInitArgs { review: destination, staged, revisions, title, description_file, paths } = arguments;
+    let (title, description) = load_metadata(title, description_file.as_deref())?;
     let (changeset, mut source_binding) =
         git::load_diff_with_binding(DiffRequest { staged, revisions, paths }).map_err(AppError::Git)?;
     if let Some(path) = review_destination_exclusion(Path::new(&destination), &source_binding)? {
@@ -271,6 +291,7 @@ fn initialize_review(arguments: ReviewInitArgs) -> Result<(), AppError> {
         Vec::new(),
     )
     .and_then(|review| review.with_source_binding(source_binding))
+    .and_then(|review| review.with_metadata(title, description))
     .map_err(AppError::InitializeReview)?;
     create_review_atomic(Path::new(&destination), &review).map_err(AppError::CreateReviewFile)?;
 
@@ -371,7 +392,12 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
         let mut session = LiveSession::start(true).map_err(AppError::LiveSession)?;
         mire_tui::run_review_watch_with_live_control(
             review,
-            mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
+            mire_tui::AppOptions {
+                language_override: None,
+                theme,
+                human_author: Some(local_author()),
+                ..mire_tui::AppOptions::default()
+            },
             |updated| {
                 let expected = ReviewRevision::new(updated.revision().get().saturating_sub(1))
                     .map_err(|error| io::Error::other(error.to_string()))?;
@@ -430,7 +456,12 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
         let mut session = LiveSession::start(false).map_err(AppError::LiveSession)?;
         mire_tui::run_review_with_live_control(
             &review,
-            mire_tui::AppOptions { language_override: None, theme, human_author: Some(local_author()) },
+            mire_tui::AppOptions {
+                language_override: None,
+                theme,
+                human_author: Some(local_author()),
+                ..mire_tui::AppOptions::default()
+            },
             |updated| {
                 let expected = ReviewRevision::new(updated.revision().get().saturating_sub(1))
                     .map_err(|error| io::Error::other(error.to_string()))?;
@@ -471,6 +502,13 @@ fn run_changeset(
     changeset: Changeset, format: Option<OutputFormat>, language: Option<String>, theme: ThemeFamily,
     source: Option<ReloadSource>,
 ) -> Result<(), AppError> {
+    run_changeset_with_metadata(changeset, format, language, theme, source, (None, None))
+}
+
+fn run_changeset_with_metadata(
+    changeset: Changeset, format: Option<OutputFormat>, language: Option<String>, theme: ThemeFamily,
+    source: Option<ReloadSource>, (title, description): (Option<String>, Option<String>),
+) -> Result<(), AppError> {
     let interactive = io::stdin().is_terminal() && io::stdout().is_terminal();
     if source.is_some() && (format.is_some() || !interactive) {
         return Err(AppError::WatchRequiresTerminal);
@@ -483,7 +521,7 @@ fn run_changeset(
         let mut session = LiveSession::start(true).map_err(AppError::LiveSession)?;
         mire_tui::run_watch_with_live_control(
             changeset,
-            mire_tui::AppOptions { language_override: language, theme, human_author: None },
+            mire_tui::AppOptions { language_override: language, theme, human_author: None, title, description },
             |force| {
                 let reload_due = watcher.reload_due();
                 if let Some(error) = watcher.take_error() {
@@ -504,7 +542,7 @@ fn run_changeset(
         let mut session = LiveSession::start(false).map_err(AppError::LiveSession)?;
         mire_tui::run_with_live_control(
             &changeset,
-            mire_tui::AppOptions { language_override: language, theme, human_author: None },
+            mire_tui::AppOptions { language_override: language, theme, human_author: None, title, description },
             session.take_control(),
         )
         .map_err(AppError::Terminal)
@@ -746,6 +784,42 @@ fn execute_session(arguments: SessionArgs) -> Result<(), AppError> {
     let mut output = serde_json::to_vec(&response).map_err(AppError::Output)?;
     output.push(b'\n');
     write_bytes(&output)
+}
+
+/// Reads and checks a caller-supplied title and description.
+///
+/// Trailing whitespace is trimmed from the description, and a description
+/// that is empty after trimming counts as none.
+fn load_metadata(
+    title: Option<String>, description_file: Option<&OsStr>,
+) -> Result<(Option<String>, Option<String>), AppError> {
+    let description = match description_file {
+        Some(input) => {
+            let bytes = read_bounded_input(input, MAX_REVIEW_DESCRIPTION_BYTES)
+                .map_err(|source| AppError::DescriptionIo { input: input.to_owned(), source })?;
+            if bytes.len() > MAX_REVIEW_DESCRIPTION_BYTES {
+                return Err(AppError::DescriptionTooLarge {
+                    input: input.to_owned(),
+                    limit: MAX_REVIEW_DESCRIPTION_BYTES,
+                });
+            }
+            let text =
+                String::from_utf8(bytes).map_err(|_| AppError::DescriptionEncoding { input: input.to_owned() })?;
+            let trimmed = text.trim_end();
+            (!trimmed.is_empty()).then(|| trimmed.to_owned())
+        }
+        None => None,
+    };
+    validate_review_metadata(title.as_deref(), description.as_deref()).map_err(AppError::Metadata)?;
+    Ok((title, description))
+}
+
+fn read_bounded_input(input: &OsStr, limit: usize) -> io::Result<Vec<u8>> {
+    if input == "-" {
+        read_bounded(io::stdin().lock(), limit)
+    } else {
+        read_bounded(File::open(Path::new(input))?, limit)
+    }
 }
 
 fn load_patch(input: &OsStr) -> Result<Changeset, AppError> {

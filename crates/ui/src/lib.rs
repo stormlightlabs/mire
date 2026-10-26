@@ -2,6 +2,7 @@
 
 mod app;
 mod chrome;
+mod description;
 mod layout;
 mod live;
 mod navigation;
@@ -20,6 +21,7 @@ use mire_core::{Changeset, Review};
 pub use app::{
     App, AppOptions, AppState, FileFindingSummary, FilePickerEntry, GutterMark, InteractionMode, WatchState,
 };
+pub use description::DescriptionDialog;
 pub use live::{
     LiveAction, LiveControl, LiveRequest, LiveResponse, PresentationKind, PresentationState, WalkthroughAction,
 };

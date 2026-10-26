@@ -78,6 +78,18 @@ differ:
   modified. A patch does not carry binary content, so Mire cannot tell that the
   file is back to its base. The plain diff leaves it out.
 
+Pass the pull request's title and description too, so they show in the review
+header. The description dialog opens with `i`:
+
+```sh
+mire patch <(gh pr diff 123) \
+  --title "$(gh pr view 123 --json title -q .title)" \
+  --description-file <(gh pr view 123 --json body -q .body)
+```
+
+`mire review init` takes the same `--title` and `--description-file` and
+stores both in the review file, where `mire context` hands them to agents.
+
 The same works for any `git format-patch` series:
 
 ```sh

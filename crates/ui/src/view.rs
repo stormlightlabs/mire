@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 
 use crate::EditorTarget;
 use crate::app::{App, AppState, GutterMark};
@@ -78,6 +78,9 @@ pub fn render(frame: &mut Frame<'_>, app: &App<'_>, theme: &Theme) {
     }
     if app.file_picker_visible() {
         render_file_picker(frame, app, theme);
+    }
+    if app.description_visible() {
+        render_description_dialog(frame, app, theme);
     }
     if app.editor().is_some() {
         render_note_editor(frame, areas.review, app, theme);
@@ -257,6 +260,35 @@ fn render_filter_dialog(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme:
             .block(Block::new().borders(Borders::ALL).border_style(theme.accent)),
         dialog,
     );
+}
+
+fn render_description_dialog(frame: &mut Frame<'_>, app: &App<'_>, theme: &Theme) {
+    let dialog = app.description_dialog();
+    let block_width = usize::from(dialog.area.width.saturating_sub(4));
+    let title = truncate_text(app.title().unwrap_or("Description"), block_width);
+    let mut block = Block::new()
+        .borders(Borders::ALL)
+        .border_style(theme.accent)
+        .padding(Padding::horizontal(1))
+        .title(Span::styled(format!(" {title} "), theme.accent));
+    if dialog.max_scroll() > 0 {
+        let position = format!(
+            " {}-{}/{} ",
+            dialog.scroll + 1,
+            (dialog.scroll + dialog.text_height()).min(dialog.lines.len()),
+            dialog.lines.len()
+        );
+        block = block.title_bottom(Line::styled(position, theme.muted).right_aligned());
+    }
+    let lines = dialog
+        .lines
+        .iter()
+        .skip(dialog.scroll)
+        .take(dialog.text_height())
+        .map(|line| Line::raw(line.clone()))
+        .collect::<Vec<_>>();
+    frame.render_widget(Clear, dialog.area);
+    frame.render_widget(Paragraph::new(lines).style(theme.panel).block(block), dialog.area);
 }
 
 fn render_file_picker(frame: &mut Frame<'_>, app: &App<'_>, theme: &Theme) {
@@ -672,6 +704,7 @@ mod tests {
     use super::*;
 
     const PATCH: &[u8] = b"diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1,2 +1,2 @@ heading\n-old\n+new\n context\n\\ No newline at end of file\ndiff --git a/image.bin b/image.bin\nBinary files a/image.bin and b/image.bin differ\n";
+    const DESCRIPTION: &str = "Parsed keys and values keep surrounding spaces, so `port = 8080` fails to match. Trim both sides before returning them.\n\nThe dev server also moves to port 8080:\n- update the default\n- document the change in the guide";
     const NESTED_PATCH: &[u8] = b"diff --git a/src/lib.rs b/src/lib.rs
 --- a/src/lib.rs
 +++ b/src/lib.rs
@@ -963,6 +996,54 @@ new file mode 100644
             press(&mut search, KeyCode::Char(character));
         }
         insta::assert_snapshot!("search_prompt_100x16", snapshot(search, 100, 16));
+    }
+
+    #[test]
+    fn title_snapshots_cover_the_header_and_narrow_truncation() {
+        let changeset = nested_changeset();
+        let options = || crate::AppOptions {
+            title: Some("Trim parsed values and move the dev server port".to_owned()),
+            description: Some(DESCRIPTION.to_owned()),
+            ..crate::AppOptions::default()
+        };
+
+        insta::assert_snapshot!(
+            "header_title_120x16",
+            snapshot(App::ready_with_options(&changeset, options()), 120, 16)
+        );
+        insta::assert_snapshot!(
+            "header_title_narrow_60x10",
+            snapshot(App::ready_with_options(&changeset, options()), 60, 10)
+        );
+    }
+
+    #[test]
+    fn description_snapshots_cover_the_dialog_scrolling_and_no_description() {
+        let changeset = nested_changeset();
+        let options = |description: &str| crate::AppOptions {
+            title: Some("Trim parsed values and move the dev server port".to_owned()),
+            description: Some(description.to_owned()),
+            ..crate::AppOptions::default()
+        };
+
+        let mut dialog = App::ready_with_options(&changeset, options(DESCRIPTION));
+        press(&mut dialog, KeyCode::Char('i'));
+        insta::assert_snapshot!("description_dialog_100x20", snapshot(dialog, 100, 20));
+
+        let long = (1..=30)
+            .map(|line| format!("{line}. Step {line} of the rollout checks the parser against fixture {line}."))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut scrolled = App::ready_with_options(&changeset, options(&long));
+        scrolled.resize(100, 20);
+        press(&mut scrolled, KeyCode::Char('i'));
+        press(&mut scrolled, KeyCode::PageDown);
+        press(&mut scrolled, KeyCode::Char('j'));
+        insta::assert_snapshot!("description_scrolled_100x20", snapshot(scrolled, 100, 20));
+
+        let mut empty = App::ready(&changeset);
+        press(&mut empty, KeyCode::Char('i'));
+        insta::assert_snapshot!("description_empty_100x16", snapshot(empty, 100, 16));
     }
 
     fn nested_changeset() -> mire_core::Changeset {

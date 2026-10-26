@@ -16,11 +16,16 @@ use crate::{
 mod reanchor;
 
 /// The review-file JSON schema emitted by this version of Mire.
-pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 3 };
+pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 4 };
 /// Maximum number of notes accepted in one review file.
 pub const MAX_REVIEW_NOTES: usize = 10_000;
 /// Maximum UTF-8 byte length of one note body.
 pub const MAX_NOTE_BODY_BYTES: usize = 1024 * 1024;
+/// Maximum UTF-8 byte length of a review title.
+pub const MAX_REVIEW_TITLE_BYTES: usize = 1024;
+/// Maximum UTF-8 byte length of a review description, matching GitHub's limit
+/// for a pull request body.
+pub const MAX_REVIEW_DESCRIPTION_BYTES: usize = 64 * 1024;
 
 type Result<T> = std::result::Result<T, ReviewError>;
 
@@ -69,6 +74,9 @@ pub enum ReviewError {
     /// A required identifier or author field is empty or too large.
     #[error("{field} must contain between 1 and {max} UTF-8 bytes")]
     InvalidTextField { field: &'static str, max: usize },
+    /// A review title spans more than one line.
+    #[error("review title must be a single line")]
+    MultilineTitle,
     /// A note body exceeds the review-file resource limit.
     #[error("note body is {actual} bytes; limit is {limit} bytes")]
     NoteBodyTooLarge { actual: usize, limit: usize },
@@ -135,6 +143,7 @@ impl ReviewError {
             ReviewError::ContextOnlyLocation => "context_only_location",
             ReviewError::HumanProvenanceForbidden => "human_provenance_forbidden",
             ReviewError::InvalidTextField { .. } => "invalid_text_field",
+            ReviewError::MultilineTitle => "multiline_title",
             ReviewError::NoteBodyTooLarge { .. } => "note_body_too_large",
             ReviewError::TooManyNotes { .. } => "too_many_notes",
             ReviewError::DuplicateNoteId(_) => "duplicate_note_id",
@@ -963,6 +972,10 @@ pub struct Review {
     changeset: Changeset,
     #[serde(skip_serializing_if = "Option::is_none")]
     source_binding: Option<SourceBinding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
     notes: Vec<ReviewNote>,
     events: Vec<NoteEvent>,
     #[serde(default, flatten)]
@@ -979,6 +992,8 @@ impl Review {
             revision,
             changeset,
             source_binding: None,
+            title: None,
+            description: None,
             notes,
             events,
             extensions: BTreeMap::new(),
@@ -1011,6 +1026,27 @@ impl Review {
     /// Attaches a reloadable source that matches the captured Git operation.
     pub fn with_source_binding(mut self, source_binding: SourceBinding) -> Result<Self> {
         self.source_binding = Some(source_binding);
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// Returns the caller-supplied title, such as a pull request title.
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Returns the caller-supplied description, such as a pull request body.
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    /// Attaches a caller-supplied title and description.
+    ///
+    /// The title is one line of at most [`MAX_REVIEW_TITLE_BYTES`]; the
+    /// description is at most [`MAX_REVIEW_DESCRIPTION_BYTES`].
+    pub fn with_metadata(mut self, title: Option<String>, description: Option<String>) -> Result<Self> {
+        self.title = title;
+        self.description = description;
         self.validate()?;
         Ok(self)
     }
@@ -1075,6 +1111,8 @@ impl Review {
         )
         .map_err(|error| NoteImportError { failures: vec![NoteImportFailure { note_id: first_note_id, error }] })?;
         review.source_binding = self.source_binding.clone();
+        review.title = self.title.clone();
+        review.description = self.description.clone();
         review.extensions = self.extensions.clone();
         Ok(review)
     }
@@ -1212,6 +1250,7 @@ impl Review {
         if self.notes.len() > MAX_REVIEW_NOTES {
             return Err(ReviewError::TooManyNotes { actual: self.notes.len(), limit: MAX_REVIEW_NOTES });
         }
+        validate_review_metadata(self.title.as_deref(), self.description.as_deref())?;
         if let Some(binding) = &self.source_binding {
             let (_, comparison) = binding.git_parts();
             if matches!(comparison, GitOperation::Show { .. }) {
@@ -1242,6 +1281,8 @@ impl Review {
     fn rebuild(&self, revision: ReviewRevision, notes: Vec<ReviewNote>, events: Vec<NoteEvent>) -> Result<Self> {
         let mut review = Self::new(revision, self.changeset.clone(), notes, events)?;
         review.source_binding = self.source_binding.clone();
+        review.title = self.title.clone();
+        review.description = self.description.clone();
         review.extensions = self.extensions.clone();
         Ok(review)
     }
@@ -1264,6 +1305,8 @@ impl<'de> Deserialize<'de> for Review {
             revision: wire.revision,
             changeset: wire.changeset,
             source_binding: wire.source_binding,
+            title: wire.title,
+            description: wire.description,
             notes: wire.notes,
             events: wire.events,
             extensions: wire.extensions,
@@ -1281,6 +1324,10 @@ struct ReviewWire {
     changeset: Changeset,
     #[serde(default)]
     source_binding: Option<SourceBinding>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
     notes: Vec<ReviewNote>,
     events: Vec<NoteEvent>,
     #[serde(default, flatten)]
@@ -1618,6 +1665,23 @@ fn validate_provenance(provenance: &Provenance) -> Result<()> {
     }
 }
 
+/// Checks a caller-supplied review title and description against the limits
+/// review files enforce: a non-empty single-line title of at most
+/// [`MAX_REVIEW_TITLE_BYTES`], and a non-empty description of at most
+/// [`MAX_REVIEW_DESCRIPTION_BYTES`].
+pub fn validate_review_metadata(title: Option<&str>, description: Option<&str>) -> Result<()> {
+    if let Some(title) = title {
+        validate_text("review title", title, MAX_REVIEW_TITLE_BYTES)?;
+        if title.contains(['\n', '\r']) {
+            return Err(ReviewError::MultilineTitle);
+        }
+    }
+    if let Some(description) = description {
+        validate_text("review description", description, MAX_REVIEW_DESCRIPTION_BYTES)?;
+    }
+    Ok(())
+}
+
 fn validate_text(field: &'static str, value: &str, max: usize) -> Result<()> {
     if value.is_empty() || value.len() > max {
         return Err(ReviewError::InvalidTextField { field, max });
@@ -1695,6 +1759,62 @@ mod tests {
         let encoded = serde_json::to_string(&decoded).unwrap();
         assert!(encoded.contains("\"future\":{\"enabled\":true}"));
         assert!(!encoded.contains("source_binding"));
+    }
+
+    #[test]
+    fn title_and_description_round_trip_and_survive_new_revisions() {
+        let review = empty_review()
+            .with_metadata(Some("Fix the parser".to_owned()), Some("Body\n\nwith lines".to_owned()))
+            .unwrap();
+        let decoded: Review = serde_json::from_str(&serde_json::to_string(&review).unwrap()).unwrap();
+        assert_eq!(decoded.title(), Some("Fix the parser"));
+        assert_eq!(decoded.description(), Some("Body\n\nwith lines"));
+
+        let next = decoded
+            .rebuild(decoded.next_revision().unwrap(), Vec::new(), Vec::new())
+            .unwrap();
+        assert_eq!(next.title(), Some("Fix the parser"));
+        assert_eq!(next.description(), Some("Body\n\nwith lines"));
+    }
+
+    #[test]
+    fn review_files_without_title_or_description_still_load() {
+        let json = serde_json::to_string(&empty_review())
+            .unwrap()
+            .replacen("\"minor\":4", "\"minor\":3", 1);
+        assert!(!json.contains("\"title\"") && !json.contains("\"description\""));
+        let decoded: Review = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.title(), None);
+        assert_eq!(decoded.description(), None);
+    }
+
+    #[test]
+    fn title_and_description_are_bounded() {
+        let review = empty_review;
+        assert_eq!(
+            review().with_metadata(Some("two\nlines".to_owned()), None),
+            Err(ReviewError::MultilineTitle)
+        );
+        assert!(matches!(
+            review().with_metadata(Some(String::new()), None),
+            Err(ReviewError::InvalidTextField { field: "review title", .. })
+        ));
+        assert!(matches!(
+            review().with_metadata(Some("t".repeat(MAX_REVIEW_TITLE_BYTES + 1)), None),
+            Err(ReviewError::InvalidTextField { field: "review title", .. })
+        ));
+        assert!(matches!(
+            review().with_metadata(None, Some("d".repeat(MAX_REVIEW_DESCRIPTION_BYTES + 1))),
+            Err(ReviewError::InvalidTextField { field: "review description", .. })
+        ));
+        assert!(
+            review()
+                .with_metadata(
+                    Some("t".repeat(MAX_REVIEW_TITLE_BYTES)),
+                    Some("d".repeat(MAX_REVIEW_DESCRIPTION_BYTES))
+                )
+                .is_ok()
+        );
     }
 
     #[test]

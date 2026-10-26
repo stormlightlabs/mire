@@ -17,7 +17,8 @@ Mire's durable review model has four primary objects:
 Changeset   source, files, hunks, fingerprint
 Anchor      side, path, line range, hunk and content fingerprints
 ReviewNote  anchor, author, severity, kind, status, body, provenance
-Review      captured changeset, source binding, revision, notes, and note events
+Review      captured changeset, source binding, optional title and description,
+            revision, notes, and note events
 ```
 
 The TUI and CLI use the same validation rules. Tools can therefore add findings
@@ -66,6 +67,8 @@ only the latest label.
 
 Review schemas carry explicit versions and reject unsupported major versions.
 Mire bounds review size, note count, imported payloads, and expanded context.
+A review's title is one line of at most 1 KiB and its description at most
+64 KiB. Review files written before titles existed still load.
 
 A location batch and a source refresh validate the entire transaction before
 Mire atomically replaces the review file.

@@ -17,6 +17,7 @@ precedence over the general controls.
 | `q`               | Quit Mire                                                         |
 | `Esc`             | Cancel active UI state or return sidebar focus to the review      |
 | `?`               | Show or hide keybinding help                                      |
+| `i`               | Show the changeset title and description                          |
 | `Tab`             | Switch focus between the file sidebar and review                  |
 | `b`               | Show or hide the file sidebar                                     |
 | `j` / `Down`      | Scroll down, or select the next file when the sidebar has focus   |
@@ -43,6 +44,17 @@ precedence over the general controls.
 
 While entering a search, type to update the query. `Backspace` removes the
 previous character, `Enter` runs the search, and `Esc` cancels input.
+
+## Read the title and description
+
+Press `i` to open the title and description given with `--title` and
+`--description-file`, or stored in the review. The dialog says "No
+description." when there is none. Scroll a long description with `j`/`k`, the
+arrow keys, `PgDn`/`PgUp`, `g`/`Home`, `G`/`End`, or the mouse wheel. Press `i`
+or `Esc` to close it.
+
+When a title is set, the status bar shows it after "Mire review", shortened to
+fit.
 
 ## Jump to a changed file
 

@@ -14,8 +14,8 @@ pub use patch::{
 };
 pub use review::{
     Anchor, AnchorSide, AnnotationKind, Author, AuthorKind, CURRENT_REVIEW_SCHEMA_VERSION, FilesystemIdentity,
-    LineRange, MAX_NOTE_BODY_BYTES, MAX_REVIEW_NOTES, NoteApplyError, NoteApplyFailure, NoteEvent, NoteEventKind,
-    NoteId, NoteImportError, NoteImportFailure, NoteInput, NoteSeverity, NoteStatus, Provenance, ReanchorCandidate,
-    ReanchorEvidence, ReanchorOutcome, RepositoryIdentity, Review, ReviewError, ReviewNote, ReviewRevision,
-    SourceBinding,
+    LineRange, MAX_NOTE_BODY_BYTES, MAX_REVIEW_DESCRIPTION_BYTES, MAX_REVIEW_NOTES, MAX_REVIEW_TITLE_BYTES,
+    NoteApplyError, NoteApplyFailure, NoteEvent, NoteEventKind, NoteId, NoteImportError, NoteImportFailure, NoteInput,
+    NoteSeverity, NoteStatus, Provenance, ReanchorCandidate, ReanchorEvidence, ReanchorOutcome, RepositoryIdentity,
+    Review, ReviewError, ReviewNote, ReviewRevision, SourceBinding, validate_review_metadata,
 };

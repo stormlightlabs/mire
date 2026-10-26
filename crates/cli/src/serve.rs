@@ -44,6 +44,11 @@ use crate::watch::WatchSet;
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/web");
 
 const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024;
+/// Byte limit on the browser's agent context export. A maximum description
+/// serializes to at most 256 KiB (65,536 four-byte characters; escaped
+/// characters take two bytes) and a maximum title to 2 KiB, so 1 MiB leaves
+/// room for the file and note manifests.
+const MAX_CONTEXT_EXPORT_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub enum ServeError {
@@ -991,7 +996,7 @@ async fn export_notes_markdown(State(state): State<AppState>) -> Response<Body> 
 )]
 async fn export_context(State(state): State<AppState>) -> Response<Body> {
     match load_current_review(&state).await {
-        Ok(review) => match context_json(&review, ContextSelection::Manifest, Some(256 * 1024)) {
+        Ok(review) => match context_json(&review, ContextSelection::Manifest, Some(MAX_CONTEXT_EXPORT_BYTES)) {
             Ok(bytes) => download(bytes, "application/json; charset=utf-8", "mire-context.json"),
             Err(error) => protocol_problem(error),
         },
@@ -1718,6 +1723,35 @@ mod tests {
             response.headers().get(CONTENT_DISPOSITION),
             Some(&HeaderValue::from_static("attachment; filename=\"mire-notes.json\""))
         );
+    }
+
+    #[tokio::test]
+    async fn context_export_fits_a_maximum_worst_case_description() {
+        let chars = mire_core::MAX_REVIEW_DESCRIPTION_CHARS;
+        let title = "\"".repeat(mire_core::MAX_REVIEW_TITLE_BYTES);
+        for description in [
+            "\u{1F600}".repeat(chars),
+            "\"".repeat(chars),
+            "\\\n\t".repeat(chars / 3),
+        ] {
+            let state = state();
+            let review = read_review(&state.review_path)
+                .expect("review")
+                .with_metadata(Some(title.clone()), Some(description.clone()))
+                .expect("valid metadata");
+            crate::write_review_atomic(&state.review_path, &review).expect("review is written");
+            let mut export = request("/api/v1/exports/context.json");
+            export
+                .headers_mut()
+                .insert(AUTHORIZATION, HeaderValue::from_static("Bearer secret"));
+            let response = app(state).oneshot(export).await.expect("response");
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), MAX_CONTEXT_EXPORT_BYTES)
+                .await
+                .expect("body");
+            let context: serde_json::Value = serde_json::from_slice(&bytes).expect("context JSON");
+            assert_eq!(context["payload"]["description"], description.as_str());
+        }
     }
 
     #[tokio::test]

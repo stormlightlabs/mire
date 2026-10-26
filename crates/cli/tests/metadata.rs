@@ -145,7 +145,8 @@ fn reviews_without_title_or_description_omit_them() {
 #[test]
 fn invalid_title_and_description_are_rejected_before_writing() {
     let fixture = Fixture::new();
-    fs::write(fixture.path("huge.md"), "d".repeat(64 * 1024 + 1)).unwrap();
+    fs::write(fixture.path("long.md"), "d".repeat(65_537)).unwrap();
+    fs::write(fixture.path("huge.md"), "d".repeat(300 * 1024)).unwrap();
     for (arguments, message) in [
         (
             vec!["review", "init", "review.json", "--title", "two\nlines"],
@@ -156,8 +157,20 @@ fn invalid_title_and_description_are_rejected_before_writing() {
             "review title must contain",
         ),
         (
+            vec!["review", "init", "review.json", "--title", "   "],
+            "non-whitespace character",
+        ),
+        (
+            vec!["review", "init", "review.json", "--title", "bell\u{7}"],
+            "control character",
+        ),
+        (
+            vec!["review", "init", "review.json", "--description-file", "long.md"],
+            "65537 characters; limit is 65536 characters",
+        ),
+        (
             vec!["review", "init", "review.json", "--description-file", "huge.md"],
-            "exceeds the 65536-byte limit",
+            "byte input limit",
         ),
         (
             vec!["review", "init", "review.json", "--description-file", "missing.md"],
@@ -170,6 +183,35 @@ fn invalid_title_and_description_are_rejected_before_writing() {
         assert!(stderr.contains(message), "{arguments:?}: {stderr}");
         assert!(!fixture.path("review.json").exists(), "{arguments:?}");
     }
+}
+
+#[test]
+fn description_limit_counts_characters_after_trimming() {
+    let fixture = Fixture::new();
+    let full = format!("{}\n", "a".repeat(65_536));
+    let multibyte = format!("{}é\u{1F600}\n", "a".repeat(65_534));
+    for body in [full, multibyte] {
+        let output = fixture.mire(
+            &["review", "init", "review.json", "--description-file", "-"],
+            body.as_bytes(),
+        );
+        assert_success(&output);
+        let review: Value = serde_json::from_slice(&fs::read(fixture.path("review.json")).unwrap()).unwrap();
+        assert_eq!(review["description"].as_str().unwrap(), body.trim_end());
+        fs::remove_file(fixture.path("review.json")).unwrap();
+    }
+}
+
+#[test]
+fn description_line_endings_and_control_characters_are_normalized() {
+    let fixture = Fixture::new();
+    let output = fixture.mire(
+        &["review", "init", "review.json", "--description-file", "-"],
+        b"One\r\nTwo\rThree\x01\x1b[31m\tred\x7f\r\n",
+    );
+    assert_success(&output);
+    let review: Value = serde_json::from_slice(&fs::read(fixture.path("review.json")).unwrap()).unwrap();
+    assert_eq!(review["description"], "One\nTwo\nThree[31m\tred");
 }
 
 #[test]

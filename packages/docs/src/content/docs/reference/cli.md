@@ -54,8 +54,11 @@ with a file-backed patch in an interactive terminal.
 
 `--title` and `--description-file` give the changeset a title and description,
 such as a pull request's, which the TUI shows. The title is one line of at most
-1 KiB. The description is plain text of at most 64 KiB, read from a file;
-trailing whitespace is trimmed, and a blank description counts as none.
+1 KiB, with at least one non-space character and no control characters. The
+description is plain text of at most 65,536 characters, GitHub's limit for a
+pull request body, read from a file. Mire turns `\r\n` and `\r` into `\n`,
+drops control characters other than newline and tab, and trims trailing
+whitespace before it counts characters. A blank description counts as none.
 Standard input is not accepted, because the TUI needs it to be a terminal. Use
 process substitution instead, such as
 `--description-file <(gh pr view --json body --jq .body)`. Structured output

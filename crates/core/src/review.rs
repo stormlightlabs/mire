@@ -23,9 +23,10 @@ pub const MAX_REVIEW_NOTES: usize = 10_000;
 pub const MAX_NOTE_BODY_BYTES: usize = 1024 * 1024;
 /// Maximum UTF-8 byte length of a review title.
 pub const MAX_REVIEW_TITLE_BYTES: usize = 1024;
-/// Maximum UTF-8 byte length of a review description, matching GitHub's limit
-/// for a pull request body.
-pub const MAX_REVIEW_DESCRIPTION_BYTES: usize = 64 * 1024;
+/// Maximum number of characters (Unicode scalar values) in a review
+/// description, matching GitHub's 65,536-character limit for a pull request
+/// body.
+pub const MAX_REVIEW_DESCRIPTION_CHARS: usize = 65_536;
 
 type Result<T> = std::result::Result<T, ReviewError>;
 
@@ -77,6 +78,18 @@ pub enum ReviewError {
     /// A review title spans more than one line.
     #[error("review title must be a single line")]
     MultilineTitle,
+    /// A review title holds only whitespace.
+    #[error("review title must contain a non-whitespace character")]
+    BlankTitle,
+    /// A review description is empty.
+    #[error("review description must not be empty")]
+    EmptyDescription,
+    /// A review description has more characters than the limit.
+    #[error("review description is {actual} characters; limit is {limit} characters")]
+    DescriptionTooLong { actual: usize, limit: usize },
+    /// A title or description holds a control character it may not carry.
+    #[error("{field} contains a control character")]
+    ControlCharacter { field: &'static str },
     /// A note body exceeds the review-file resource limit.
     #[error("note body is {actual} bytes; limit is {limit} bytes")]
     NoteBodyTooLarge { actual: usize, limit: usize },
@@ -144,6 +157,10 @@ impl ReviewError {
             ReviewError::HumanProvenanceForbidden => "human_provenance_forbidden",
             ReviewError::InvalidTextField { .. } => "invalid_text_field",
             ReviewError::MultilineTitle => "multiline_title",
+            ReviewError::BlankTitle => "blank_title",
+            ReviewError::EmptyDescription => "empty_description",
+            ReviewError::DescriptionTooLong { .. } => "description_too_long",
+            ReviewError::ControlCharacter { .. } => "control_character",
             ReviewError::NoteBodyTooLarge { .. } => "note_body_too_large",
             ReviewError::TooManyNotes { .. } => "too_many_notes",
             ReviewError::DuplicateNoteId(_) => "duplicate_note_id",
@@ -1043,7 +1060,8 @@ impl Review {
     /// Attaches a caller-supplied title and description.
     ///
     /// The title is one line of at most [`MAX_REVIEW_TITLE_BYTES`]; the
-    /// description is at most [`MAX_REVIEW_DESCRIPTION_BYTES`].
+    /// description is at most [`MAX_REVIEW_DESCRIPTION_CHARS`] characters. See
+    /// [`validate_review_metadata`].
     pub fn with_metadata(mut self, title: Option<String>, description: Option<String>) -> Result<Self> {
         self.title = title;
         self.description = description;
@@ -1666,20 +1684,64 @@ fn validate_provenance(provenance: &Provenance) -> Result<()> {
 }
 
 /// Checks a caller-supplied review title and description against the limits
-/// review files enforce: a non-empty single-line title of at most
-/// [`MAX_REVIEW_TITLE_BYTES`], and a non-empty description of at most
-/// [`MAX_REVIEW_DESCRIPTION_BYTES`].
+/// review files enforce.
+///
+/// The title is one line of at most [`MAX_REVIEW_TITLE_BYTES`], with a
+/// non-whitespace character and no control characters. The description is
+/// non-empty, at most [`MAX_REVIEW_DESCRIPTION_CHARS`] characters, and carries
+/// no control characters other than `\n` and `\t`. [`normalize_description`]
+/// turns untrusted text into a description that passes.
 pub fn validate_review_metadata(title: Option<&str>, description: Option<&str>) -> Result<()> {
     if let Some(title) = title {
         validate_text("review title", title, MAX_REVIEW_TITLE_BYTES)?;
         if title.contains(['\n', '\r']) {
             return Err(ReviewError::MultilineTitle);
         }
+        if title.chars().any(char::is_control) {
+            return Err(ReviewError::ControlCharacter { field: "review title" });
+        }
+        if title.trim().is_empty() {
+            return Err(ReviewError::BlankTitle);
+        }
     }
     if let Some(description) = description {
-        validate_text("review description", description, MAX_REVIEW_DESCRIPTION_BYTES)?;
+        if description.is_empty() {
+            return Err(ReviewError::EmptyDescription);
+        }
+        let actual = description.chars().count();
+        if actual > MAX_REVIEW_DESCRIPTION_CHARS {
+            return Err(ReviewError::DescriptionTooLong { actual, limit: MAX_REVIEW_DESCRIPTION_CHARS });
+        }
+        if description.chars().any(|c| c.is_control() && c != '\n' && c != '\t') {
+            return Err(ReviewError::ControlCharacter { field: "review description" });
+        }
     }
     Ok(())
+}
+
+/// Turns untrusted text, such as a pull request body, into description text.
+///
+/// `\r\n` and a lone `\r` become `\n`, other control characters except `\t`
+/// are removed, and trailing whitespace is trimmed. Returns `None` when
+/// nothing is left. The length is not checked; [`validate_review_metadata`]
+/// does that.
+pub fn normalize_description(text: &str) -> Option<String> {
+    let mut normalized = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\r' => {
+                chars.next_if_eq(&'\n');
+                normalized.push('\n');
+            }
+            '\n' | '\t' => normalized.push(c),
+            c if c.is_control() => {}
+            c => normalized.push(c),
+        }
+    }
+    let trimmed = normalized.trim_end().len();
+    normalized.truncate(trimmed);
+    (!normalized.is_empty()).then_some(normalized)
 }
 
 fn validate_text(field: &'static str, value: &str, max: usize) -> Result<()> {
@@ -1803,18 +1865,90 @@ mod tests {
             review().with_metadata(Some("t".repeat(MAX_REVIEW_TITLE_BYTES + 1)), None),
             Err(ReviewError::InvalidTextField { field: "review title", .. })
         ));
-        assert!(matches!(
-            review().with_metadata(None, Some("d".repeat(MAX_REVIEW_DESCRIPTION_BYTES + 1))),
-            Err(ReviewError::InvalidTextField { field: "review description", .. })
-        ));
+        assert_eq!(
+            review().with_metadata(None, Some("d".repeat(MAX_REVIEW_DESCRIPTION_CHARS + 1))),
+            Err(ReviewError::DescriptionTooLong {
+                actual: MAX_REVIEW_DESCRIPTION_CHARS + 1,
+                limit: MAX_REVIEW_DESCRIPTION_CHARS
+            })
+        );
+        assert_eq!(
+            review().with_metadata(None, Some(String::new())),
+            Err(ReviewError::EmptyDescription)
+        );
         assert!(
             review()
                 .with_metadata(
                     Some("t".repeat(MAX_REVIEW_TITLE_BYTES)),
-                    Some("d".repeat(MAX_REVIEW_DESCRIPTION_BYTES))
+                    Some("d".repeat(MAX_REVIEW_DESCRIPTION_CHARS))
                 )
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn description_limit_counts_characters_not_bytes() {
+        let multibyte = format!("{}é", "d".repeat(MAX_REVIEW_DESCRIPTION_CHARS - 1));
+        assert!(multibyte.len() > MAX_REVIEW_DESCRIPTION_CHARS);
+        assert!(empty_review().with_metadata(None, Some(multibyte)).is_ok());
+        let wide = "\u{1F600}".repeat(MAX_REVIEW_DESCRIPTION_CHARS);
+        assert!(empty_review().with_metadata(None, Some(wide)).is_ok());
+        assert!(matches!(
+            empty_review().with_metadata(None, Some("é".repeat(MAX_REVIEW_DESCRIPTION_CHARS + 1))),
+            Err(ReviewError::DescriptionTooLong { .. })
+        ));
+    }
+
+    #[test]
+    fn blank_titles_are_rejected() {
+        for title in ["   ", "\u{3000}"] {
+            assert_eq!(
+                empty_review().with_metadata(Some(title.to_owned()), None),
+                Err(ReviewError::BlankTitle)
+            );
+        }
+        assert!(
+            empty_review()
+                .with_metadata(Some(" Fix parser ".to_owned()), None)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn control_characters_are_rejected_in_titles_and_descriptions() {
+        for title in ["tab\there", "bell\u{7}", "del\u{7f}", "c1\u{85}"] {
+            assert_eq!(
+                empty_review().with_metadata(Some(title.to_owned()), None),
+                Err(ReviewError::ControlCharacter { field: "review title" })
+            );
+        }
+        for description in ["cr\r\nlf", "nul\u{0}", "esc\u{1b}[31m", "del\u{7f}", "c1\u{9b}"] {
+            assert_eq!(
+                empty_review().with_metadata(None, Some(description.to_owned())),
+                Err(ReviewError::ControlCharacter { field: "review description" })
+            );
+        }
+        assert!(
+            empty_review()
+                .with_metadata(None, Some("lines\nand\ttabs".to_owned()))
+                .is_ok()
+        );
+
+        let json = serde_json::to_string(&empty_review()).unwrap();
+        let tampered = json.replacen('{', "{\"description\":\"bad\\u0001\",", 1);
+        assert!(serde_json::from_str::<Review>(&tampered).is_err());
+    }
+
+    #[test]
+    fn normalize_description_keeps_only_newlines_and_tabs() {
+        assert_eq!(
+            normalize_description("a\r\nb\rc\nd\te\u{0}\u{1}\u{1b}\u{7f}\u{85}\u{9f}f").as_deref(),
+            Some("a\nb\nc\nd\tef")
+        );
+        assert_eq!(normalize_description("body\n\n").as_deref(), Some("body"));
+        assert_eq!(normalize_description(" \r\n\u{1}\t"), None);
+        let normalized = normalize_description(&"\u{1}x".repeat(10)).unwrap();
+        assert!(validate_review_metadata(None, Some(&normalized)).is_ok());
     }
 
     #[test]

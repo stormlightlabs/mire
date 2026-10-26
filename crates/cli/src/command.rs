@@ -7,8 +7,9 @@ use std::process::ExitCode;
 use clap::Parser;
 use mire_core::{
     AnchorSide, Author, BytePath, BytePathError, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, LineNumber,
-    LineRange, MAX_REVIEW_DESCRIPTION_BYTES, NoteId, NoteInput, NoteStatus, PatchError, PatchLimits, PatchWriteError,
-    Provenance, Review, ReviewError, ReviewRevision, parse_patch, validate_review_metadata, write_patch,
+    LineRange, MAX_REVIEW_DESCRIPTION_CHARS, NoteId, NoteInput, NoteStatus, PatchError, PatchLimits, PatchWriteError,
+    Provenance, Review, ReviewError, ReviewRevision, normalize_description, parse_patch, validate_review_metadata,
+    write_patch,
 };
 use mire_tui::ThemeFamily;
 use thiserror::Error;
@@ -29,6 +30,10 @@ use crate::skill::{self, SkillError};
 use crate::watch::{WatchError, WatchSet};
 
 use crate::cli::*;
+
+/// Byte bound on description input: room for a maximum description of
+/// four-byte characters plus trailing whitespace and line-ending slack.
+const MAX_DESCRIPTION_INPUT_BYTES: usize = MAX_REVIEW_DESCRIPTION_CHARS * 4 + 4096;
 
 #[derive(Debug, Error)]
 enum AppError {
@@ -86,7 +91,7 @@ enum AppError {
     DescriptionStdin,
     #[error("cannot read description from {input:?}: {source}")]
     DescriptionIo { input: OsString, source: io::Error },
-    #[error("description from {input:?} exceeds the {limit}-byte limit")]
+    #[error("description from {input:?} exceeds the {limit}-byte input limit")]
     DescriptionTooLarge { input: OsString, limit: usize },
     #[error("description from {input:?} is not valid UTF-8")]
     DescriptionEncoding { input: OsString },
@@ -790,25 +795,26 @@ fn execute_session(arguments: SessionArgs) -> Result<(), AppError> {
 
 /// Reads and checks a caller-supplied title and description.
 ///
-/// Trailing whitespace is trimmed from the description, and a description
-/// that is empty after trimming counts as none.
+/// The description is normalized with [`normalize_description`] before its
+/// length is checked, so line endings, stray control characters and trailing
+/// whitespace do not count against the limit. A description that is empty
+/// after normalizing counts as none.
 fn load_metadata(
     title: Option<String>, description_file: Option<&OsStr>,
 ) -> Result<(Option<String>, Option<String>), AppError> {
     let description = match description_file {
         Some(input) => {
-            let bytes = read_bounded_input(input, MAX_REVIEW_DESCRIPTION_BYTES)
+            let bytes = read_bounded_input(input, MAX_DESCRIPTION_INPUT_BYTES)
                 .map_err(|source| AppError::DescriptionIo { input: input.to_owned(), source })?;
-            if bytes.len() > MAX_REVIEW_DESCRIPTION_BYTES {
+            if bytes.len() > MAX_DESCRIPTION_INPUT_BYTES {
                 return Err(AppError::DescriptionTooLarge {
                     input: input.to_owned(),
-                    limit: MAX_REVIEW_DESCRIPTION_BYTES,
+                    limit: MAX_DESCRIPTION_INPUT_BYTES,
                 });
             }
             let text =
                 String::from_utf8(bytes).map_err(|_| AppError::DescriptionEncoding { input: input.to_owned() })?;
-            let trimmed = text.trim_end();
-            (!trimmed.is_empty()).then(|| trimmed.to_owned())
+            normalize_description(&text)
         }
         None => None,
     };

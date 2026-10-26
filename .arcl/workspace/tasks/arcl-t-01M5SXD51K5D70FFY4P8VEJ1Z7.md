@@ -12,11 +12,11 @@ evidence = "just check passes. CLI tests cover review init and patch with --titl
 Let the caller give a changeset a title and description, so an agent can pass pull-request context from `gh pr view` without Mire knowing about GitHub.
 
 Acceptance criteria:
-- [x] `mire patch` and `mire review init` accept `--title <TEXT>` and `--description-file <PATH|->`.
+- [x] `mire review init` accepts `--title <TEXT>` and `--description-file <PATH|->`. `mire patch` accepts `--title <TEXT>` and `--description-file <PATH>`; it rejects `-` because the TUI needs standard input, so callers use process substitution.
 - [x] Review files store them as optional fields, and older files without them still load.
 - [x] The TUI header and the browser overview show the title, and the description is viewable.
 - [x] `mire context` includes both, within its byte limits.
 
 Verification:
-- `gh pr view 1 --json title,body` piped into the flags shows the title in the TUI.
+- `gh pr view 1 --json title,body` passed to the flags shows the title in the TUI.
 - `just check` passes.

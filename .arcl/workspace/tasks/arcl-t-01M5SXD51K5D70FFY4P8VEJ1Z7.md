@@ -6,7 +6,7 @@ status = "completed"
 priority = "normal"
 position = 5
 blocked-by = ["arcl-t-01M5SXD513CRP041YBEYB7CWXF"]
-evidence = "just check passes. CLI tests cover review init and patch with --title/--description-file (file and stdin), context manifest fields within --max-bytes, blank descriptions, and rejected titles and descriptions. Core tests cover round trips, older files and bounds. TUI snapshots cover the header title and the i dialog; PR 1's real title and body opened through mire patch show both. The browser shows the title and a Description dialog (Playwright screenshots)."
+evidence = "just check passes. CLI tests cover review init with --title/--description-file (file and stdin), patch with --title/--description-file (file only; stdin is rejected), context manifest fields within --max-bytes, blank descriptions, and rejected titles and descriptions. Core tests cover round trips, older files and bounds. TUI snapshots cover the header title and the i dialog; PR 1's real title and body opened through mire patch show both. The browser shows the title and a Description dialog (Playwright screenshots)."
 +++
 
 Let the caller give a changeset a title and description, so an agent can pass pull-request context from `gh pr view` without Mire knowing about GitHub.

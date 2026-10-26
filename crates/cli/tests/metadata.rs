@@ -173,7 +173,7 @@ fn invalid_title_and_description_are_rejected_before_writing() {
 }
 
 #[test]
-fn patch_accepts_title_and_description_but_not_two_stdin_inputs() {
+fn patch_accepts_a_description_file_but_not_standard_input() {
     let fixture = Fixture::new();
     fs::write(fixture.path("body.md"), DESCRIPTION).unwrap();
     let output = fixture.mire(
@@ -191,9 +191,16 @@ fn patch_accepts_title_and_description_but_not_two_stdin_inputs() {
     );
     assert_success(&output);
 
-    let output = fixture.mire(&["patch", "-", "--description-file", "-"], PATCH);
-    assert_eq!(output.status.code(), Some(3));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot both come from standard input"));
+    for input in ["-", "change.patch"] {
+        let output = fixture.mire(&["patch", input, "--description-file", "-"], PATCH);
+        assert_eq!(output.status.code(), Some(3), "input {input}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("cannot read the description from standard input"),
+            "{stderr}"
+        );
+        assert!(stderr.contains("process substitution"), "{stderr}");
+    }
 }
 
 fn json(output: &Output) -> Value {

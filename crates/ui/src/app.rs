@@ -1112,7 +1112,7 @@ impl<'a> App<'a> {
             }
             Action::Quit => self.should_quit = true,
             Action::ToggleHelp => self.help_visible = !self.help_visible,
-            Action::ToggleDescription => {
+            Action::ShowDescription => {
                 self.description_visible = true;
                 self.description_scroll = 0;
             }

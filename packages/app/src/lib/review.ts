@@ -158,6 +158,11 @@ export function reviewDescription(review: Pick<ReviewOverview, 'description'> | 
 	return description && description.trim() ? description : null;
 }
 
+/** Reports whether a review has a caller-supplied title or a description to show. */
+export function hasReviewMetadata(review: Pick<ReviewOverview, 'title' | 'description'> | null): boolean {
+	return Boolean(review?.title?.trim()) || reviewDescription(review) !== null;
+}
+
 /** Combines durable review readiness with browser-local file progress. */
 export function completionSummary(review: ReviewOverview, viewedFileIds: string[]): CompletionSummary {
 	const viewed = new Set(viewedFileIds);

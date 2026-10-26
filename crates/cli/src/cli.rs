@@ -172,7 +172,8 @@ pub struct PatchArgs {
     #[arg(long, value_name = "TEXT")]
     pub title: Option<String>,
     /// File holding a description of the changeset, such as a pull request
-    /// body, or - for standard input.
+    /// body. Standard input is not accepted; use process substitution, such
+    /// as <(gh pr view --json body --jq .body).
     #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath)]
     pub description_file: Option<OsString>,
 }

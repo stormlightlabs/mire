@@ -10,6 +10,7 @@
 		completionSummary,
 		defaultFindingFilters,
 		filterFindings,
+		hasReviewMetadata,
 		reviewDescription,
 		reviewTitle
 	} from '$lib/review';
@@ -53,6 +54,7 @@
 	const visibleFindings = $derived(review ? filterFindings(review.findings, filters) : []);
 	const title = $derived(reviewTitle(review));
 	const description = $derived(reviewDescription(review));
+	const hasMetadata = $derived(hasReviewMetadata(review));
 	const themeLabel = $derived(theme === 'dark' ? 'Use light mode' : 'Use dark mode');
 
 	$effect(() => {
@@ -402,7 +404,7 @@
 					<span class="i-lucide-list-checks icon" aria-hidden="true"></span>Findings
 				</button>
 			{/if}
-			{#if review && description}
+			{#if review && hasMetadata}
 				<button class="topbar-button" aria-haspopup="dialog" onclick={() => (descriptionOpen = true)}>
 					<span class="i-lucide-file-text icon" aria-hidden="true"></span>Description
 				</button>
@@ -543,7 +545,7 @@
 			</section>
 		</Overlay>
 	{/if}
-	{#if review && description}
+	{#if review && hasMetadata}
 		<Overlay
 			open={descriptionOpen}
 			labelledBy="description-heading"
@@ -552,7 +554,11 @@
 			<section class="dialog-content">
 				<h1 id="description-heading" class="description-heading">{title}</h1>
 				<p class="description-label">Description</p>
-				<div class="description-body">{description}</div>
+				{#if description}
+					<div class="description-body">{description}</div>
+				{:else}
+					<p class="description-empty">No description.</p>
+				{/if}
 				<button class="close" onclick={() => (descriptionOpen = false)}>Close</button>
 			</section>
 		</Overlay>

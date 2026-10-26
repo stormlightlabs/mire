@@ -80,7 +80,9 @@ enum AppError {
     WatchRequiresTerminal,
     #[error("watch mode cannot read a patch from standard input")]
     WatchStdin,
-    #[error("the patch and the description cannot both come from standard input")]
+    #[error(
+        "mire patch cannot read the description from standard input; pass a file or process substitution, such as --description-file <(gh pr view --json body --jq .body)"
+    )]
     DescriptionStdin,
     #[error("cannot read description from {input:?}: {source}")]
     DescriptionIo { input: OsString, source: io::Error },
@@ -213,7 +215,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
             if watch && input == "-" {
                 return Err(AppError::WatchStdin);
             }
-            if input == "-" && description_file.as_deref() == Some(OsStr::new("-")) {
+            if description_file.as_deref() == Some(OsStr::new("-")) {
                 return Err(AppError::DescriptionStdin);
             }
             let metadata = load_metadata(title, description_file.as_deref())?;

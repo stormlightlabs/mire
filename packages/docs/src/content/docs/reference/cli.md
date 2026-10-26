@@ -46,7 +46,7 @@ mire watch [--staged] [REVISION]... [--language LANGUAGE] [-- PATH]...
 
 ```text
 mire patch PATH|- [--format json] [--language LANGUAGE] [--watch]
-           [--title TEXT] [--description-file PATH|-]
+           [--title TEXT] [--description-file PATH]
 ```
 
 `-` reads a patch from standard input and produces JSON. `--watch` works only
@@ -54,10 +54,12 @@ with a file-backed patch in an interactive terminal.
 
 `--title` and `--description-file` give the changeset a title and description,
 such as a pull request's, which the TUI shows. The title is one line of at most
-1 KiB. The description is plain text of at most 64 KiB, read from a file or
-from standard input with `-`; trailing whitespace is trimmed, and a blank
-description counts as none. The patch and the description cannot both come
-from standard input. Structured output leaves both out.
+1 KiB. The description is plain text of at most 64 KiB, read from a file;
+trailing whitespace is trimmed, and a blank description counts as none.
+Standard input is not accepted, because the TUI needs it to be a terminal. Use
+process substitution instead, such as
+`--description-file <(gh pr view --json body --jq .body)`. Structured output
+leaves both out.
 
 A patch series in mbox form, as `git format-patch --stdout` and
 `gh pr diff --patch` print it, is read as one net diff: commit headers and

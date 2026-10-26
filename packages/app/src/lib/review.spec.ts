@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { completionSummary, reviewDescription, reviewTitle, type ReviewOverview } from './review';
+import { completionSummary, hasReviewMetadata, reviewDescription, reviewTitle, type ReviewOverview } from './review';
 
 function review(): ReviewOverview {
 	return {
@@ -54,5 +54,12 @@ describe('review metadata', () => {
 		expect(reviewDescription(review())).toBeNull();
 		expect(reviewDescription({ description: '\n  \n' })).toBeNull();
 		expect(reviewDescription({ description: 'First\n\n<b>raw</b>' })).toBe('First\n\n<b>raw</b>');
+	});
+
+	it('has metadata with a title, a description or both', () => {
+		expect(hasReviewMetadata(null)).toBe(false);
+		expect(hasReviewMetadata({ title: '  ', description: '\n' })).toBe(false);
+		expect(hasReviewMetadata({ title: 'Add caching', description: null })).toBe(true);
+		expect(hasReviewMetadata({ title: null, description: 'Body' })).toBe(true);
 	});
 });

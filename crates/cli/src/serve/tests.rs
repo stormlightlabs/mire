@@ -197,14 +197,25 @@ async fn unexpected_hosts_are_rejected_before_authentication() {
         Some("evil.example"),
     ] {
         for path in ["/api/v1/review", "/"] {
-            let mut builder = Request::builder().uri(path).header(AUTHORIZATION, "Bearer secret");
-            if let Some(host) = host {
-                builder = builder.header(HOST, host);
+            // Without a valid secret, an API request that passed the host
+            // check would fail authentication with 401 instead.
+            for authorization in [None, Some("Bearer wrong")] {
+                let mut builder = Request::builder().uri(path);
+                if let Some(host) = host {
+                    builder = builder.header(HOST, host);
+                }
+                if let Some(value) = authorization {
+                    builder = builder.header(AUTHORIZATION, value);
+                }
+                let (status, problem) =
+                    send_json(Fixture::new().state(), builder.body(Body::empty()).expect("request")).await;
+                assert_eq!(
+                    status,
+                    StatusCode::BAD_REQUEST,
+                    "{path} with host {host:?} and {authorization:?}"
+                );
+                assert_eq!(problem["code"], "unexpected_host");
             }
-            let (status, problem) =
-                send_json(Fixture::new().state(), builder.body(Body::empty()).expect("request")).await;
-            assert_eq!(status, StatusCode::BAD_REQUEST, "{path} with host {host:?}");
-            assert_eq!(problem["code"], "unexpected_host");
         }
     }
 }
@@ -645,4 +656,60 @@ async fn the_event_stream_delivers_invalidations_after_a_write() {
     assert_eq!(event["kind"], "review_invalidated");
     assert_eq!(event["revision"], 3);
     assert_eq!(event["watch"], "unavailable");
+}
+
+#[test]
+fn the_watcher_announces_every_new_revision_it_learns() {
+    let fixture = Fixture::new();
+    let state = fixture.state();
+    let mut events = state.events.subscribe();
+    let mut announced = Some(2);
+
+    // A refresh that found nothing to do can still return a revision that
+    // another process wrote since the last announcement.
+    announce_revision(&state, &mut announced, 3, false);
+    let event = events.try_recv().expect("an event for the unannounced write");
+    assert_eq!(
+        (event.kind, event.revision),
+        (ServerEventKind::ReviewInvalidated, Some(3))
+    );
+    assert_eq!(announced, Some(3));
+
+    announce_revision(&state, &mut announced, 3, false);
+    assert!(events.try_recv().is_err(), "a known revision is not announced again");
+
+    announce_revision(&state, &mut announced, 4, true);
+    let event = events.try_recv().expect("an event for the refresh");
+    assert_eq!((event.kind, event.revision), (ServerEventKind::Refresh, Some(4)));
+    assert_eq!(announced, Some(4));
+}
+
+#[tokio::test]
+async fn the_watcher_announces_a_write_made_before_it_started() {
+    let fixture = Fixture::with_note();
+    let state = fixture.state();
+    let mut events = state.events.subscribe();
+    let (shutdown, shutdown_receiver) = watch::channel(false);
+
+    // The review is at revision 2, but the server read revision 1 before it
+    // printed its URL, so the watcher must report the write it never saw.
+    let watcher = start_watcher(state, 1, shutdown_receiver);
+    let received = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match events.recv().await {
+                Ok(event) if event.kind == ServerEventKind::WatchStatus => {}
+                other => break other,
+            }
+        }
+    })
+    .await;
+    // Stop the watcher before any assertion, so a failure cannot leave its
+    // blocking loop holding the runtime open.
+    shutdown.send(true).expect("the watcher is listening");
+    watcher.await.expect("the watcher stops");
+    let event = received.expect("an event arrives").expect("the channel stays open");
+    assert_eq!(
+        (event.kind, event.revision),
+        (ServerEventKind::ReviewInvalidated, Some(2))
+    );
 }

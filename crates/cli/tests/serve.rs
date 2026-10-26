@@ -13,11 +13,18 @@ static TEST_ID: AtomicU64 = AtomicU64::new(0);
 /// A Git repository with an uncommitted change, a review bound to it, and a
 /// running `mire serve` process that stops when the fixture drops.
 struct Server {
-    directory: PathBuf,
+    cleanup: Cleanup,
     root: PathBuf,
-    child: Child,
     address: String,
     secret: String,
+}
+
+/// Owns the fixture's temporary directory and server process from the moment
+/// each exists, so a panic anywhere in setup still stops the process and
+/// removes the directory.
+struct Cleanup {
+    directory: PathBuf,
+    child: Option<Child>,
 }
 
 struct HttpResponse {
@@ -31,13 +38,17 @@ impl Server {
         let directory = std::env::temp_dir().join(format!("mire-serve-e2e-{}-{id}", std::process::id()));
         let root = directory.join("repository");
         let review = directory.join("review.json");
+        let mut cleanup = Cleanup { directory, child: None };
         fs::create_dir_all(&root).unwrap();
         git(&root, &["init", "--quiet"]);
         git(&root, &["config", "user.name", "Mire Tests"]);
         git(&root, &["config", "user.email", "mire@example.invalid"]);
         fs::write(root.join("file.txt"), b"old\n").unwrap();
         git(&root, &["add", "file.txt"]);
-        git(&root, &["commit", "--quiet", "-m", "base"]);
+        git(
+            &root,
+            &["-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "base"],
+        );
         fs::write(root.join("file.txt"), b"new\n").unwrap();
         let init = Command::new(binary())
             .args(["review", "init"])
@@ -47,14 +58,16 @@ impl Server {
             .unwrap();
         assert!(init.status.success(), "{}", String::from_utf8_lossy(&init.stderr));
 
-        let mut child = Command::new(binary())
-            .arg("serve")
-            .arg(&review)
-            .current_dir(&root)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .unwrap();
+        let child = cleanup.child.insert(
+            Command::new(binary())
+                .arg("serve")
+                .arg(&review)
+                .current_dir(&root)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
         let mut line = String::new();
         BufReader::new(child.stdout.take().unwrap())
             .read_line(&mut line)
@@ -66,7 +79,12 @@ impl Server {
         let (address, secret) = url
             .split_once("/#")
             .expect("the URL carries the secret in its fragment");
-        Self { directory, root, child, address: address.to_owned(), secret: secret.to_owned() }
+        let (address, secret) = (address.to_owned(), secret.to_owned());
+        Self { cleanup, root, address, secret }
+    }
+
+    fn directory(&self) -> &Path {
+        &self.cleanup.directory
     }
 
     fn connect(&self) -> TcpStream {
@@ -132,10 +150,12 @@ impl Server {
     }
 }
 
-impl Drop for Server {
+impl Drop for Cleanup {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if let Some(child) = &mut self.child {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
         let _ = fs::remove_dir_all(&self.directory);
     }
 }
@@ -231,7 +251,7 @@ fn an_external_review_write_streams_a_review_invalidated_event() {
 
     let added = Command::new(binary())
         .args(["note", "add"])
-        .arg(server.directory.join("review.json"))
+        .arg(server.directory().join("review.json"))
         .args([
             "--revision",
             "2",

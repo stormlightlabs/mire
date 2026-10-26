@@ -241,7 +241,7 @@ struct ServerEvent {
     watch: WatchStatus,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum ServerEventKind {
     ReviewInvalidated,
@@ -383,11 +383,11 @@ pub async fn run(arguments: ServeArgs) -> Result<(), ServeError> {
     let secret = session_secret().map_err(ServeError::Bind)?;
     let session_url = format!("{origin}/#{secret}");
     let (events, _) = broadcast::channel(64);
-    let initial_watch_status = if read_review(&review_path)
-        .map_err(ServeError::Review)?
-        .source_binding()
-        .is_some()
-    {
+    // Read the starting revision before the URL is printed, so the watcher
+    // compares any later write against it.
+    let initial_review = read_review(&review_path).map_err(ServeError::Review)?;
+    let initial_revision = initial_review.revision().get();
+    let initial_watch_status = if initial_review.source_binding().is_some() {
         WatchStatus::Watching
     } else {
         WatchStatus::Unavailable
@@ -402,7 +402,7 @@ pub async fn run(arguments: ServeArgs) -> Result<(), ServeError> {
         watch_status: Arc::new(Mutex::new(initial_watch_status)),
     };
     let (shutdown, shutdown_receiver) = watch::channel(false);
-    let watcher = start_watcher(state.clone(), shutdown_receiver);
+    let watcher = start_watcher(state.clone(), initial_revision, shutdown_receiver);
 
     println!("Mire review server: {session_url}");
     if arguments.open {
@@ -457,11 +457,11 @@ async fn shutdown_signal() {
     eprintln!("Shutting down Mire review server…");
 }
 
-fn start_watcher(state: AppState, shutdown: watch::Receiver<bool>) -> JoinHandle<()> {
-    tokio::task::spawn_blocking(move || watch_review(state, shutdown))
+fn start_watcher(state: AppState, initial_revision: u64, shutdown: watch::Receiver<bool>) -> JoinHandle<()> {
+    tokio::task::spawn_blocking(move || watch_review(state, initial_revision, shutdown))
 }
 
-fn watch_review(state: AppState, shutdown: watch::Receiver<bool>) {
+fn watch_review(state: AppState, initial_revision: u64, shutdown: watch::Receiver<bool>) {
     let review_parent = watched_file_parent(&state.review_path);
     let mut review_watcher = match WatchSet::new(&review_parent, false) {
         Ok(watcher) => watcher,
@@ -489,9 +489,10 @@ fn watch_review(state: AppState, shutdown: watch::Receiver<bool>) {
         },
     );
     let mut source_retry = Instant::now() + Duration::from_secs(2);
-    let mut revision = read_review(&state.review_path)
-        .ok()
-        .map(|review| review.revision().get());
+    let mut revision = Some(initial_revision);
+    // The review file is checked once after the watchers exist, which catches
+    // a write that landed before they could report it.
+    let mut first_pass = true;
 
     while !*shutdown.borrow() {
         if source_watcher.is_none() && Instant::now() >= source_retry {
@@ -511,7 +512,7 @@ fn watch_review(state: AppState, shutdown: watch::Receiver<bool>) {
                 }
             }
         }
-        let review_due = review_watcher.reload_due();
+        let review_due = review_watcher.reload_due() | std::mem::take(&mut first_pass);
         if let Some(error) = review_watcher.take_error() {
             tracing::warn!(error = %error, "Mire review-file watcher failed");
             set_watch_status(&state, WatchStatus::Degraded);
@@ -527,8 +528,7 @@ fn watch_review(state: AppState, shutdown: watch::Receiver<bool>) {
         if review_due {
             match read_review(&state.review_path) {
                 Ok(review) if revision != Some(review.revision().get()) => {
-                    revision = Some(review.revision().get());
-                    publish(&state, ServerEventKind::ReviewInvalidated, revision);
+                    announce_revision(&state, &mut revision, review.revision().get(), false);
                 }
                 Ok(_) => {
                     if !source_degraded {
@@ -547,10 +547,12 @@ fn watch_review(state: AppState, shutdown: watch::Receiver<bool>) {
         if source_due {
             match refresh_review(&state.review_path) {
                 Ok(result) => {
-                    revision = Some(result.review().revision().get());
-                    if result.changed() {
-                        publish(&state, ServerEventKind::Refresh, revision);
-                    }
+                    announce_revision(
+                        &state,
+                        &mut revision,
+                        result.review().revision().get(),
+                        result.changed(),
+                    );
                     if source_watcher.is_some() {
                         source_degraded = false;
                         set_watch_status(&state, WatchStatus::Watching);
@@ -565,6 +567,22 @@ fn watch_review(state: AppState, shutdown: watch::Receiver<bool>) {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// Records `current` as the announced revision and publishes it when it is new.
+/// A refresh that changed the review publishes `Refresh`; any other new
+/// revision, such as a write that landed while a refresh found nothing to do,
+/// publishes `ReviewInvalidated`.
+fn announce_revision(state: &AppState, announced: &mut Option<u64>, current: u64, refreshed: bool) {
+    let kind = if refreshed {
+        ServerEventKind::Refresh
+    } else if *announced != Some(current) {
+        ServerEventKind::ReviewInvalidated
+    } else {
+        return;
+    };
+    *announced = Some(current);
+    publish(state, kind, Some(current));
 }
 
 fn create_source_watcher(state: &AppState) -> Result<Option<WatchSet>, crate::watch::WatchError> {

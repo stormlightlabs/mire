@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { completionSummary, type ReviewOverview } from './review';
+import { completionSummary, hasReviewMetadata, reviewDescription, reviewTitle, type ReviewOverview } from './review';
 
 function review(): ReviewOverview {
 	return {
 		reviewIdentity: 'review',
 		revision: 1,
 		source: 'Git comparison',
+		title: null,
+		description: null,
 		files: [
 			{
 				id: 'first',
@@ -37,5 +39,27 @@ describe('completionSummary', () => {
 		const summary = completionSummary(review(), ['first']);
 
 		expect(summary).toEqual({ ready: false, unviewedFiles: 1, openFindings: 1, unsafeAnchors: 0 });
+	});
+});
+
+describe('review metadata', () => {
+	it('falls back to the default heading without a title', () => {
+		expect(reviewTitle(null)).toBe('Local review');
+		expect(reviewTitle(review())).toBe('Local review');
+		expect(reviewTitle({ title: '   ' })).toBe('Local review');
+		expect(reviewTitle({ title: ' Add caching ' })).toBe('Add caching');
+	});
+
+	it('keeps the description text as written', () => {
+		expect(reviewDescription(review())).toBeNull();
+		expect(reviewDescription({ description: '\n  \n' })).toBeNull();
+		expect(reviewDescription({ description: 'First\n\n<b>raw</b>' })).toBe('First\n\n<b>raw</b>');
+	});
+
+	it('has metadata with a title, a description or both', () => {
+		expect(hasReviewMetadata(null)).toBe(false);
+		expect(hasReviewMetadata({ title: '  ', description: '\n' })).toBe(false);
+		expect(hasReviewMetadata({ title: 'Add caching', description: null })).toBe(true);
+		expect(hasReviewMetadata({ title: null, description: 'Body' })).toBe(true);
 	});
 });

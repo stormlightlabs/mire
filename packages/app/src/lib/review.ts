@@ -110,6 +110,10 @@ export type ReviewOverview = {
 	reviewIdentity: string;
 	revision: number;
 	source: string;
+	/** Caller-supplied one-line title, such as a pull request title. */
+	title: string | null;
+	/** Caller-supplied plain-text description. Render it as text, never as HTML. */
+	description: string | null;
 	files: FileSummary[];
 	findings: FindingSummary[];
 	totals: {
@@ -138,6 +142,26 @@ export type CompletionSummary = {
 	openFindings: number;
 	unsafeAnchors: number;
 };
+
+/** Fallback heading for a review without a caller-supplied title. */
+export const DEFAULT_REVIEW_TITLE = 'Local review';
+
+/** Returns the heading for a review: its title, or the default when the title is missing or blank. */
+export function reviewTitle(review: Pick<ReviewOverview, 'title'> | null): string {
+	const title = review?.title?.trim();
+	return title ? title : DEFAULT_REVIEW_TITLE;
+}
+
+/** Returns the review description, or `null` when it is missing or only whitespace. */
+export function reviewDescription(review: Pick<ReviewOverview, 'description'> | null): string | null {
+	const description = review?.description;
+	return description && description.trim() ? description : null;
+}
+
+/** Reports whether a review has a caller-supplied title or a description to show. */
+export function hasReviewMetadata(review: Pick<ReviewOverview, 'title' | 'description'> | null): boolean {
+	return Boolean(review?.title?.trim()) || reviewDescription(review) !== null;
+}
 
 /** Combines durable review readiness with browser-local file progress. */
 export function completionSummary(review: ReviewOverview, viewedFileIds: string[]): CompletionSummary {

@@ -11,7 +11,7 @@ use serde_json::json;
 use thiserror::Error;
 
 /// Protocol schema emitted by non-interactive review commands.
-pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 2 };
+pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 3 };
 
 type Result<T> = std::result::Result<T, ProtocolError>;
 
@@ -73,6 +73,10 @@ impl ProtocolError {
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum ContextPayload<'a> {
     Manifest {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<&'a str>,
         files: Vec<FileManifest<'a>>,
         notes: Vec<NoteSummary<'a>>,
     },
@@ -350,6 +354,8 @@ impl Write for BoundedBuffer {
 pub fn context_json(review: &Review, selection: ContextSelection<'_>, limit: Option<usize>) -> Result<Vec<u8>> {
     let payload = match selection {
         ContextSelection::Manifest => ContextPayload::Manifest {
+            title: review.title(),
+            description: review.description(),
             files: review.changeset().files().iter().map(FileManifest::from).collect(),
             notes: review.notes().iter().map(NoteSummary::from).collect(),
         },

@@ -14,6 +14,7 @@ pub enum Focus {
 pub enum Action {
     Quit,
     ToggleHelp,
+    ShowDescription,
     ToggleFocus,
     ToggleSidebar,
     MoveDown,
@@ -64,6 +65,12 @@ struct Binding {
 const BINDINGS: &[Binding] = &[
     Binding { action: Action::Quit, description: "quit", keys: &[KeyPattern::Char('q')], labels: "q" },
     Binding { action: Action::ToggleHelp, description: "toggle help", keys: &[KeyPattern::Char('?')], labels: "?" },
+    Binding {
+        action: Action::ShowDescription,
+        description: "show title and description",
+        keys: &[KeyPattern::Char('i')],
+        labels: "i",
+    },
     Binding {
         action: Action::ToggleFocus,
         description: "switch sidebar/review focus",

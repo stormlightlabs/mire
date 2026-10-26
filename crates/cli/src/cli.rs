@@ -168,6 +168,14 @@ pub struct PatchArgs {
     /// Reload the interactive review when the patch file changes.
     #[arg(long)]
     pub watch: bool,
+    /// Title to show with the changeset, such as a pull request title.
+    #[arg(long, value_name = "TEXT")]
+    pub title: Option<String>,
+    /// File holding a description of the changeset, such as a pull request
+    /// body. Standard input is not accepted; use process substitution, such
+    /// as <(gh pr view --json body --jq .body).
+    #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath)]
+    pub description_file: Option<OsString>,
 }
 
 #[derive(Args, Debug)]
@@ -371,6 +379,13 @@ pub struct ReviewInitArgs {
     /// Git revision or revision range to compare.
     #[arg(value_name = "REVISION")]
     pub revisions: Vec<OsString>,
+    /// Title to show with the changeset, such as a pull request title.
+    #[arg(long, value_name = "TEXT")]
+    pub title: Option<String>,
+    /// File holding a description of the changeset, such as a pull request
+    /// body, or - for standard input.
+    #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath)]
+    pub description_file: Option<OsString>,
     /// Repository-relative paths, supplied after --.
     #[arg(last = true, value_name = "PATH", value_hint = ValueHint::AnyPath)]
     pub paths: Vec<OsString>,

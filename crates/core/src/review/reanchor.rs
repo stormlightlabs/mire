@@ -31,6 +31,8 @@ pub fn reanchor_review(review: &Review, changeset: Changeset) -> Result<Review> 
     }
     let mut refreshed = Review::new(review.next_revision()?, changeset, notes, review.events.clone())?;
     refreshed.source_binding = review.source_binding.clone();
+    refreshed.title = review.title.clone();
+    refreshed.description = review.description.clone();
     refreshed.extensions = review.extensions.clone();
     refreshed.validate()?;
     Ok(refreshed)

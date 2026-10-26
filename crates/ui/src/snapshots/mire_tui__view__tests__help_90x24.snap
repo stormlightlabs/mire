@@ -6,6 +6,7 @@ expression: "snapshot(app, 90, 24)"
  Files         1/2 │ Navigation and layout
 ▌ M file.txt       │ q            quit
   M image.bin      │ ?            toggle help
+                   │ i            show title and description
                    │ Tab          switch sidebar/review focus
                    │ b            toggle sidebar
                    │ j / Down     scroll or select next file
@@ -24,5 +25,4 @@ expression: "snapshot(app, 90, 24)"
                    │ n            next search match
                    │ N            previous search match
                    │ +            show more context
-                   │ -            show less context
  help  ? / Esc close  q quit

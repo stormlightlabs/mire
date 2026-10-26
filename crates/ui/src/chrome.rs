@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use mire_core::{FileContent, FileDiff, FileStatus, LineKind};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -12,6 +12,7 @@ use crate::navigation::{Focus, help_entries};
 use crate::stream::ReviewStream;
 use crate::theme::Theme;
 
+const TITLE_MIN_WIDTH: usize = 16;
 const EDITOR_FOOTER: &[(&str, &str)] = &[
     ("Enter", "newline"),
     ("Ctrl-Enter", "save"),
@@ -26,6 +27,12 @@ const FILE_PICKER_FOOTER: &[(&str, &str)] = &[
     ("↑↓", "select"),
     ("Enter", "jump"),
     ("Esc", "close"),
+];
+const DESCRIPTION_FOOTER: &[(&str, &str)] = &[
+    ("j/k", "scroll"),
+    ("PgUp/PgDn", "page"),
+    ("i / Esc", "close"),
+    ("q", "quit"),
 ];
 const RANGE_FOOTER: &[(&str, &str)] = &[("j/k", "extend"), ("c", "note"), ("v / Esc", "cancel")];
 const HELP_FOOTER: &[(&str, &str)] = &[("? / Esc", "close"), ("q", "quit")];
@@ -124,6 +131,9 @@ pub fn render_title(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Th
             theme,
         );
     }
+    if let Some(title) = app.title() {
+        insert_changeset_title(&mut spans, title, usize::from(area.width), theme);
+    }
     frame.render_widget(Paragraph::new(Line::from(spans)).style(theme.title), area);
 }
 
@@ -154,6 +164,7 @@ fn footer_context(mode: InteractionMode) -> (&'static str, &'static [(&'static s
         InteractionMode::Filter => ("filter", FILTER_FOOTER),
         InteractionMode::Search => ("search", SEARCH_FOOTER),
         InteractionMode::FilePicker => ("file jump", FILE_PICKER_FOOTER),
+        InteractionMode::Description => ("description", DESCRIPTION_FOOTER),
         InteractionMode::RangeSelection => ("range", RANGE_FOOTER),
         InteractionMode::Help => ("help", HELP_FOOTER),
         InteractionMode::Review => ("", REVIEW_FOOTER),
@@ -262,6 +273,20 @@ pub fn truncate_text(value: &str, width: usize) -> String {
     }
     result.push('…');
     result
+}
+
+/// Places the changeset title after the application name, using the width the
+/// other segments leave free, but never more than half the bar or less than a
+/// short prefix.
+fn insert_changeset_title(spans: &mut Vec<Span<'static>>, title: &str, width: usize, theme: &Theme) {
+    let separator = Span::styled(" │ ", theme.divider);
+    let free = width.saturating_sub(spans_width(spans).saturating_add(separator.width()));
+    let budget = free.clamp((width / 4).min(TITLE_MIN_WIDTH), width / 2);
+    if budget == 0 {
+        return;
+    }
+    let title = Span::styled(truncate_text(title, budget), theme.title.add_modifier(Modifier::BOLD));
+    spans.splice(1..1, [separator, title]);
 }
 
 fn push_title_segment(spans: &mut Vec<Span<'static>>, value: String, style: Style, theme: &Theme) {

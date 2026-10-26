@@ -97,6 +97,32 @@ impl Server {
         HttpResponse { status, body }
     }
 
+    /// Opens the event stream and reads past its response headers, which
+    /// arrive once the server has subscribed this client. Returns the stream
+    /// and any event text that arrived with the headers.
+    fn events(&self) -> (TcpStream, String) {
+        let mut events = self.connect();
+        events
+            .write_all(
+                format!(
+                    "GET /api/v1/events HTTP/1.1\r\nHost: {}\r\nAuthorization: {}\r\n\r\n",
+                    self.address,
+                    self.authorization()
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+        let mut headers = String::new();
+        read_until(&mut events, &mut headers, |text| text.contains("\r\n\r\n"));
+        assert!(headers.starts_with("HTTP/1.1 200"), "{headers}");
+        assert!(
+            headers.to_ascii_lowercase().contains("content-type: text/event-stream"),
+            "{headers}"
+        );
+        let (_, body) = headers.split_once("\r\n\r\n").unwrap();
+        (events, body.to_owned())
+    }
+
     fn authorization(&self) -> String {
         format!("Bearer {}", self.secret)
     }
@@ -166,21 +192,7 @@ fn a_source_change_refreshes_the_review_and_streams_an_event() {
     let authorization = server.authorization();
     let origin = server.origin();
 
-    let mut events = server.connect();
-    events
-        .write_all(
-            format!("GET /api/v1/events HTTP/1.1\r\nHost: {host}\r\nAuthorization: {authorization}\r\n\r\n").as_bytes(),
-        )
-        .unwrap();
-    let mut received = String::new();
-    read_until(&mut events, &mut received, |text| text.contains("\r\n\r\n"));
-    assert!(received.starts_with("HTTP/1.1 200"), "{received}");
-    assert!(
-        received
-            .to_ascii_lowercase()
-            .contains("content-type: text/event-stream"),
-        "{received}"
-    );
+    let (mut events, mut received) = server.events();
 
     fs::write(server.root.join("file.txt"), b"newer\n").unwrap();
     let response = server.request(
@@ -204,6 +216,57 @@ fn a_source_change_refreshes_the_review_and_streams_an_event() {
     let overview: serde_json::Value = serde_json::from_str(&response.body).unwrap();
     assert_eq!(overview["revision"], 2);
     assert_eq!(overview["changes"]["additions"], 1);
+}
+
+#[test]
+fn an_external_review_write_streams_a_review_invalidated_event() {
+    let server = Server::start();
+    let (mut events, mut received) = server.events();
+
+    // A refresh event from the watcher shows its loop is running with a known
+    // revision, so the next review-file write is compared against revision 2.
+    fs::write(server.root.join("file.txt"), b"newer\n").unwrap();
+    read_until(&mut events, &mut received, |text| text.contains("\"kind\":\"refresh\""));
+    assert!(received.contains("\"revision\":2"), "{received}");
+
+    let added = Command::new(binary())
+        .args(["note", "add"])
+        .arg(server.directory.join("review.json"))
+        .args([
+            "--revision",
+            "2",
+            "--file",
+            "file.txt",
+            "--new-line",
+            "1",
+            "--author",
+            "review-agent",
+            "--provenance",
+            "agent",
+            "--producer",
+            "test-agent",
+            "--severity",
+            "low",
+            "--kind",
+            "comment",
+            "--body",
+            "Written by another process.",
+        ])
+        .current_dir(&server.root)
+        .output()
+        .unwrap();
+    assert!(added.status.success(), "{}", String::from_utf8_lossy(&added.stderr));
+
+    read_until(&mut events, &mut received, |text| {
+        text.contains("\"kind\":\"review_invalidated\"")
+    });
+    let event = received
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .map(|data| serde_json::from_str::<serde_json::Value>(data).unwrap())
+        .find(|event| event["kind"] == "review_invalidated")
+        .unwrap();
+    assert_eq!(event["revision"], 3, "{received}");
 }
 
 /// Reads from `stream` into `text` until `done` holds, failing after ten seconds.

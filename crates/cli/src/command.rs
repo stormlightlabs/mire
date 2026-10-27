@@ -15,14 +15,16 @@ use mire_tui::ThemeFamily;
 use thiserror::Error;
 
 use crate::git::{self, DiffRequest, GitError, ShowRequest};
+use crate::history::{self, keep_missing_copies};
 use crate::live_session::{self, LiveSession, LiveSessionError};
 use crate::output_file::{OutputFileError, write_output_atomic};
 use crate::protocol::{
-    ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, check_schema_major, context_json,
-    import_error_json, import_result_json, notes_json, notes_markdown, protocol_error_json, review_status_json,
-    review_status_text, revision_conflict_json, viewed_cleared_json, viewed_rejection_json, viewed_result_json,
+    ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, check_schema_major,
+    checkpoint_rejection_json, context_json, file_checkpoint_json, file_history_json, import_error_json,
+    import_result_json, notes_json, notes_markdown, protocol_error_json, review_status_json, review_status_text,
+    revision_conflict_json, viewed_cleared_json, viewed_rejection_json, viewed_result_json,
 };
-use crate::refresh::{RefreshError, refresh_review as refresh_review_file};
+use crate::refresh::{RefreshError, refresh_review as refresh_review_file, reload_review};
 use crate::review_file::{
     DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, update_review_viewed,
     write_review_atomic_if_revision,
@@ -314,6 +316,7 @@ fn initialize_review(arguments: ReviewInitArgs) -> Result<(), AppError> {
     .and_then(|review| review.with_source_binding(source_binding))
     .and_then(|review| review.with_metadata(title, description))
     .map_err(AppError::InitializeReview)?;
+    let review = keep_missing_copies(review).map_err(AppError::Git)?;
     create_review_atomic(Path::new(&destination), &review).map_err(AppError::CreateReviewFile)?;
 
     let stdout = io::stdout();
@@ -439,15 +442,11 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
                 if !source_due {
                     return mire_tui::WatchUpdate::Loaded(latest);
                 }
-                let Some(binding) = latest.source_binding() else {
+                if latest.source_binding().is_none() {
                     source_watcher = None;
                     return mire_tui::WatchUpdate::Loaded(latest);
-                };
-                let changeset = match git::load_bound_diff(binding) {
-                    Ok(changeset) => changeset,
-                    Err(error) => return mire_tui::WatchUpdate::Failed(error.to_string()),
-                };
-                let refreshed = match latest.reanchor(changeset) {
+                }
+                let refreshed = match reload_review(&latest) {
                     Ok(review) => review,
                     Err(error) => return mire_tui::WatchUpdate::Failed(error.to_string()),
                 };
@@ -750,6 +749,7 @@ fn import_notes(review_path: &OsStr, input: &OsStr, expected_revision: u64) -> R
 
 fn execute_file(command: FileCommand) -> Result<(), AppError> {
     let (review_path, file, reader, mark) = match command {
+        FileCommand::History(arguments) => return file_history(arguments),
         FileCommand::Viewed(FileViewedArgs { review, file, fingerprint, revision, reader }) => {
             (review, Some(file), reader, Some((fingerprint, revision)))
         }
@@ -769,6 +769,44 @@ fn execute_file(command: FileCommand) -> Result<(), AppError> {
     let updated = viewed_update(result)?;
     let status = if mark.is_some() { "viewed" } else { "unviewed" };
     write_bytes(&viewed_result_json(&updated, &reader, &path, status).map_err(AppError::Protocol)?)
+}
+
+fn file_history(arguments: FileHistoryArgs) -> Result<(), AppError> {
+    let FileHistoryArgs { review, file, revision } = arguments;
+    let review = read_review(Path::new(&review)).map_err(AppError::ReviewFile)?;
+    let path = BytePath::new(file.as_encoded_bytes())
+        .map_err(|error| checkpoint_rejection("invalid_path", &error.to_string()))?;
+    let Some(revision) = revision else {
+        let held = history::held_blobs(&review, &history::history_objects(&review)).ok();
+        let entries = review
+            .file_history(&path)
+            .into_iter()
+            .map(|(checkpoint, row)| (checkpoint, row, history::is_available(&review, row, held.as_ref())))
+            .collect::<Vec<_>>();
+        return write_bytes(&file_history_json(&review, &path, &entries).map_err(AppError::Protocol)?);
+    };
+    let revision =
+        ReviewRevision::new(revision).map_err(|error| checkpoint_rejection("invalid_revision", &error.to_string()))?;
+    let (checkpoint_revision, row, rebuilt) = history::file_at_revision(&review, &path, revision)
+        .map_err(|failure| checkpoint_rejection(failure.code(), failure.message()))?;
+    write_bytes(
+        &file_checkpoint_json(
+            &review,
+            &path,
+            revision,
+            checkpoint_revision,
+            row,
+            rebuilt.source.as_str(),
+            &rebuilt.content,
+        )
+        .map_err(AppError::Protocol)?,
+    )
+}
+
+fn checkpoint_rejection(code: &str, error: &str) -> AppError {
+    checkpoint_rejection_json(code, error)
+        .map(|report| AppError::MutationRejected { report })
+        .unwrap_or_else(AppError::Protocol)
 }
 
 fn clear_all_viewed(review_path: &Path, reader: &str) -> Result<(), AppError> {

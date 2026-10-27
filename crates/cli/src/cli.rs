@@ -28,7 +28,7 @@ pub enum Command {
     Diff(DiffArgs),
     /// Review a patch file or standard input.
     Patch(PatchArgs),
-    /// Mark a changed file viewed or not viewed.
+    /// Mark a changed file viewed, or read how it changed between revisions.
     File(FileArgs),
     /// Add or update one review finding.
     Note(NoteArgs),
@@ -56,6 +56,8 @@ pub enum FileCommand {
     Viewed(FileViewedArgs),
     /// Clear the reader's viewed mark for a file.
     Unviewed(FileUnviewedArgs),
+    /// List the revisions that changed a file, or print its hunks at one.
+    History(FileHistoryArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -242,6 +244,19 @@ pub struct FileUnviewedArgs {
     /// Reader the mark belongs to; defaults to USER, then USERNAME.
     #[arg(long, value_name = "ID")]
     pub reader: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct FileHistoryArgs {
+    /// JSON review file to read.
+    #[arg(value_hint = ValueHint::FilePath)]
+    pub review: OsString,
+    /// Path of the file, in the changeset or not.
+    #[arg(long, value_hint = ValueHint::AnyPath)]
+    pub file: OsString,
+    /// Print the file's hunks at this review revision instead of the list.
+    #[arg(long)]
+    pub revision: Option<u64>,
 }
 
 #[derive(Args, Debug)]

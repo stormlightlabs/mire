@@ -124,6 +124,25 @@ pub fn encode_hex(bytes: &[u8]) -> String {
     encoded
 }
 
+/// Reads the one `path` query parameter as hex path bytes.
+pub fn query_path(uri: &Uri) -> Option<BytePath> {
+    let mut values = uri.query()?.split('&').filter_map(|pair| pair.strip_prefix("path="));
+    let value = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    BytePath::new(decode_hex(value)?).ok()
+}
+
+/// The `invalid_path` problem for a `path` query parameter.
+pub fn invalid_path() -> Response<Body> {
+    problem(
+        StatusCode::BAD_REQUEST,
+        "invalid_path",
+        "The path query parameter must be a file path's bytes as hex.",
+    )
+}
+
 async fn change_viewed(state: AppState, path: BytePath, change: ViewedChange) -> Response<Body> {
     let review_path = state.review_path.clone();
     let reader = local_author().id().to_owned();
@@ -168,15 +187,6 @@ fn apply_change(
     })
 }
 
-fn query_path(uri: &Uri) -> Option<BytePath> {
-    let mut values = uri.query()?.split('&').filter_map(|pair| pair.strip_prefix("path="));
-    let value = values.next()?;
-    if values.next().is_some() {
-        return None;
-    }
-    BytePath::new(decode_hex(value)?).ok()
-}
-
 fn decode_hex(value: &str) -> Option<Vec<u8>> {
     let (pairs, rest) = value.as_bytes().as_chunks::<2>();
     if pairs.is_empty() || !rest.is_empty() {
@@ -196,14 +206,6 @@ fn hex_value(digit: u8) -> Option<u8> {
         b'a'..=b'f' => Some(digit - b'a' + 10),
         _ => None,
     }
-}
-
-fn invalid_path() -> Response<Body> {
-    problem(
-        StatusCode::BAD_REQUEST,
-        "invalid_path",
-        "The path query parameter must be a file path's bytes as hex.",
-    )
 }
 
 fn invalid_mark() -> Response<Body> {

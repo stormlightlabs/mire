@@ -11,17 +11,20 @@ describes code. A review stores findings and decisions about that code.
 
 ## Core objects
 
-Mire's durable review model has six primary objects:
+Mire's durable review model has seven primary objects:
 
 ```text
 Changeset    source, files, hunks, fingerprint
-Anchor       side, path, line range, hunk and content fingerprints
+Anchor       side, path, line range, hunk and content fingerprints,
+             optional checkpoint
 ReviewNote   anchor, author, severity, kind, status, body, provenance
 Walkthrough  optional overview, ordered steps, author, provenance
 ViewedMark   path, file fingerprint, revision
+Checkpoint   revision, one row per changed file: path, fingerprint,
+             blob ids, patch copy
 Review       captured changeset, source binding, optional title and
              description, revision, notes, note events, optional walkthrough,
-             viewed marks by reader
+             viewed marks by reader, checkpoints, pinned rows
 ```
 
 The TUI and CLI use the same validation rules. Tools can therefore add findings
@@ -37,6 +40,10 @@ locations.
 An anchor contains the original location and evidence tying the note to the
 reviewed content. This avoids treating a mutable line number as permanent
 identity.
+
+A note's anchor also names its `checkpoint`: the revision and path of the
+checkpoint row that held the file when the note was added. Re-anchoring does
+not change it. Notes written before checkpoints have none.
 
 ## Re-anchoring
 
@@ -106,6 +113,29 @@ was, so every file it writes can be read back.
 [Walkthrough design](/docs/concepts/walkthrough-design/) records where these
 fields come from.
 
+## Checkpoints
+
+A checkpoint records a revision where at least one file's fingerprint changed.
+The first revision records every file. Each refresh that changes a file records
+a row for it: its path, its new fingerprint (`null` once the file leaves the
+changeset), and the Git blob ids of its two sides. To find a file at revision
+R, Mire takes the latest checkpoint at or before R that names the path.
+
+When the bound repository does not hold a changed file's blobs, as for an
+unstaged worktree file, the row keeps a patch copy of the file's hunks. A copy
+may take 1 MiB and all history 16 MiB. Past that budget Mire folds the oldest
+checkpoint into the next one to make room; rows a note points at move to
+`pinned` with their copies, and pinned rows no note points at are removed.
+Mire never writes objects into the repository.
+
+`mire file history` lists the revisions that changed a file and prints its
+hunks at one of them, from the current capture, from Git blobs, or from the
+copy. When none of these holds them, it reports `checkpoint_unavailable`.
+
+A review file written before checkpoints loads with a baseline checkpoint at
+its current revision. A file that an older release refreshed loads with a
+`gap` checkpoint holding the files that changed in between.
+
 ## Viewed marks
 
 A review's `viewed` map holds, for each reader id, the files that reader marked
@@ -116,8 +146,10 @@ changes the file, the mark keeps the older fingerprint and the file shows as
 changed since viewed. A mark for a path that left the changeset stays until the
 reader clears it.
 
-A mark must name the current revision and the file's current fingerprint, or
-Mire rejects it with `viewed_mismatch`. Marks do not advance the revision.
+A mark names the fingerprint the reader saw and the revision they read it at.
+Mire looks up the file at that revision in the checkpoints and rejects the mark
+with `viewed_mismatch` when the fingerprints differ or history does not reach
+that revision. Marks do not advance the revision.
 Every other write takes the marks from the file on disk, read under the review
 file lock, so a refresh or a note write prepared before a mark landed keeps
 that mark. A reader may hold 10,000 marks, and a review may hold marks for 100
@@ -145,8 +177,8 @@ Mire bounds review size, note count, imported payloads, and expanded context.
 A review's title is one line of at most 1 KiB with no control characters.
 Its description is at most 65,536 characters, GitHub's limit for a pull
 request body, and carries no control characters other than newline and tab.
-Review files written before titles, walkthroughs or viewed marks existed still
-load.
+Review files written before titles, walkthroughs, viewed marks or checkpoints
+existed still load.
 
 A location batch and a source refresh validate the entire transaction before
 Mire atomically replaces the review file.

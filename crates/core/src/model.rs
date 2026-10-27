@@ -286,6 +286,51 @@ pub struct FileSide {
     pub mode: Option<FileMode>,
     /// Fingerprint of the complete side content, if captured.
     pub fingerprint: Option<Fingerprint>,
+    /// Git blob id of the side, when the patch's `index` line carried a
+    /// full-length id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object: Option<ObjectId>,
+}
+
+/// A full-length Git object id: 40 lowercase hex digits (SHA-1) or 64
+/// (SHA-256).
+///
+/// Abbreviated ids can match more than one object, so they are not accepted.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct ObjectId(String);
+
+impl ObjectId {
+    /// Accepts a full-length id of lowercase hex digits. Returns `None` for
+    /// any other length, for other characters, and for the all-zero id Git
+    /// prints for a missing side.
+    pub fn new(id: &str) -> Option<Self> {
+        let full_length = matches!(id.len(), 40 | 64);
+        let hex = id.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
+        let null = id.bytes().all(|byte| byte == b'0');
+        (full_length && hex && !null).then(|| Self(id.to_owned()))
+    }
+
+    /// Returns the id as hex text.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ObjectId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for ObjectId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let encoded = String::deserialize(deserializer)?;
+        Self::new(&encoded).ok_or_else(|| de::Error::custom("object id must be 40 or 64 lowercase hex digits"))
+    }
 }
 
 /// A Git-compatible six-digit file mode retained as an octal JSON string.
@@ -920,6 +965,7 @@ mod tests {
             path: BytePath::new(path.as_bytes()).expect("test path is valid"),
             mode: Some(mode),
             fingerprint: None,
+            object: None,
         }
     }
 

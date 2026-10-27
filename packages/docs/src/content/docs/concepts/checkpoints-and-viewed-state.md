@@ -10,9 +10,11 @@ A review lives through several refreshes. Each refresh replaces the captured
 changeset, so today the review file cannot say what a file looked like at an
 earlier revision, what changed since a reader last looked at it, or what code a
 stale note was written on. This page fixes the schema that answers those
-questions. Viewed marks are implemented as described below, except that Mire
-checks a mark only against the current revision until checkpoints exist.
-Checkpoints are a design: their fields are not written yet.
+questions. Viewed marks, checkpoints, patch copies, compaction, note
+checkpoints, `mire file history` and the history API routes are implemented as
+described below. The browser and the terminal do not show history yet: the
+checkpoint strip, the revision cells and the stale-note view are still to
+come.
 
 Two records answer them:
 
@@ -69,11 +71,12 @@ checkpoint.
 
 ### Blob ids
 
-The parser reads the `index` line today only for its mode and drops the blob
-ids. It will keep them in a new `FileSide` field, `object`, as a hex string.
-Mire asks Git for `--full-index`, so Git sources carry full ids. A patch file
-may carry abbreviated ids, which can match more than one object, so the parser
-keeps only ids of 40 hex characters (SHA-1) or 64 (SHA-256) and drops the rest.
+The parser reads the blob ids from the `index` line and keeps them in the
+`FileSide` field `object`, as a hex string. Mire asks Git for `--full-index`,
+so Git sources carry full ids. A patch file may carry abbreviated ids, which
+can match more than one object, so the parser keeps only ids of 40 hex
+characters (SHA-1) or 64 (SHA-256) and drops the rest. It also drops the
+all-zero id Git prints for a missing side.
 
 The existing `FileSide.fingerprint` does not fit. It is a `Fingerprint`, a
 fixed 32-byte value, while a SHA-1 id is 20 bytes. It is also documented as a
@@ -83,19 +86,25 @@ fingerprint of the side's content, not a Git object id.
 
 To show a file as it was at a checkpoint, Mire tries these in order:
 
-1. Read both blobs from the bound repository with `git cat-file`. This works
+1. Use the current capture, when the file's fingerprint has not changed since
+   the checkpoint.
+2. Read both blobs from the bound repository with `git cat-file`. This works
    for revision comparisons and for staged changes, whose blobs Git has
-   written.
-2. Use the patch copy. A copy holds only the file's hunks, so Mire can show the
+   written. A side without an id, as for an added or a deleted file, is read
+   as empty.
+3. Use the patch copy. A copy holds only the file's hunks, so Mire can show the
    changed lines and their context, but not the whole file.
-3. Report the checkpoint as unavailable. The UI still shows that the file
+4. Report the checkpoint as unavailable. The UI still shows that the file
    changed at that revision.
 
 An unstaged worktree comparison is the case Git cannot cover. Git hashes the
 worktree side to print the `index` line but does not store the blob, and the
 next edit replaces the file on disk. When a refresh records a checkpoint, Mire
-checks the new blob with `git cat-file -e`. If Git does not hold it, Mire keeps
-a patch copy. Mire never writes objects into the reviewed repository.
+checks the file's blobs with `git cat-file --batch-check`, the batch form of
+`git cat-file -e`. If Git does not hold one, or a side has no id, Mire keeps a
+patch copy. Binary files get no copy. If the check itself fails, the refresh
+fails and the review file stays as it was. Mire never writes objects into the
+reviewed repository.
 
 A blob can also disappear later, when Git prunes an unreachable object. Mire
 then falls back to the copy if it kept one, and otherwise reports the
@@ -111,9 +120,13 @@ limits count serialized JSON bytes:
 | One patch copy                              | 1 MiB  |
 | History: `checkpoints` and `pinned` (below) | 16 MiB |
 
-A file whose hunks exceed 1 MiB gets `"copy": "skipped"`. At the budget, a
-refresh still records its checkpoint, with `"copy": "skipped"` on every row,
-and compaction frees space for later copies.
+A file whose hunks exceed 1 MiB gets `"copy": "skipped"`. A refresh always
+records its checkpoint, and keeps copies, in path order, while they fit the
+budget. When a copy does not fit, Mire folds the oldest checkpoint to make room
+and tries the remaining copies again, until each fits or no older checkpoint
+is left. A copy that still does not fit gets `"copy": "skipped"`. Folds that
+made room for no copy are undone, and a copy the refresh kept is never dropped
+to fit another.
 
 A review file may not pass 128 MiB (`DEFAULT_MAX_REVIEW_FILE_BYTES`), and that
 write check is what bounds the changeset, notes and walkthrough today. The
@@ -122,24 +135,29 @@ stores bytes as JSON number arrays, so a captured changeset serializes to about
 five times its patch size. The note and walkthrough limits (10,000 notes of up
 to 1 MiB each, and 1 MiB per walkthrough text) are per item and do not add up to
 a total. History takes a fixed 16 MiB, which leaves 112 MiB for the rest,
-viewed marks included. When
-a write would pass 128 MiB, Mire compacts history until the file fits or only
-pinned rows remain, and fails the write only then.
+viewed marks included. When a write would pass 128 MiB, Mire compacts history
+until the file fits or only the newest checkpoint's rows, without copies, and
+the pinned rows remain, and fails the write only then.
 
 ### Compaction
 
 Compaction folds the oldest checkpoint into the next one. Each row of the
 oldest checkpoint whose path the next checkpoint does not name moves forward
 with `"carried": true`. The oldest checkpoint's copies are dropped, except
-pinned ones. Mire repeats this until history fits the budget.
+pinned ones. The next checkpoint keeps the folded one's meaning: it becomes the
+`baseline` when the folded one was, keeps a folded `gap`, and takes any field
+a newer Mire stored on the folded checkpoint that it does not set itself.
+Mire repeats this until history fits the budget.
 
 A note pins the row its `checkpoint` names. Before a fold, Mire copies the
 pinned rows of the oldest checkpoint, with their copies, into a `pinned` list
 kept under their own revision. The fold then carries those rows forward like
 any other row, so a file that has not changed since a pinned row still has a
-row for the lookup. Pinned copies are never dropped. When pinned
-rows alone fill the budget, refreshes stop keeping new copies, and writes still
-succeed.
+row for the lookup. Pinned copies are never dropped. Each refresh and each
+compaction removes the pinned rows no note's `checkpoint` names any more, as
+when a note was written again on newer code. When the pinned rows alone fill
+the budget, folding cannot bring history under it: refreshes keep no new
+copies and fold nothing, and writes still succeed.
 
 After compaction the lookup above stays correct for any revision from the
 oldest kept checkpoint on: a carried row holds the latest state at or before
@@ -184,9 +202,7 @@ revision it was read at. Mire looks up the file at that revision with the
 checkpoint lookup and rejects the mark with `viewed_mismatch` when the
 fingerprints differ or the revision has no answer. A tab that loaded revision 4
 can then mark the file it showed, even after a refresh, but a tab cannot mark a
-fingerprint the file never had at that revision. Until the review records
-checkpoints, Mire accepts a mark only at the current revision with the file's
-current fingerprint. The stored mark keeps the
+fingerprint the file never had at that revision. The stored mark keeps the
 revision. If the file changed since, the mark holds the older fingerprint and
 the file shows as changed. Mire does not derive the revision from the
 fingerprint, because a file that is reverted has the same fingerprint at more
@@ -224,7 +240,8 @@ stored on the mark.
 
 An anchor gains an optional `checkpoint`: the revision and path of the
 checkpoint row that held the anchor's file when the note was written. Mire sets
-it when a note is added and when an edit moves the note to a new location.
+it when a note is added, and would set it again when an edit moves the note to
+a new location; no edit moves a note today.
 Re-anchoring never changes it: a `moved` note still points at the code it was
 written on, even after a rename.
 
@@ -280,7 +297,11 @@ is rejected with `invalid_path`.
 | `GET /api/v1/events`                        | Sends `viewed` events.                                                 |
 
 `history` lists the revisions that changed the file, newest first, each with
-`available` set when Mire can rebuild its text. Carried rows are left out. The
+`available` set when Mire can rebuild its text. `available` is `null` when the
+Git check failed and only Git could rebuild the text: Mire does not know
+whether the blobs are there. The server checks the blobs once per review
+revision and reuses the result; a failed check is tried again on the next
+request. Carried rows are left out. The
 browser builds the revision cells and the checkpoint strip from it. The
 server's reader is the local author; the browser cannot name another reader.
 

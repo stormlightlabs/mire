@@ -6,6 +6,7 @@ use mire_core::{Review, ReviewError};
 use thiserror::Error;
 
 use crate::git::{self, GitError};
+use crate::history::keep_missing_copies;
 use crate::review_file::{ReviewFileError, read_review, write_review_atomic_if_revision};
 
 const MAX_REFRESH_ATTEMPTS: usize = 8;
@@ -46,6 +47,23 @@ pub enum RefreshError {
     Reanchor(#[from] ReviewError),
 }
 
+/// Repeats a review's bound Git comparison and re-anchors its notes, without
+/// saving.
+///
+/// A new revision records a checkpoint for each file whose fingerprint
+/// changed, and keeps a patch copy for each such file whose blobs the
+/// repository does not hold, such as an unstaged worktree file. An unchanged
+/// capture returns the review as it was.
+pub fn reload_review(review: &Review) -> Result<Review, RefreshError> {
+    let binding = review.source_binding().ok_or(RefreshError::UnavailableSource)?;
+    let changeset = git::load_bound_diff(binding)?;
+    let refreshed = review.reanchor(changeset)?;
+    if refreshed.revision() == review.revision() {
+        return Ok(refreshed);
+    }
+    keep_missing_copies(refreshed).map_err(RefreshError::Git)
+}
+
 /// Repeats a bound Git comparison, re-anchors its notes, and atomically saves it.
 ///
 /// Concurrent edits are retried from the latest durable revision. After repeated
@@ -53,9 +71,7 @@ pub enum RefreshError {
 pub fn refresh_review(path: &Path) -> Result<RefreshResult, RefreshError> {
     for _ in 0..MAX_REFRESH_ATTEMPTS {
         let review = read_review(path)?;
-        let binding = review.source_binding().ok_or(RefreshError::UnavailableSource)?;
-        let changeset = git::load_bound_diff(binding)?;
-        let refreshed = review.reanchor(changeset)?;
+        let refreshed = reload_review(&review)?;
         if refreshed == review {
             return Ok(RefreshResult { review, changed: false });
         }

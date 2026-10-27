@@ -2,10 +2,10 @@ use std::ffi::OsStr;
 use std::io::{self, Write};
 
 use mire_core::{
-    AnchorSide, AnnotationKind, Author, BytePath, Changeset, ChangesetSource, FileContent, FileDiff, Fingerprint, Hunk,
-    LineKind, LineNumber, LineRange, NoteApplyError, NoteEvent, NoteEventKind, NoteImportError, NoteInput,
-    NoteSeverity, NoteStatus, Provenance, ReanchorEvidence, ReanchorOutcome, Review, ReviewNote, SchemaVersion,
-    ViewedMark,
+    AnchorSide, AnnotationKind, Author, BytePath, Changeset, ChangesetSource, Checkpoint, CheckpointRow, FileContent,
+    FileDiff, Fingerprint, Hunk, LineKind, LineNumber, LineRange, NoteApplyError, NoteEvent, NoteEventKind,
+    NoteImportError, NoteInput, NoteSeverity, NoteStatus, Provenance, ReanchorEvidence, ReanchorOutcome, Review,
+    ReviewNote, ReviewRevision, SchemaVersion, ViewedMark,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -681,6 +681,67 @@ pub fn viewed_cleared_json(review: &Review, reader: &str, cleared: usize) -> Res
 /// Serializes a rejected viewed mark change with its failure code, such as
 /// `viewed_mismatch` or `invalid_path`.
 pub fn viewed_rejection_json(code: &str, error: &str) -> Result<Vec<u8>> {
+    rejection_json(vec![json!({ "code": code, "error": error })])
+}
+
+/// Serializes the checkpoints that changed one file, newest first. Each
+/// entry pairs a checkpoint and the file's row with whether Mire can show
+/// the file's hunks there, or `None` when the Git check failed and only Git
+/// could rebuild them.
+pub fn file_history_json(
+    review: &Review, path: &BytePath, entries: &[(&Checkpoint, &CheckpointRow, Option<bool>)],
+) -> Result<Vec<u8>> {
+    let history = entries
+        .iter()
+        .map(|(checkpoint, row, available)| {
+            json!({
+                "revision": checkpoint.revision().get(),
+                "fingerprint": row.fingerprint(),
+                "old_object": row.old_object(),
+                "new_object": row.new_object(),
+                "copy": row.copy().hunks().is_some(),
+                "available": available,
+                "baseline": checkpoint.is_baseline(),
+                "gap": checkpoint.is_gap(),
+            })
+        })
+        .collect::<Vec<_>>();
+    let value = json!({
+        "schema_version": CURRENT_PROTOCOL_SCHEMA_VERSION,
+        "review_revision": review.revision().get(),
+        "path": path,
+        "history": history,
+    });
+    let mut bytes = serde_json::to_vec(&value).map_err(ProtocolError::Serialize)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+/// Serializes one file's hunks at a revision: the checkpoint row the lookup
+/// found, where the hunks came from (`capture`, `git` or `copy`), and the
+/// content.
+pub fn file_checkpoint_json(
+    review: &Review, path: &BytePath, revision: ReviewRevision, checkpoint_revision: ReviewRevision,
+    row: &CheckpointRow, source: &str, content: &FileContent,
+) -> Result<Vec<u8>> {
+    let value = json!({
+        "schema_version": CURRENT_PROTOCOL_SCHEMA_VERSION,
+        "review_revision": review.revision().get(),
+        "path": path,
+        "revision": revision.get(),
+        "checkpoint_revision": checkpoint_revision.get(),
+        "fingerprint": row.fingerprint(),
+        "source": source,
+        "content": content,
+    });
+    let mut bytes = serde_json::to_vec(&value).map_err(ProtocolError::Serialize)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+/// Serializes a failed checkpoint read with its code, `checkpoint_not_found`
+/// or `checkpoint_unavailable`.
+pub fn checkpoint_rejection_json(code: &str, error: &str) -> Result<Vec<u8>> {
     rejection_json(vec![json!({ "code": code, "error": error })])
 }
 

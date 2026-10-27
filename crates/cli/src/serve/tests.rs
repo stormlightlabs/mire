@@ -57,6 +57,7 @@ impl Fixture {
             events: broadcast::channel(16).0,
             watch_status: Arc::new(Mutex::new(WatchStatus::Unavailable)),
             announced_viewed: Arc::new(Mutex::new(ViewedMap::new())),
+            held_blobs: Arc::default(),
         };
         Self { directory, state }
     }
@@ -521,6 +522,21 @@ async fn exports_and_the_openapi_document_are_typed_downloads() {
     ] {
         assert!(paths.contains_key(path), "the OpenAPI document lists {path}");
     }
+    let history = &paths["/api/v1/history"]["get"]["responses"]["200"]["content"]["application/json"]["schema"];
+    assert_eq!(history["$ref"], "#/components/schemas/HistoryResult");
+    let variants = document["components"]["schemas"]["HistoryResult"]["oneOf"]
+        .as_array()
+        .expect("the history body is one of two shapes")
+        .iter()
+        .map(|variant| variant["$ref"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        variants,
+        [
+            "#/components/schemas/HistoryResponse",
+            "#/components/schemas/CheckpointResponse"
+        ]
+    );
 }
 
 #[tokio::test]
@@ -819,8 +835,9 @@ async fn viewed_marks_reject_bad_paths_and_changed_fingerprints() {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         assert_eq!(problem["code"], "invalid_viewed_mark", "{body}");
     }
+    // Revision 3 is after the current revision, so the lookup has no answer.
     for body in [
-        format!(r#"{{"fingerprint":"{id}","revision":1}}"#),
+        format!(r#"{{"fingerprint":"{id}","revision":3}}"#),
         format!(r#"{{"fingerprint":"{}","revision":2}}"#, "0".repeat(64)),
     ] {
         let (status, problem) = send_json(fixture.state(), api_request(Method::PUT, &route, Some(&body))).await;
@@ -925,4 +942,203 @@ async fn a_viewed_route_and_the_watcher_announce_one_change_once() {
         events.try_recv().is_err(),
         "the route does not announce the clear again"
     );
+}
+
+/// Refreshes the one-note fixture to a changed `file.rs` at revision 3, and
+/// returns the file's raw path.
+async fn refreshed_note_fixture() -> (Fixture, String) {
+    let fixture = Fixture::with_note();
+    let (_, raw) = first_file(&fixture).await;
+    let review = read_review(fixture.path()).expect("review");
+    let changed = parse_patch(
+        b"--- a/file.rs\n+++ b/file.rs\n@@ -1 +1 @@\n-let old = 1;\n+let new = 3;\n",
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .expect("changeset");
+    let refreshed = review.reanchor(changed).expect("reanchored");
+    crate::write_review_atomic(fixture.path(), &refreshed).expect("review is written");
+    (fixture, raw)
+}
+
+#[test]
+fn held_blobs_are_checked_once_per_revision_and_a_failure_is_not_kept() {
+    let cache = history::HeldBlobCache::default();
+    let id = mire_core::ObjectId::new(&"a".repeat(40)).expect("object id");
+    let objects = BTreeSet::from([id.clone()]);
+    let revision = |value| ReviewRevision::new(value).expect("positive revision");
+    let checks = std::cell::Cell::new(0);
+    let check = |objects: &BTreeSet<mire_core::ObjectId>| {
+        checks.set(checks.get() + 1);
+        Some(objects.clone())
+    };
+
+    let first = cache.held_with(revision(2), objects.clone(), check);
+    assert_eq!(first.as_deref(), Some(&objects));
+    let again = cache.held_with(revision(2), objects.clone(), check);
+    assert_eq!(again.as_deref(), Some(&objects));
+    assert_eq!(checks.get(), 1, "the same revision reuses the result");
+    cache.held_with(revision(3), objects.clone(), check);
+    assert_eq!(checks.get(), 2, "a new revision checks again");
+
+    // A failed check reports unknown and leaves nothing to reuse.
+    assert!(cache.held_with(revision(4), objects.clone(), |_| None).is_none());
+    cache.held_with(revision(4), objects.clone(), check);
+    assert_eq!(checks.get(), 3, "a failed check is tried again");
+}
+
+#[tokio::test]
+async fn the_history_route_lists_a_files_checkpoints_and_reads_one() {
+    let (fixture, raw) = refreshed_note_fixture().await;
+    let (_, overview) = send_json(fixture.state(), api_request(Method::GET, "/api/v1/review", None)).await;
+    let history = overview["files"][0]["history"].as_array().expect("history");
+    let revisions = history
+        .iter()
+        .map(|entry| entry["revision"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(revisions, [serde_json::json!(3), serde_json::json!(1)]);
+    // A patch review has no repository and kept no copy: only the current
+    // capture can be shown.
+    assert_eq!(history[0]["available"], true);
+    assert_eq!(history[1]["available"], false);
+    assert_eq!(history[1]["copy"], false);
+
+    let (status, listed) = send_json(
+        fixture.state(),
+        api_request(Method::GET, &format!("/api/v1/history?path={raw}"), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["history"], overview["files"][0]["history"]);
+    assert_eq!(listed["path"]["raw"], raw);
+
+    let (status, current) = send_json(
+        fixture.state(),
+        api_request(Method::GET, &format!("/api/v1/history?path={raw}&revision=3"), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    assert_eq!(current["source"], "capture");
+    assert_eq!(current["checkpointRevision"], 3);
+    assert_eq!(
+        current["content"]["hunks"][0]["lines"][1]["content"]["display"],
+        "let new = 3;"
+    );
+
+    let (status, problem) = send_json(
+        fixture.state(),
+        api_request(Method::GET, &format!("/api/v1/history?path={raw}&revision=2"), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(problem["code"], "checkpoint_unavailable");
+    for route in [
+        format!("/api/v1/history?path={raw}&revision=4"),
+        format!("/api/v1/history?path={}&revision=1", viewed::encode_hex(b"other.rs")),
+    ] {
+        let (status, problem) = send_json(fixture.state(), api_request(Method::GET, &route, None)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{route}");
+        assert_eq!(problem["code"], "checkpoint_not_found", "{route}");
+    }
+    for route in [
+        format!("/api/v1/history?path={raw}&revision=0"),
+        format!("/api/v1/history?path={raw}&revision=x"),
+        format!("/api/v1/history?path={raw}&revision=1&revision=2"),
+    ] {
+        let (status, problem) = send_json(fixture.state(), api_request(Method::GET, &route, None)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{route}");
+        assert_eq!(problem["code"], "invalid_revision", "{route}");
+    }
+    let (status, problem) = send_json(
+        fixture.state(),
+        api_request(Method::GET, "/api/v1/history?path=zz", None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(problem["code"], "invalid_path");
+}
+
+#[tokio::test]
+async fn a_finding_names_and_serves_the_checkpoint_it_was_written_on() {
+    let fixture = Fixture::with_note();
+    let note_id = fixture.note_id();
+    let (_, finding) = send_json(
+        fixture.state(),
+        api_request(Method::GET, &format!("/api/v1/findings/{note_id}"), None),
+    )
+    .await;
+    assert_eq!(finding["checkpoint"]["revision"], 1);
+    assert_eq!(finding["checkpoint"]["path"]["display"], "file.rs");
+
+    let route = format!("/api/v1/findings/{note_id}/checkpoint");
+    let (status, written_on) = send_json(fixture.state(), api_request(Method::GET, &route, None)).await;
+    assert_eq!(status, StatusCode::OK, "{written_on}");
+    assert_eq!(written_on["source"], "capture");
+    assert_eq!(written_on["checkpointRevision"], 1);
+
+    // After the file changes, a patch review keeps no copy of the old text.
+    let review = read_review(fixture.path()).expect("review");
+    let changed = parse_patch(
+        b"--- a/file.rs\n+++ b/file.rs\n@@ -1 +1 @@\n-let old = 1;\n+let new = 3;\n",
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .expect("changeset");
+    let refreshed = review.reanchor(changed).expect("reanchored");
+    crate::write_review_atomic(fixture.path(), &refreshed).expect("review is written");
+    let (status, problem) = send_json(fixture.state(), api_request(Method::GET, &route, None)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(problem["code"], "checkpoint_unavailable");
+
+    // With a copy kept, the old text comes from the copy.
+    let kept = read_review(fixture.path()).expect("review");
+    let mut json = serde_json::to_value(&kept).expect("json");
+    json["checkpoints"][0]["files"][0]["copy"] = serde_json::json!({
+        "hunks": match review.changeset().files()[0].content() {
+            mire_core::FileContent::Text { hunks } => serde_json::to_value(hunks).expect("hunks"),
+            mire_core::FileContent::Binary => unreachable!(),
+        }
+    });
+    std::fs::write(fixture.path(), serde_json::to_vec(&json).expect("bytes")).expect("review is written");
+    let (status, copied) = send_json(fixture.state(), api_request(Method::GET, &route, None)).await;
+    assert_eq!(status, StatusCode::OK, "{copied}");
+    assert_eq!(copied["source"], "copy");
+    assert_eq!(
+        copied["content"]["hunks"][0]["lines"][1]["content"]["display"],
+        "let new = 2;"
+    );
+
+    let (status, problem) = send_json(
+        fixture.state(),
+        api_request(Method::GET, "/api/v1/findings/missing/checkpoint", None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(problem["code"], "finding_not_found");
+}
+
+#[tokio::test]
+async fn a_viewed_mark_at_an_older_revision_checks_the_file_as_it_was() {
+    let fixture = Fixture::with_note();
+    let (old, raw) = first_file(&fixture).await;
+    let review = read_review(fixture.path()).expect("review");
+    let changed = parse_patch(
+        b"--- a/file.rs\n+++ b/file.rs\n@@ -1 +1 @@\n-let old = 1;\n+let new = 3;\n",
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .expect("changeset");
+    crate::write_review_atomic(fixture.path(), &review.reanchor(changed).expect("reanchored"))
+        .expect("review is written");
+    let (new, _) = first_file(&fixture).await;
+    let route = format!("/api/v1/viewed?path={raw}");
+
+    let body = format!(r#"{{"fingerprint":"{old}","revision":2}}"#);
+    let (status, marked) = send_json(fixture.state(), api_request(Method::PUT, &route, Some(&body))).await;
+    assert_eq!(status, StatusCode::OK, "{marked}");
+    assert_eq!(marked["viewed"]["revision"], 2);
+    let body = format!(r#"{{"fingerprint":"{new}","revision":2}}"#);
+    let (status, problem) = send_json(fixture.state(), api_request(Method::PUT, &route, Some(&body))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(problem["code"], "viewed_mismatch");
 }

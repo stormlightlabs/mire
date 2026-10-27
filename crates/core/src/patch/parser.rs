@@ -3,7 +3,7 @@ use unidiff::PatchSet;
 
 use crate::{
     BytePath, ByteString, Changeset, ChangesetSource, DiffLine, FileContent, FileDiff, FileMode, FileSide, FileStatus,
-    Fingerprint, Hunk, LineKind, LineNumber, MissingNewline,
+    Fingerprint, Hunk, LineKind, LineNumber, MissingNewline, ObjectId,
 };
 
 use super::{PatchError, Result};
@@ -33,6 +33,8 @@ struct FileMetadata {
     diff_new: Option<Vec<u8>>,
     diff_old: Option<Vec<u8>>,
     index_mode: Option<FileMode>,
+    index_new_object: Option<ObjectId>,
+    index_old_object: Option<ObjectId>,
     new_file_mode: Option<FileMode>,
     new_mode: Option<FileMode>,
     new_path: Option<Vec<u8>>,
@@ -78,6 +80,7 @@ impl FileMetadata {
             self.copy_to = Some(parse_git_path(value, offset)?);
         } else if let Some(value) = line.strip_prefix("index ") {
             self.index_mode = parse_index_mode(value, offset)?;
+            (self.index_old_object, self.index_new_object) = parse_index_objects(value);
         } else if let Some(value) = line.strip_prefix("--- ") {
             self.old_path = parse_file_header_path(value, b"a/", offset)?;
         } else if let Some(value) = line.strip_prefix("+++ ") {
@@ -139,8 +142,8 @@ fn parse_file(text: &str, block: FileBlock<'_>) -> Result<FileDiff> {
     let ResolvedFile { status, old_path, new_path } = resolve_paths(&metadata, block.start)?;
     let old_mode = metadata.deleted_mode.or(metadata.old_mode).or(metadata.index_mode);
     let new_mode = metadata.new_file_mode.or(metadata.new_mode).or(metadata.index_mode);
-    let old = make_side(old_path, old_mode, block.start)?;
-    let new = make_side(new_path, new_mode, block.start)?;
+    let old = make_side(old_path, old_mode, metadata.index_old_object, block.start)?;
+    let new = make_side(new_path, new_mode, metadata.index_new_object, block.start)?;
     let content = if metadata.binary { FileContent::Binary } else { FileContent::Text { hunks } };
 
     FileDiff::new(
@@ -528,6 +531,16 @@ fn parse_index_mode(value: &str, offset: usize) -> Result<Option<FileMode>> {
     parse_mode(mode, offset).map(Some)
 }
 
+/// Reads the blob ids of an `index <old>..<new> [mode]` line. Only full-length
+/// ids are kept: an abbreviated id can match more than one object.
+fn parse_index_objects(value: &str) -> (Option<ObjectId>, Option<ObjectId>) {
+    let ids = value.split_once(' ').map_or(value, |(ids, _)| ids);
+    let Some((old, new)) = ids.split_once("..") else {
+        return (None, None);
+    };
+    (ObjectId::new(old), ObjectId::new(new))
+}
+
 fn parse_similarity(value: &str, offset: usize) -> Result<u8> {
     let percentage = value
         .strip_suffix('%')
@@ -541,10 +554,12 @@ fn parse_similarity(value: &str, offset: usize) -> Result<u8> {
     Ok(similarity)
 }
 
-fn make_side(path: Option<Vec<u8>>, mode: Option<FileMode>, offset: usize) -> Result<Option<FileSide>> {
+fn make_side(
+    path: Option<Vec<u8>>, mode: Option<FileMode>, object: Option<ObjectId>, offset: usize,
+) -> Result<Option<FileSide>> {
     path.map(|path| {
         BytePath::new(path)
-            .map(|path| FileSide { path, mode, fingerprint: None })
+            .map(|path| FileSide { path, mode, fingerprint: None, object })
             .map_err(|error| malformed(offset, error.to_string()))
     })
     .transpose()
@@ -749,6 +764,41 @@ mod tests {
         );
         let changeset = parse(patch, source()).unwrap();
         assert_eq!(changeset.files().len(), 2);
+    }
+
+    #[test]
+    fn keeps_only_full_length_blob_ids_from_the_index_line() {
+        let old = "3b18e512dba79e4c8300dd08aeb37f8e728b8dad";
+        let new = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
+        let sha256 = "a".repeat(64);
+        let patch = format!(
+            "diff --git a/full.txt b/full.txt\nindex {old}..{new} 100644\n--- a/full.txt\n+++ b/full.txt\n@@ -1 +1 @@\n-a\n+b\n\
+             diff --git a/short.txt b/short.txt\nindex 3b18e51..e69de29 100644\n--- a/short.txt\n+++ b/short.txt\n@@ -1 +1 @@\n-a\n+b\n\
+             diff --git a/added.txt b/added.txt\nnew file mode 100644\nindex {}..{sha256}\n--- /dev/null\n+++ b/added.txt\n@@ -0,0 +1 @@\n+b\n",
+            "0".repeat(64)
+        );
+        let changeset = parse(&patch, source()).unwrap();
+        let objects = changeset
+            .files()
+            .iter()
+            .map(|file| {
+                (
+                    file.old_side()
+                        .and_then(|side| side.object.as_ref())
+                        .map(ObjectId::as_str),
+                    file.new_side()
+                        .and_then(|side| side.object.as_ref())
+                        .map(ObjectId::as_str),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            objects,
+            [(None, Some(sha256.as_str())), (Some(old), Some(new)), (None, None)]
+        );
+
+        let json = serde_json::to_string(&changeset.files()[2]).unwrap();
+        assert!(!json.contains("\"object\""), "an absent id is not serialized");
     }
 
     fn assert_malformed_reason(patch: &str, expected: &str) {

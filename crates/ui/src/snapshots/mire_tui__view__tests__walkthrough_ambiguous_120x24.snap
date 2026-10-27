@@ -1,0 +1,28 @@
+---
+source: crates/ui/src/view.rs
+expression: "snapshot(open(&refreshed, \"JJJ\", 120, 24), 120, 24)"
+---
+ Mire review │ split │ focus review │ context 3 │ wrap off │ file 3/3 · 15/17 │ 0 open
+ Files                3/3 │ Step 3 of 3 · Document the format
+  A docs/guide.md       +4│ Ambiguous: 1 of 1 location matches more than one place in the diff.
+  M src/lib.rs       +1 -1│ The diff did not move, because this step has no place to show.
+▌ M src/parse/mod.rs +2 -1│ The guide names the `key = value` format the parser reads.
+                          │─────────────────────────────────────────────────────────────────────────────────────────────
+                          │ ▾ docs/guide.md                                                                     added +4
+                          │ ▾ @@ -0,0 +1,4 @@
+                          │                                              │     1 +# Guide
+                          │                                              │     2 +Read key = value lines.
+                          │                                              │     3 +# Guide
+                          │                                              │     4 +Read key = value lines.
+                          │ ▾ src/lib.rs                                                                  modified +1 -1
+                          │ ▾ @@ -1,3 +1,3 @@
+                          │    1  pub mod parse;                         │     1  pub mod parse;
+                          │    2 -pub const PORT: u16 = 80;              │     2 +pub const PORT: u16 = 9090;
+                          │    3  pub const HOST: &str = "localhost";    │     3  pub const HOST: &str = "localhost";
+                          │ ▾ src/parse/mod.rs                                                            modified +2 -1
+                          │ ▾ @@ -1,3 +1,4 @@
+                          │    1  pub fn split(line: &str) -> Option<(&s │     1  pub fn split(line: &str) -> Option<(&s
+                          │    2 >    line.split_once('=')               │     2 >    let (key, value) = line.split_once
+                          │                                              │     3 +    Some((key.trim(), value.trim()))
+                          │    3  }                                      │     4  }
+ walkthrough  J/K steps  j/k move  W / Esc close  ? help  q quit

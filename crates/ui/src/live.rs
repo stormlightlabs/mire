@@ -22,7 +22,9 @@ pub struct PresentationState {
     pub review_revision: Option<u64>,
     /// Whether a local client has started a walkthrough.
     pub walkthrough_active: bool,
-    /// The current one-based finding position and total findings under walkthrough control.
+    /// The walkthrough position and its total: the step number, 0 for the
+    /// overview, and the step count in walkthrough mode, or else the finding
+    /// position and the visible finding count.
     pub walkthrough_progress: Option<(usize, usize)>,
 }
 
@@ -69,13 +71,15 @@ pub enum LiveAction {
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WalkthroughAction {
-    /// Mark the session as controlled by a walkthrough client.
+    /// Mark the session as controlled by a walkthrough client and open
+    /// walkthrough mode on the overview, or, without an authored walkthrough,
+    /// focus the first visible finding.
     Start,
-    /// Move to the next visible finding.
+    /// Move to the next step, or the next visible finding.
     Next,
-    /// Move to the previous visible finding.
+    /// Move to the previous step, or the previous visible finding.
     Previous,
-    /// End the walkthrough.
+    /// End the walkthrough and close walkthrough mode.
     Stop,
 }
 

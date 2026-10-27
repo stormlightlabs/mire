@@ -10,7 +10,7 @@ use std::time::Duration;
 use mire::write_review_atomic;
 use mire_core::{
     AnchorSide, AnnotationKind, Author, BytePath, ChangesetSource, LineNumber, LineRange, NoteInput, NoteSeverity,
-    PatchLimits, Provenance, Review, ReviewRevision, parse_patch,
+    PatchLimits, Provenance, Review, ReviewRevision, StepInput, StepLocation, WalkthroughInput, parse_patch,
 };
 use serde_json::Value;
 
@@ -147,6 +147,37 @@ fn live_session_inspects_and_navigates_an_open_review_without_writing_it() {
 }
 
 #[test]
+fn live_session_walkthrough_steps_through_authored_steps() {
+    let directory = TempDirectory::new();
+    let review_path = directory.0.join("review.json");
+    write_review_atomic(&review_path, &review_with_walkthrough()).unwrap();
+    let mut process = TuiProcess::review(&directory.0, &review_path, false);
+    thread::sleep(Duration::from_secs(1));
+
+    assert!(
+        process.child.try_wait().unwrap().is_none(),
+        "TUI exited before live discovery"
+    );
+    let session = listed_session(&directory.0);
+    let started = session_command(&directory.0, &["walkthrough", "start", &session]);
+    assert_eq!(started["status"], "ok", "{started}");
+    assert_eq!(started["result"]["walkthrough_active"], true);
+    assert_eq!(started["result"]["walkthrough_progress"], serde_json::json!([0, 2]));
+
+    let first = session_command(&directory.0, &["walkthrough", "next", &session]);
+    assert_eq!(first["result"]["walkthrough_progress"], serde_json::json!([1, 2]));
+    let second = session_command(&directory.0, &["walkthrough", "next", &session]);
+    assert_eq!(second["result"]["walkthrough_progress"], serde_json::json!([2, 2]));
+    let previous = session_command(&directory.0, &["walkthrough", "previous", &session]);
+    assert_eq!(previous["result"]["walkthrough_progress"], serde_json::json!([1, 2]));
+
+    let stopped = session_command(&directory.0, &["walkthrough", "stop", &session]);
+    assert_eq!(stopped["result"]["walkthrough_active"], false);
+    assert_eq!(stopped["result"]["walkthrough_progress"], Value::Null);
+    process.finish();
+}
+
+#[test]
 fn live_session_requests_a_watched_reload() {
     let directory = TempDirectory::new();
     let patch_path = directory.0.join("review.patch");
@@ -179,6 +210,33 @@ fn review_with_note() -> Review {
     )
     .unwrap();
     review.apply_notes(vec![input]).unwrap()
+}
+
+fn review_with_walkthrough() -> Review {
+    let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+    let review = Review::new(ReviewRevision::new(1).unwrap(), changeset, Vec::new(), Vec::new()).unwrap();
+    let step = |title: &str| {
+        let location = StepLocation::new(
+            BytePath::new(b"file.rs".to_vec()).unwrap(),
+            AnchorSide::New,
+            LineRange::new(LineNumber::new(1).unwrap(), LineNumber::new(1).unwrap()).unwrap(),
+        );
+        StepInput::new(
+            None,
+            title.to_owned(),
+            format!("{title}."),
+            vec![location],
+            Vec::new(),
+            None,
+        )
+    };
+    let input = WalkthroughInput::new(
+        Some("Rename the binding.".to_owned()),
+        vec![step("Rename"), step("Change the value")],
+        Author::new("agent", None).unwrap(),
+        Provenance::Agent { producer: "test".to_owned() },
+    );
+    review.write_walkthrough(review.revision(), input).unwrap()
 }
 
 fn assert_rejects_invalid_capability(directory: &Path) {

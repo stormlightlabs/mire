@@ -13,6 +13,7 @@ mod syntax;
 mod terminal;
 mod theme;
 mod view;
+mod walkthrough;
 
 use std::io;
 
@@ -29,6 +30,7 @@ pub use notes::{EditorField, EditorTarget, LineSelection, NoteEditor};
 pub use stream::{CollapseState, LayoutMode, ReviewStream, RowKind};
 pub use theme::{ColorMode, ParseThemeFamilyError, Theme, ThemeFamily, ThemeVariant};
 pub use view::render;
+pub use walkthrough::WalkthroughPosition;
 
 /// A filesystem-backed review update produced by the CLI watch boundary.
 #[derive(Debug)]

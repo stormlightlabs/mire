@@ -13,7 +13,7 @@
 # PNG's path.
 set -euo pipefail
 
-SCENARIOS=(unified split narrow help sidebar-hidden collapsed note walkthrough no-color)
+SCENARIOS=(unified split narrow help sidebar-hidden collapsed note walkthrough walkthrough-step walkthrough-narrow session-walkthrough no-color)
 
 usage() {
   echo "usage: scripts/shots.sh [--list | <scenario>...]" >&2
@@ -143,6 +143,32 @@ EOF
   (cd "$fixture" && "$mire" note add review.json --revision 2 --file src/parse.rs --new-line 4 \
     --author reviewer --provenance agent --producer shots --severity note --kind question \
     --body "Should an empty value be accepted?" >/dev/null)
+  (cd "$fixture" && "$mire" walkthrough apply review.json --stdin >/dev/null) <<'EOF'
+{
+  "schema_version": { "major": 1, "minor": 4 },
+  "review_revision": 3,
+  "overview": "Parsed values kept their spaces, so `port = 8080` never matched. This change trims them, reads the port from `MIRE_PORT`, and documents the format.",
+  "author": { "id": "review-agent", "display_name": null },
+  "provenance": { "kind": "agent", "producer": "shots" },
+  "steps": [
+    {
+      "title": "Trim keys and values",
+      "narrative": "`split` now uses `split_once` and trims both sides. A line with an empty key returns `None`, so callers skip it instead of storing an empty name.",
+      "locations": [{ "file": "src/parse.rs", "new_line": 3, "end": 8 }]
+    },
+    {
+      "title": "Read the port from the environment",
+      "narrative": "`default_port` reads `MIRE_PORT` and falls back to 8080 when it is unset or does not parse. Check what a value outside 1-65535 does.",
+      "locations": [{ "file": "src/lib.rs", "new_line": 7, "end": 10 }]
+    },
+    {
+      "title": "Document the format",
+      "narrative": "The new README names the `key = value` format and the function that reads it.",
+      "locations": [{ "file": "README.md", "new_line": 1, "end": 3 }]
+    }
+  ]
+}
+EOF
 }
 
 # Runs one scenario: shot.sh options, the name, the size, then the command.
@@ -158,13 +184,17 @@ capture() {
     sidebar-hidden) run --keys b sidebar-hidden 120 32 "${diff[@]}" ;;
     collapsed) run --keys Enter collapsed 120 32 "${diff[@]}" ;;
     note) run --keys p note 120 32 "${review[@]}" ;;
-    walkthrough)
+    walkthrough) run --keys W walkthrough 120 32 "${review[@]}" ;;
+    walkthrough-step) run --keys J --keys J walkthrough-step 120 32 "${review[@]}" ;;
+    walkthrough-narrow) run --keys J --keys J walkthrough-narrow 60 24 "${review[@]}" ;;
+    session-walkthrough)
       # The live-session command needs a running TUI, so it starts in the
       # background and drives the TUI that replaces the shell.
-      run --wait-for "walkthrough 1/" walkthrough 120 32 bash -c '
+      run --wait-for "walkthrough 1/" session-walkthrough 120 32 bash -c '
         (sleep 2
           session=$("$0" session list | jq -r ".sessions[0].id")
-          "$0" session walkthrough start "$session" >/dev/null) &
+          "$0" session walkthrough start "$session" >/dev/null
+          "$0" session walkthrough next "$session" >/dev/null) &
         exec "$0" review review.json --theme eldritch' "$mire"
       ;;
     no-color) run no-color 120 32 env NO_COLOR=1 "$mire" diff --staged ;;

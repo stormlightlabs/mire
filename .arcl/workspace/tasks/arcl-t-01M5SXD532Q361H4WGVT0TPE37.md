@@ -2,7 +2,7 @@
 id = "arcl-t-01M5SXD532Q361H4WGVT0TPE37"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
 title = "Render walkthroughs in the TUI"
-status = "pending"
+status = "in_progress"
 priority = "high"
 position = 8
 blocked-by = ["arcl-t-01M5SXD52H6Q67PXE4VEY2FFS4"]

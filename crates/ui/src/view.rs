@@ -16,6 +16,7 @@ use crate::chrome::{
 use crate::stream::TextRange;
 use crate::stream::{ReviewStream, RowKey};
 use crate::theme::Theme;
+use crate::walkthrough::render_walkthrough;
 
 #[derive(Clone, Copy)]
 struct SourcePosition {
@@ -63,6 +64,7 @@ pub fn render(frame: &mut Frame<'_>, app: &App<'_>, theme: &Theme) {
             if app.help_visible() {
                 render_help(frame, areas.review, theme);
             } else {
+                render_walkthrough(frame, areas.walkthrough, app, theme);
                 render_stream(frame, areas.review, stream, app, theme);
             }
         }
@@ -755,6 +757,10 @@ new file mode 100644
         let mut app = App::ready(&changeset);
         app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
         insta::assert_snapshot!("help_90x24", snapshot(app, 90, 24));
+
+        let mut tall = App::ready(&changeset);
+        tall.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        insta::assert_snapshot!("help_tall_90x48", snapshot(tall, 90, 48));
     }
 
     #[test]
@@ -980,6 +986,56 @@ new file mode 100644
         let mut app = App::review_with_options(&review, crate::AppOptions::default());
         app.start_walkthrough().unwrap();
         insta::assert_snapshot!("walkthrough_started_120x18", snapshot(app, 120, 18));
+    }
+
+    #[test]
+    fn walkthrough_snapshots_cover_each_mode_state() {
+        use crate::walkthrough::fixtures::{plain_review, refreshed_review, walkthrough_review};
+
+        let review = walkthrough_review();
+        let open = |review, keys: &str, width, height| {
+            let mut app = App::review_with_options(review, crate::AppOptions::default());
+            app.resize(width, height);
+            for key in keys.chars() {
+                app.handle_key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::SHIFT));
+            }
+            app
+        };
+        insta::assert_snapshot!(
+            "walkthrough_overview_120x24",
+            snapshot(open(&review, "W", 120, 24), 120, 24)
+        );
+        insta::assert_snapshot!(
+            "walkthrough_step_120x24",
+            snapshot(open(&review, "JJ", 120, 24), 120, 24)
+        );
+        insta::assert_snapshot!(
+            "walkthrough_step_narrow_40x16",
+            snapshot(open(&review, "JJ", 40, 16), 40, 16)
+        );
+        insta::assert_snapshot!(
+            "walkthrough_overview_narrow_40x16",
+            snapshot(open(&review, "W", 40, 16), 40, 16)
+        );
+
+        let refreshed = refreshed_review();
+        insta::assert_snapshot!(
+            "walkthrough_stale_120x24",
+            snapshot(open(&refreshed, "JJ", 120, 24), 120, 24)
+        );
+        insta::assert_snapshot!(
+            "walkthrough_ambiguous_120x24",
+            snapshot(open(&refreshed, "JJJ", 120, 24), 120, 24)
+        );
+
+        let plain = plain_review();
+        insta::assert_snapshot!("walkthrough_none_100x16", snapshot(open(&plain, "W", 100, 16), 100, 16));
+
+        let mut session = App::review_with_options(&review, crate::AppOptions::default());
+        session.resize(120, 24);
+        session.start_walkthrough().unwrap();
+        session.move_walkthrough(true).unwrap();
+        insta::assert_snapshot!("walkthrough_session_120x24", snapshot(session, 120, 24));
     }
 
     #[test]

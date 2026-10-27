@@ -34,7 +34,13 @@ conversion.
 `previous` move between visible findings. `reload` asks a watched session to run
 its normal reload path; an unwatched session returns `reload_unavailable`.
 Walkthrough actions let another local process mark a session as being driven
-and advance or reverse its finding selection. They never write a review file.
+and move through a walkthrough. In a review with an authored walkthrough,
+`start` opens walkthrough mode on the overview, `next` and `previous` move
+between steps as `J` and `K` do, and `stop` closes the mode. The state's
+`walkthrough_progress` is the step number and the step count, with `0` for the
+overview. Without an authored walkthrough, the actions move through visible
+findings and `walkthrough_progress` is the finding position and count.
+Walkthrough actions never write a review file.
 
 Every command emits one JSON response with `schema_version` `{ "major": 1,
 "minor": 0 }`. Successful responses have `status: "ok"`. Failures have

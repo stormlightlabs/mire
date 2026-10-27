@@ -468,13 +468,13 @@ pub struct SessionFocusArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum SessionWalkthroughCommand {
-    /// Start a walkthrough.
+    /// Start a walkthrough on the overview, or on the first finding without one.
     Start(SessionTarget),
-    /// Advance the walkthrough to the next visible finding.
+    /// Show the next walkthrough step, or the next visible finding.
     Next(SessionTarget),
-    /// Move the walkthrough to the previous visible finding.
+    /// Show the previous walkthrough step, or the previous visible finding.
     Previous(SessionTarget),
-    /// End the walkthrough.
+    /// End the walkthrough and close walkthrough mode.
     Stop(SessionTarget),
 }
 

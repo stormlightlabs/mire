@@ -38,6 +38,9 @@ pub enum Action {
     UnifiedLayout,
     SplitLayout,
     AutomaticLayout,
+    ToggleWalkthrough,
+    NextStep,
+    PreviousStep,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -183,6 +186,24 @@ const BINDINGS: &[Binding] = &[
         description: "automatic layout",
         keys: &[KeyPattern::Char('3')],
         labels: "3",
+    },
+    Binding {
+        action: Action::ToggleWalkthrough,
+        description: "open or close the walkthrough",
+        keys: &[KeyPattern::Char('W')],
+        labels: "W",
+    },
+    Binding {
+        action: Action::NextStep,
+        description: "next walkthrough step",
+        keys: &[KeyPattern::Char('J')],
+        labels: "J",
+    },
+    Binding {
+        action: Action::PreviousStep,
+        description: "previous walkthrough step",
+        keys: &[KeyPattern::Char('K')],
+        labels: "K",
     },
 ];
 

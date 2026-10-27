@@ -1,7 +1,7 @@
 import { test as base } from '@playwright/test';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -17,7 +17,12 @@ export type MireServer = {
 	root: string;
 	/** Reads the review file the server writes. */
 	readReview: () => Promise<{ revision: number; notes: { id: string; status: string; body: string }[] }>;
-	/** Replaces a file in the repository's working tree. */
+	/**
+	 * Replaces a file in the repository's working tree in one step: it writes a
+	 * temporary file outside the tree, then renames it into place. A plain
+	 * `writeFile` truncates first, and a watcher refresh that lands between the
+	 * truncate and the write records the empty file as a revision of its own.
+	 */
 	writeSource: (file: string, content: string) => Promise<void>;
 };
 
@@ -58,7 +63,11 @@ export const test = base.extend<{ mire: MireServer }>({
 				url,
 				root,
 				readReview: async () => JSON.parse(await readFile(review, 'utf8')),
-				writeSource: (file, content) => writeFile(path.join(root, file), content)
+				writeSource: async (file, content) => {
+					const staged = path.join(directory, 'staged-source');
+					await writeFile(staged, content);
+					await rename(staged, path.join(root, file));
+				}
 			});
 		} finally {
 			if (child) await stop(child);

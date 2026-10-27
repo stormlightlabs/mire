@@ -42,8 +42,10 @@ test('reviews a change from load to export', async ({ page, mire }) => {
 	const decided = await mire.readReview();
 	expect(decided.notes.map((note) => note.status)).toEqual(['resolved', 'open']);
 
-	// Mark the open file viewed.
+	// Mark the open file viewed once the reload after the decision has settled.
 	const viewed = diff.getByRole('button', { name: 'Viewed' });
+	await expect(diff).toHaveAttribute('aria-busy', 'false');
+	await expect(viewed).toHaveAttribute('aria-pressed', 'false');
 	await viewed.click();
 	await expect(viewed).toHaveAttribute('aria-pressed', 'true');
 	await expect(files.getByRole('treeitem', { name: /one\.txt/ })).toContainText('viewed');

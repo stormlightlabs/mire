@@ -73,3 +73,60 @@ test('reviews a change from load to export', async ({ page, mire }) => {
 	await expect(header).toContainText('revision 5 · current');
 	expect((await mire.readReview()).revision).toBe(5);
 });
+
+test('opens the changed file when a viewed reload overtakes a slow source reload', async ({ page, mire }) => {
+	await page.goto(mire.url);
+
+	const header = page.getByRole('banner');
+	const files = page.getByRole('tree', { name: 'Changed file tree' });
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await expect(header).toContainText('revision 3');
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+	await expect(diff).toHaveAttribute('aria-busy', 'false');
+
+	// Hold the response to the next overview request, the reload the source edit starts.
+	let hold = false;
+	let held: () => void = () => {};
+	const release = new Promise<void>((resolve) => (held = resolve));
+	let holding: () => void = () => {};
+	const holdingStarted = new Promise<void>((resolve) => (holding = resolve));
+	await page.route('**/api/v1/review', async (route) => {
+		if (!hold) return route.continue();
+		hold = false;
+		const response = await route.fetch();
+		holding();
+		await release;
+		await route.fulfill({ response });
+	});
+	hold = true;
+	await mire.writeSource('one.txt', 'alpha\nBETA\ngamma\ndelta\n');
+	await holdingStarted;
+
+	// Marking the old content viewed reloads the overview, which overtakes the held reload.
+	await diff.getByRole('button', { name: 'Viewed' }).click();
+	await expect(header).toContainText('revision 4');
+	await expect(diff).toContainText('delta');
+	await expect(files.getByRole('treeitem', { name: /one\.txt/ })).toHaveAttribute('aria-selected', 'true');
+	await expect(diff.getByRole('button', { name: 'Changed since viewed' })).toBeVisible();
+
+	// The held response arrives late and changes nothing.
+	held();
+	await expect(diff).toContainText('delta');
+	await expect(header).toContainText('revision 4');
+});
+
+test('empties the diff pane when the last file leaves the review', async ({ page, mire }) => {
+	await page.goto(mire.url);
+
+	const files = page.getByRole('tree', { name: 'Changed file tree' });
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+
+	await mire.writeSource('one.txt', 'alpha\nbeta\ngamma\n');
+	await mire.writeSource('two.txt', 'x\ny\n');
+
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('No changed files');
+	await expect(diff.getByRole('status')).toHaveText(/is no longer in the review\./);
+	await expect(diff.getByRole('button', { name: /Viewed/ })).toHaveCount(0);
+	await expect(files.getByRole('treeitem')).toHaveCount(0);
+});

@@ -39,8 +39,7 @@
 		viewState: FileViewState;
 		viewedError: string | null;
 		onDismissNotice?: () => void;
-		/** Called with the file on screen when the reader clicks Viewed. */
-		onToggleViewed: (shown: FileDetail) => void;
+		onToggleViewed: () => void;
 		onFindingClick: (finding: FindingSummary) => void;
 		onEditFinding: (draft: FindingDraft) => Promise<string | null>;
 		onDecideFinding: (decision: 'resolve' | 'reopen' | 'dismiss' | 'accept-risk') => Promise<string | null>;
@@ -62,10 +61,15 @@
 			<h1>File unavailable</h1>
 			<p>{fileError}</p>
 		</section>
-	{:else if !file}
+	{:else if !file && fileLoading}
 		<section class="message" aria-live="polite">
 			<h1>Loading file</h1>
 			<p>Reading the semantic diff.</p>
+		</section>
+	{:else if !file}
+		<section class="message" aria-live="polite">
+			<h1>No changed files</h1>
+			<p>The review has no file diffs to show.</p>
 		</section>
 	{:else}
 		<header class="diff-heading">
@@ -80,7 +84,7 @@
 				class="viewed-toggle"
 				class:viewed={viewState === 'viewed'}
 				aria-pressed={viewState === 'viewed'}
-				onclick={() => file && onToggleViewed(file)}>
+				onclick={onToggleViewed}>
 				<span class={viewState === 'viewed' ? 'i-lucide-square-check' : 'i-lucide-square'}></span>
 				{viewState === 'changed' ? 'Changed since viewed' : 'Viewed'}
 			</button>

@@ -63,6 +63,8 @@ jobs:
 
       - run: just e2e
 
+      # Traces hold the session secret, which only authorizes the runner's
+      # localhost server and ends with the job.
       - if: failure()
         uses: actions/upload-artifact@v4
         with:

@@ -1017,6 +1017,9 @@ new file mode 100644
             "walkthrough_overview_narrow_40x16",
             snapshot(open(&review, "W", 40, 16), 40, 16)
         );
+        let mut files = open(&review, "W", 120, 24);
+        files.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        insta::assert_snapshot!("walkthrough_sidebar_120x24", snapshot(files, 120, 24));
 
         let refreshed = refreshed_review();
         insta::assert_snapshot!(

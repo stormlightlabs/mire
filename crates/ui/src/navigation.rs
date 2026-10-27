@@ -127,6 +127,24 @@ const BINDINGS: &[Binding] = &[
         labels: "{",
     },
     Binding {
+        action: Action::ToggleWalkthrough,
+        description: "open or close the walkthrough",
+        keys: &[KeyPattern::Char('W')],
+        labels: "W",
+    },
+    Binding {
+        action: Action::NextStep,
+        description: "next walkthrough step",
+        keys: &[KeyPattern::Char('J')],
+        labels: "J",
+    },
+    Binding {
+        action: Action::PreviousStep,
+        description: "previous walkthrough step",
+        keys: &[KeyPattern::Char('K')],
+        labels: "K",
+    },
+    Binding {
         action: Action::ToggleCollapse,
         description: "collapse or expand file/hunk",
         keys: &[KeyPattern::Enter, KeyPattern::Char(' ')],
@@ -186,24 +204,6 @@ const BINDINGS: &[Binding] = &[
         description: "automatic layout",
         keys: &[KeyPattern::Char('3')],
         labels: "3",
-    },
-    Binding {
-        action: Action::ToggleWalkthrough,
-        description: "open or close the walkthrough",
-        keys: &[KeyPattern::Char('W')],
-        labels: "W",
-    },
-    Binding {
-        action: Action::NextStep,
-        description: "next walkthrough step",
-        keys: &[KeyPattern::Char('J')],
-        labels: "J",
-    },
-    Binding {
-        action: Action::PreviousStep,
-        description: "previous walkthrough step",
-        keys: &[KeyPattern::Char('K')],
-        labels: "K",
     },
 ];
 

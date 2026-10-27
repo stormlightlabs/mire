@@ -36,11 +36,15 @@ its normal reload path; an unwatched session returns `reload_unavailable`.
 Walkthrough actions let another local process mark a session as being driven
 and move through a walkthrough. In a review with an authored walkthrough,
 `start` opens walkthrough mode on the overview, `next` and `previous` move
-between steps as `J` and `K` do, and `stop` closes the mode. The state's
-`walkthrough_progress` is the step number and the step count, with `0` for the
-overview. Without an authored walkthrough, the actions move through visible
-findings and `walkthrough_progress` is the finding position and count.
-Walkthrough actions never write a review file.
+between steps as `J` and `K` do, and `stop` closes the mode. Closing the mode
+in the terminal with `W` or `Esc` also ends the session walkthrough, so the next
+`inspect` reports `walkthrough_active: false`. Send `start` to drive it
+again. The state's `walkthrough_progress` is the step number and the step
+count, with `0` for the overview. Without an authored walkthrough, the actions
+move through visible findings and `walkthrough_progress` is the finding
+position and count. `walkthrough_progress` is `null` whenever
+`walkthrough_active` is false, including when `W` opened the mode in the
+terminal. Walkthrough actions never write a review file.
 
 Every command emits one JSON response with `schema_version` `{ "major": 1,
 "minor": 0 }`. Successful responses have `status: "ok"`. Failures have

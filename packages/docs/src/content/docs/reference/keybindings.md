@@ -80,7 +80,8 @@ was. Without a walkthrough, the pane says the review has none.
 ![Walkthrough mode on step 2 of 3, with the narrative above the diff](/screencap_walkthrough.png)
 
 `mire session walkthrough start|next|previous|stop` drives the same mode from
-another process. See the
+another process. Closing the mode with `W` or `Esc` ends that session
+walkthrough. See the
 [live-session protocol](/docs/reference/live-session-protocol/).
 
 ## Jump to a changed file

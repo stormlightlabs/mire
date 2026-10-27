@@ -43,6 +43,13 @@ const WALKTHROUGH_FOOTER: &[(&str, &str)] = &[
     ("?", "help"),
     ("q", "quit"),
 ];
+const WALKTHROUGH_SIDEBAR_FOOTER: &[(&str, &str)] = &[
+    ("J/K", "steps"),
+    ("j/k", "files"),
+    ("Tab", "review"),
+    ("W / Esc", "close"),
+    ("q", "quit"),
+];
 const REVIEW_FOOTER: &[(&str, &str)] = &[("?", "help"), ("q", "quit")];
 const FINDING_FOOTER: &[(&str, &str)] = &[
     ("e", "edit"),
@@ -178,6 +185,7 @@ fn footer_context(mode: InteractionMode) -> (&'static str, &'static [(&'static s
         InteractionMode::RangeSelection => ("range", RANGE_FOOTER),
         InteractionMode::Help => ("help", HELP_FOOTER),
         InteractionMode::Walkthrough => ("walkthrough", WALKTHROUGH_FOOTER),
+        InteractionMode::WalkthroughSidebar => ("walkthrough files", WALKTHROUGH_SIDEBAR_FOOTER),
         InteractionMode::Review => ("", REVIEW_FOOTER),
         InteractionMode::Finding => ("finding", FINDING_FOOTER),
         InteractionMode::Sidebar => ("files", SIDEBAR_FOOTER),

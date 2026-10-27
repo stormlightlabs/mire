@@ -24,7 +24,8 @@ pub struct PresentationState {
     pub walkthrough_active: bool,
     /// The walkthrough position and its total: the step number, 0 for the
     /// overview, and the step count in walkthrough mode, or else the finding
-    /// position and the visible finding count.
+    /// position and the visible finding count. `None` unless
+    /// `walkthrough_active` is set.
     pub walkthrough_progress: Option<(usize, usize)>,
 }
 

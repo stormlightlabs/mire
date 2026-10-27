@@ -19,10 +19,10 @@ expression: "snapshot(app, 90, 24)"
                    │ [            previous file
                    │ }            next hunk
                    │ {            previous hunk
+                   │ W            open or close the walkthrough
+                   │ J            next walkthrough step
+                   │ K            previous walkthrough step
                    │ Enter / Space collapse or expand file/hunk
                    │ Ctrl-P       jump to file
                    │ /            search
-                   │ n            next search match
-                   │ N            previous search match
-                   │ +            show more context
  help  ? / Esc close  q quit

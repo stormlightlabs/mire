@@ -57,6 +57,8 @@ pub enum InteractionMode {
     Help,
     /// Walkthrough mode shows the overview or one step above the review.
     Walkthrough,
+    /// Walkthrough mode is open while the file navigator has focus.
+    WalkthroughSidebar,
     /// The review has no source content to navigate.
     Review,
     /// A finding is under the review cursor.
@@ -484,6 +486,8 @@ impl<'a> App<'a> {
             InteractionMode::RangeSelection
         } else if self.help_visible {
             InteractionMode::Help
+        } else if self.walkthrough_view.is_some() && matches!(self.focus, Focus::Sidebar) {
+            InteractionMode::WalkthroughSidebar
         } else if self.walkthrough_view.is_some() {
             InteractionMode::Walkthrough
         } else if !matches!(&self.state, AppState::Ready(stream) if !stream.is_empty()) {
@@ -782,7 +786,7 @@ impl<'a> App<'a> {
             filter: self.filter_summary(),
             review_revision: self.review.as_ref().map(|review| review.revision().get()),
             walkthrough_active: self.walkthrough_active,
-            walkthrough_progress: self.walkthrough_progress(),
+            walkthrough_progress: self.walkthrough_active.then(|| self.walkthrough_progress()).flatten(),
         }
     }
 
@@ -1736,8 +1740,13 @@ impl<'a> App<'a> {
         self.keep_cursor_visible();
     }
 
+    /// Closes walkthrough mode. On an authored walkthrough this also ends a
+    /// live-session walkthrough, because the mode is where its steps live.
     fn close_walkthrough(&mut self) {
         self.walkthrough_view = None;
+        if self.walkthrough().is_some() {
+            self.walkthrough_active = false;
+        }
         self.keep_cursor_visible();
     }
 

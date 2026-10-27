@@ -538,6 +538,55 @@ mod tests {
     }
 
     #[test]
+    fn closing_walkthrough_mode_locally_ends_the_live_walkthrough() {
+        let review = walkthrough_review();
+        let mut app = App::review_with_options(&review, AppOptions::default());
+        app.resize(120, 24);
+        app.start_walkthrough().unwrap();
+        app.move_walkthrough(true).unwrap();
+        assert_eq!(app.live_state().walkthrough_progress, Some((1, 3)));
+
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        let state = app.live_state();
+        assert!(!state.walkthrough_active);
+        assert_eq!(state.walkthrough_progress, None);
+
+        app.move_walkthrough(true).unwrap();
+        let state = app.live_state();
+        assert!(!state.walkthrough_active);
+        assert_eq!(state.walkthrough_progress, None);
+
+        app.start_walkthrough().unwrap();
+        app.move_walkthrough(true).unwrap();
+        press(&mut app, 'W');
+        assert!(!app.live_state().walkthrough_active);
+        assert_eq!(app.walkthrough_view(), None);
+    }
+
+    #[test]
+    fn local_walkthrough_mode_reports_no_live_progress() {
+        let review = walkthrough_review();
+        let mut app = App::review_with_options(&review, AppOptions::default());
+        app.resize(120, 24);
+        press(&mut app, 'W');
+        assert_eq!(app.walkthrough_progress(), Some((0, 3)));
+        assert!(!app.live_state().walkthrough_active);
+        assert_eq!(app.live_state().walkthrough_progress, None);
+    }
+
+    #[test]
+    fn walkthrough_mode_keeps_file_keys_when_the_sidebar_has_focus() {
+        let review = walkthrough_review();
+        let mut app = App::review_with_options(&review, AppOptions::default());
+        app.resize(120, 24);
+        press(&mut app, 'W');
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(app.interaction_mode(), InteractionMode::WalkthroughSidebar);
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(app.interaction_mode(), InteractionMode::Walkthrough);
+    }
+
+    #[test]
     fn walkthrough_mode_without_a_walkthrough_says_so() {
         let review = plain_review();
         let mut app = App::review_with_options(&review, AppOptions::default());

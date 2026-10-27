@@ -17,4 +17,4 @@ expression: "snapshot(focused, 100, 16)"
                       │    2 -    line.split_once('=')      │     2 +    let (key, value) = line.sp█
                       │                                     │     3 +    Some((key.trim(), value.tr█
                       │    3  }                             │     4  }                             █
- files  j/k files  Tab review  Esc review  q quit
+ files  j/k files  m viewed  Tab review  Esc review  q quit

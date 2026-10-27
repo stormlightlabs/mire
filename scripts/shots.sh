@@ -13,7 +13,7 @@
 # PNG's path.
 set -euo pipefail
 
-SCENARIOS=(unified split narrow help sidebar-hidden collapsed note walkthrough walkthrough-step walkthrough-narrow session-walkthrough no-color)
+SCENARIOS=(unified split narrow help sidebar-hidden collapsed note viewed walkthrough walkthrough-step walkthrough-narrow session-walkthrough no-color)
 
 usage() {
   echo "usage: scripts/shots.sh [--list | <scenario>...]" >&2
@@ -184,6 +184,7 @@ capture() {
     sidebar-hidden) run --keys b sidebar-hidden 120 32 "${diff[@]}" ;;
     collapsed) run --keys Enter collapsed 120 32 "${diff[@]}" ;;
     note) run --keys p note 120 32 "${review[@]}" ;;
+    viewed) run --keys Tab --keys j --keys m viewed 120 32 "${review[@]}" ;;
     walkthrough) run --keys W walkthrough 120 32 "${review[@]}" ;;
     walkthrough-step) run --keys J --keys J walkthrough-step 120 32 "${review[@]}" ;;
     walkthrough-narrow) run --keys J --keys J walkthrough-narrow 60 24 "${review[@]}" ;;

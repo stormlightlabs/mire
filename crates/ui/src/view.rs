@@ -981,6 +981,21 @@ new file mode 100644
     }
 
     #[test]
+    fn viewed_snapshot_marks_the_selected_file_in_the_file_list() {
+        let review = notes_review();
+        let mut app = App::review_with_options(&review, crate::AppOptions::default());
+        app.resize(120, 18);
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Char('m'));
+        assert!(app.viewed_change().is_some_and(|change| change.mark.is_some()));
+        app.finish_viewed(Ok(()));
+        assert_eq!(app.file_viewed(1), Some(crate::FileViewed::Viewed));
+        assert_eq!(app.file_viewed(0), Some(crate::FileViewed::NotViewed));
+        insta::assert_snapshot!("sidebar_viewed_120x18", snapshot(app, 120, 18));
+    }
+
+    #[test]
     fn walkthrough_snapshot_shows_progress_in_the_header() {
         let review = notes_review();
         let mut app = App::review_with_options(&review, crate::AppOptions::default());

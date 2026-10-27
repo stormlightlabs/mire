@@ -17,6 +17,6 @@ mod watch;
 pub use command::run;
 pub use git::load_bound_diff;
 pub use review_file::{
-    DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, write_review_atomic,
-    write_review_atomic_if_revision,
+    DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, update_review_viewed,
+    write_review_atomic, write_review_atomic_if_revision,
 };

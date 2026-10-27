@@ -1,7 +1,7 @@
 use mire_core::{
-    AnchorSide, Author, BytePath, Changeset, ChangesetSource, HunkLocation, LineNumber, LineRange,
-    MAX_WALKTHROUGH_TEXT_BYTES, PatchLimits, Provenance, ReanchorOutcome, Review, ReviewError, ReviewRevision, StepId,
-    StepInput, StepLocation, WalkthroughInput, parse_patch,
+    AnchorSide, Author, BytePath, CURRENT_REVIEW_SCHEMA_VERSION, Changeset, ChangesetSource, HunkLocation, LineNumber,
+    LineRange, MAX_WALKTHROUGH_TEXT_BYTES, PatchLimits, Provenance, ReanchorOutcome, Review, ReviewError,
+    ReviewRevision, StepId, StepInput, StepLocation, WalkthroughInput, parse_patch,
 };
 
 const TWO_FILES: &[u8] =
@@ -34,7 +34,7 @@ fn walkthrough_round_trips_with_generated_ids_and_advances_the_revision() {
     assert_eq!(walkthrough.steps()[1].depends_on()[0].as_str(), "contract");
 
     let json = serde_json::to_string(&written).unwrap();
-    assert!(json.contains("\"minor\":5"));
+    assert!(json.contains(&format!("\"minor\":{}", CURRENT_REVIEW_SCHEMA_VERSION.minor)));
     let decoded: Review = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded, written);
 
@@ -55,9 +55,11 @@ fn walkthrough_fields_from_newer_writers_survive_a_round_trip() {
 
 #[test]
 fn review_files_without_a_walkthrough_still_load() {
-    let json = serde_json::to_string(&review(changeset(TWO_FILES)))
-        .unwrap()
-        .replacen("\"minor\":5", "\"minor\":4", 1);
+    let json = serde_json::to_string(&review(changeset(TWO_FILES))).unwrap().replacen(
+        &format!("\"minor\":{}", CURRENT_REVIEW_SCHEMA_VERSION.minor),
+        "\"minor\":4",
+        1,
+    );
     assert!(json.contains("\"minor\":4"));
     assert!(!json.contains("walkthrough"));
     let decoded: Review = serde_json::from_str(&json).unwrap();

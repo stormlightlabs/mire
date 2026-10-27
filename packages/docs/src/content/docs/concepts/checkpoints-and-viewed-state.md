@@ -10,7 +10,9 @@ A review lives through several refreshes. Each refresh replaces the captured
 changeset, so today the review file cannot say what a file looked like at an
 earlier revision, what changed since a reader last looked at it, or what code a
 stale note was written on. This page fixes the schema that answers those
-questions. It is a design: the fields below are not written yet.
+questions. Viewed marks are implemented as described below, except that Mire
+checks a mark only against the current revision until checkpoints exist.
+Checkpoints are a design: their fields are not written yet.
 
 Two records answer them:
 
@@ -176,7 +178,9 @@ revision it was read at. Mire looks up the file at that revision with the
 checkpoint lookup and rejects the mark with `viewed_mismatch` when the
 fingerprints differ or the revision has no answer. A tab that loaded revision 4
 can then mark the file it showed, even after a refresh, but a tab cannot mark a
-fingerprint the file never had at that revision. The stored mark keeps the
+fingerprint the file never had at that revision. Until the review records
+checkpoints, Mire accepts a mark only at the current revision with the file's
+current fingerprint. The stored mark keeps the
 revision. If the file changed since, the mark holds the older fingerprint and
 the file shows as changed. Mire does not derive the revision from the
 fingerprint, because a file that is reverted has the same fingerprint at more

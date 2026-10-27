@@ -11,15 +11,17 @@ describes code. A review stores findings and decisions about that code.
 
 ## Core objects
 
-Mire's durable review model has five primary objects:
+Mire's durable review model has six primary objects:
 
 ```text
 Changeset    source, files, hunks, fingerprint
 Anchor       side, path, line range, hunk and content fingerprints
 ReviewNote   anchor, author, severity, kind, status, body, provenance
 Walkthrough  optional overview, ordered steps, author, provenance
+ViewedMark   path, file fingerprint, revision
 Review       captured changeset, source binding, optional title and
-             description, revision, notes, note events, optional walkthrough
+             description, revision, notes, note events, optional walkthrough,
+             viewed marks by reader
 ```
 
 The TUI and CLI use the same validation rules. Tools can therefore add findings
@@ -104,6 +106,28 @@ was, so every file it writes can be read back.
 [Walkthrough design](/docs/concepts/walkthrough-design/) records where these
 fields come from.
 
+## Viewed marks
+
+A review's `viewed` map holds, for each reader id, the files that reader marked
+viewed. Each mark records the file's path, the file fingerprint the reader saw,
+and the review revision they read it at. A file is viewed for a reader while
+the mark's fingerprint equals the file's current fingerprint. After a refresh
+changes the file, the mark keeps the older fingerprint and the file shows as
+changed since viewed. A mark for a path that left the changeset stays until the
+reader clears it.
+
+A mark must name the current revision and the file's current fingerprint, or
+Mire rejects it with `viewed_mismatch`. Marks do not advance the revision.
+Every other write takes the marks from the file on disk, read under the review
+file lock, so a refresh or a note write prepared before a mark landed keeps
+that mark. A reader may hold 10,000 marks, and a review may hold marks for 100
+readers. Review files written before viewed marks load with none.
+
+Mark files from the terminal with `m`, from the browser with the Viewed button,
+or with `mire file viewed` and `mire file unviewed`.
+[Checkpoints and viewed state](/docs/concepts/checkpoints-and-viewed-state/)
+records the design.
+
 ## Authorship and provenance
 
 Every note records its author and producer provenance. Human, agent, analyzer,
@@ -121,7 +145,8 @@ Mire bounds review size, note count, imported payloads, and expanded context.
 A review's title is one line of at most 1 KiB with no control characters.
 Its description is at most 65,536 characters, GitHub's limit for a pull
 request body, and carries no control characters other than newline and tab.
-Review files written before titles or walkthroughs existed still load.
+Review files written before titles, walkthroughs or viewed marks existed still
+load.
 
 A location batch and a source refresh validate the entire transaction before
 Mire atomically replaces the review file.

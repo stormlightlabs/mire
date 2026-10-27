@@ -11,8 +11,13 @@ use crate::app::{App, AppState, InteractionMode, WatchState};
 use crate::navigation::{Focus, help_entries};
 use crate::stream::ReviewStream;
 use crate::theme::Theme;
+use crate::viewed::FileViewed;
 
 const TITLE_MIN_WIDTH: usize = 16;
+/// Sidebar mark for a file the reader viewed as it is now.
+const VIEWED_MARK: &str = "●";
+/// Sidebar mark for a file the reader viewed that has changed since.
+const CHANGED_SINCE_VIEWED_MARK: &str = "○";
 const EDITOR_FOOTER: &[(&str, &str)] = &[
     ("Enter", "newline"),
     ("Ctrl-Enter", "save"),
@@ -58,7 +63,13 @@ const FINDING_FOOTER: &[(&str, &str)] = &[
     ("Esc", "clear focus"),
     ("q", "quit"),
 ];
-const SIDEBAR_FOOTER: &[(&str, &str)] = &[("j/k", "files"), ("Tab", "review"), ("Esc", "review"), ("q", "quit")];
+const SIDEBAR_FOOTER: &[(&str, &str)] = &[
+    ("j/k", "files"),
+    ("m", "viewed"),
+    ("Tab", "review"),
+    ("Esc", "review"),
+    ("q", "quit"),
+];
 const SOURCE_FOOTER: &[(&str, &str)] = &[
     ("j/k", "move"),
     ("v", "range"),
@@ -207,6 +218,7 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, stream: &ReviewStream<'
         lines.push(sidebar_file_line(
             stream.file(file),
             app.file_finding_summary(file),
+            app.file_viewed(file),
             area.width,
             file == app.selected_file(),
             theme,
@@ -351,7 +363,8 @@ fn sidebar_header(width: u16, position: usize, total: usize, theme: &Theme) -> L
 }
 
 fn sidebar_file_line(
-    file: &FileDiff, findings: crate::app::FileFindingSummary, width: u16, selected: bool, theme: &Theme,
+    file: &FileDiff, findings: crate::app::FileFindingSummary, viewed: Option<FileViewed>, width: u16, selected: bool,
+    theme: &Theme,
 ) -> Line<'static> {
     let available = usize::from(width);
     let mut progress = Vec::new();
@@ -401,6 +414,11 @@ fn sidebar_file_line(
     }
     let metadata_width = spans_width(&metadata);
     let gap_width = usize::from(metadata_width > 0);
+    let viewed = match viewed {
+        None | Some(FileViewed::NotViewed) => Span::raw(" "),
+        Some(FileViewed::Viewed) => Span::styled(VIEWED_MARK, theme.accent),
+        Some(FileViewed::Changed) => Span::styled(CHANGED_SINCE_VIEWED_MARK, theme.error),
+    };
     let prefix_width = 4;
     let path_width = available.saturating_sub(prefix_width + gap_width + metadata_width);
     let path = truncate_path(&file_path(file), path_width);
@@ -409,7 +427,7 @@ fn sidebar_file_line(
     let marker_style = if selected { theme.accent } else { theme.muted };
     let mut spans = vec![
         Span::styled(if selected { "▌" } else { " " }, marker_style),
-        Span::raw(" "),
+        viewed,
         Span::styled(file_status_code(file.status()), theme.muted),
         Span::raw(" "),
         Span::raw(path),

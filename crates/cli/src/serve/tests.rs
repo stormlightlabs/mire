@@ -157,6 +157,8 @@ async fn every_api_route_requires_the_exact_bearer_secret() {
         (Method::PATCH, "/api/v1/findings/missing"),
         (Method::POST, "/api/v1/findings/missing/decision"),
         (Method::POST, "/api/v1/refresh"),
+        (Method::PUT, "/api/v1/viewed?path=66696c652e7273"),
+        (Method::DELETE, "/api/v1/viewed?path=66696c652e7273"),
     ]);
     for (method, path) in routes {
         for authorization in [
@@ -313,6 +315,8 @@ async fn overview_file_and_finding_resources_describe_the_review() {
     assert_eq!(overview["changes"]["deletions"], 1);
     assert_eq!(overview["readiness"]["ready"], false);
     assert_eq!(overview["files"][0]["path"]["display"], "file.rs");
+    assert_eq!(overview["files"][0]["path"]["raw"], "66696c652e7273");
+    assert_eq!(overview["files"][0]["viewed"], serde_json::Value::Null);
     assert_eq!(overview["files"][0]["openFindings"], 1);
     assert_eq!(overview["findings"][0]["body"], "A finding");
 
@@ -693,7 +697,7 @@ async fn the_watcher_announces_a_write_made_before_it_started() {
 
     // The review is at revision 2, but the server read revision 1 before it
     // printed its URL, so the watcher must report the write it never saw.
-    let watcher = start_watcher(state, 1, shutdown_receiver);
+    let watcher = start_watcher(state, 1, ViewedMap::new(), shutdown_receiver);
     let received = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
@@ -712,4 +716,136 @@ async fn the_watcher_announces_a_write_made_before_it_started() {
         (event.kind, event.revision),
         (ServerEventKind::ReviewInvalidated, Some(2))
     );
+}
+
+/// The file id and path hex of the review's only file.
+async fn first_file(fixture: &Fixture) -> (String, String) {
+    let (_, overview) = send_json(fixture.state(), api_request(Method::GET, "/api/v1/review", None)).await;
+    let file = &overview["files"][0];
+    (
+        file["id"].as_str().expect("file id").to_owned(),
+        file["path"]["raw"].as_str().expect("raw path").to_owned(),
+    )
+}
+
+#[tokio::test]
+async fn viewed_marks_persist_without_advancing_the_revision() {
+    let fixture = Fixture::with_note();
+    let (id, raw) = first_file(&fixture).await;
+    let route = format!("/api/v1/viewed?path={raw}");
+    let body = format!(r#"{{"fingerprint":"{id}","revision":2}}"#);
+    let (status, marked) = send_json(fixture.state(), api_request(Method::PUT, &route, Some(&body))).await;
+    assert_eq!(status, StatusCode::OK, "{marked}");
+    assert_eq!(marked["revision"], 2);
+    assert_eq!(marked["path"]["display"], "file.rs");
+    assert_eq!(marked["viewed"]["fingerprint"], id.as_str());
+    assert_eq!(marked["viewed"]["revision"], 2);
+    assert_eq!(fixture.revision(), 2);
+    let review = read_review(fixture.path()).expect("review");
+    assert!(review.is_viewed(local_author().id(), &review.changeset().files()[0]));
+
+    let (_, overview) = send_json(fixture.state(), api_request(Method::GET, "/api/v1/review", None)).await;
+    assert_eq!(overview["files"][0]["viewed"]["fingerprint"], id.as_str());
+
+    let (status, cleared) = send_json(fixture.state(), api_request(Method::DELETE, &route, None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cleared["viewed"], serde_json::Value::Null);
+    assert_eq!(fixture.revision(), 2);
+    assert!(read_review(fixture.path()).expect("review").viewed().is_empty());
+}
+
+#[tokio::test]
+async fn viewed_marks_reject_bad_paths_and_changed_fingerprints() {
+    let fixture = Fixture::with_note();
+    let (id, raw) = first_file(&fixture).await;
+    let before = std::fs::read(fixture.path()).expect("review bytes");
+    let body = format!(r#"{{"fingerprint":"{id}","revision":2}}"#);
+    for route in [
+        "/api/v1/viewed".to_owned(),
+        "/api/v1/viewed?path=".to_owned(),
+        "/api/v1/viewed?path=zz".to_owned(),
+        "/api/v1/viewed?path=6".to_owned(),
+        "/api/v1/viewed?path=+f".to_owned(),
+        "/api/v1/viewed?path=%66%69".to_owned(),
+        format!("/api/v1/viewed?path=2e2e2f{raw}"),
+        format!("/api/v1/viewed?path={raw}&path={raw}"),
+    ] {
+        let (status, problem) = send_json(fixture.state(), api_request(Method::PUT, &route, Some(&body))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{route}");
+        assert_eq!(problem["code"], "invalid_path", "{route}");
+    }
+
+    let route = format!("/api/v1/viewed?path={raw}");
+    for body in [
+        format!(r#"{{"fingerprint":"{id}","revision":1}}"#),
+        format!(r#"{{"fingerprint":"{}","revision":2}}"#, "0".repeat(64)),
+        r#"{"fingerprint":"not hex","revision":2}"#.to_owned(),
+    ] {
+        let (status, problem) = send_json(fixture.state(), api_request(Method::PUT, &route, Some(&body))).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(problem["code"], "viewed_mismatch", "{body}");
+    }
+    let missing = format!("/api/v1/viewed?path={}", viewed::encode_hex(b"other.rs"));
+    let (status, problem) = send_json(fixture.state(), api_request(Method::PUT, &missing, Some(&body))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(problem["code"], "viewed_mismatch");
+    assert_eq!(std::fs::read(fixture.path()).expect("review bytes"), before);
+}
+
+#[tokio::test]
+async fn a_viewed_mark_sends_a_viewed_event() {
+    let fixture = Fixture::with_note();
+    let (id, raw) = first_file(&fixture).await;
+    let response = app(fixture.state())
+        .oneshot(api_request(Method::GET, "/api/v1/events", None))
+        .await
+        .expect("response");
+    let mut stream = response.into_body().into_data_stream();
+    let body = format!(r#"{{"fingerprint":"{id}","revision":2}}"#);
+    let (status, _) = send_json(
+        fixture.state(),
+        api_request(Method::PUT, &format!("/api/v1/viewed?path={raw}"), Some(&body)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let frame = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("an event arrives")
+        .expect("the stream stays open")
+        .expect("frame bytes");
+    let frame = String::from_utf8(frame.to_vec()).expect("UTF-8 event");
+    let data = frame
+        .lines()
+        .find_map(|line| line.strip_prefix("data: "))
+        .expect("event data");
+    let event: serde_json::Value = serde_json::from_str(data).expect("event JSON");
+    assert_eq!(event["kind"], "viewed");
+    assert_eq!(event["revision"], 2);
+}
+
+#[test]
+fn the_watcher_announces_marks_that_change_without_a_new_revision() {
+    let fixture = Fixture::with_note();
+    let state = fixture.state();
+    let mut events = state.events.subscribe();
+    let review = read_review(fixture.path()).expect("review");
+    let mut known = review.viewed().clone();
+    announce_viewed(&state, &mut known, &review);
+    assert!(events.try_recv().is_err(), "unchanged marks are not announced");
+
+    let file = &review.changeset().files()[0];
+    let marked = review
+        .mark_viewed(
+            "ana",
+            file.canonical_path().clone(),
+            file.fingerprint(),
+            review.revision(),
+        )
+        .expect("mark");
+    announce_viewed(&state, &mut known, &marked);
+    let event = events.try_recv().expect("an event for the new mark");
+    assert_eq!((event.kind, event.revision), (ServerEventKind::Viewed, Some(2)));
+    assert_eq!(&known, marked.viewed());
+    announce_viewed(&state, &mut known, &marked);
+    assert!(events.try_recv().is_err(), "a known mark is not announced again");
 }

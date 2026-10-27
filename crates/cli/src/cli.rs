@@ -28,6 +28,8 @@ pub enum Command {
     Diff(DiffArgs),
     /// Review a patch file or standard input.
     Patch(PatchArgs),
+    /// Mark a changed file viewed or not viewed.
+    File(FileArgs),
     /// Add or update one review finding.
     Note(NoteArgs),
     /// Apply, import, list, or export review findings.
@@ -46,6 +48,14 @@ pub enum Command {
     Walkthrough(WalkthroughArgs),
     /// Review a Git comparison and reload it when it changes.
     Watch(WatchArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum FileCommand {
+    /// Mark a file viewed at the fingerprint the reader saw.
+    Viewed(FileViewedArgs),
+    /// Clear the reader's viewed mark for a file.
+    Unviewed(FileUnviewedArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -139,6 +149,9 @@ pub struct ContextArgs {
     /// Maximum serialized bytes for an expanded context request.
     #[arg(long, value_name = "BYTES")]
     pub max_bytes: Option<usize>,
+    /// Include this reader's viewed marks in the manifest.
+    #[arg(long, value_name = "ID", conflicts_with_all = ["patch", "file", "hunk"])]
+    pub reader: Option<String>,
     /// Structured output format.
     #[arg(long, value_name = "FORMAT", value_parser = parse_json_format, default_value = "json")]
     pub format: Option<OutputFormat>,
@@ -188,6 +201,44 @@ pub struct PatchArgs {
     /// as <(gh pr view --json body --jq .body).
     #[arg(long, value_name = "PATH", value_hint = ValueHint::FilePath)]
     pub description_file: Option<OsString>,
+}
+
+#[derive(Args, Debug)]
+pub struct FileArgs {
+    #[command(subcommand)]
+    pub command: FileCommand,
+}
+
+#[derive(Args, Debug)]
+pub struct FileViewedArgs {
+    /// JSON review file to update.
+    #[arg(value_hint = ValueHint::FilePath)]
+    pub review: OsString,
+    /// Repository-relative path of the changed file.
+    #[arg(long, value_hint = ValueHint::AnyPath)]
+    pub file: OsString,
+    /// File fingerprint the reader saw, from `mire context`.
+    #[arg(long, value_name = "FINGERPRINT", value_parser = parse_fingerprint)]
+    pub fingerprint: Fingerprint,
+    /// Review revision the reader read the file at.
+    #[arg(long)]
+    pub revision: u64,
+    /// Reader the mark belongs to; defaults to USER, then USERNAME.
+    #[arg(long, value_name = "ID")]
+    pub reader: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct FileUnviewedArgs {
+    /// JSON review file to update.
+    #[arg(value_hint = ValueHint::FilePath)]
+    pub review: OsString,
+    /// Repository-relative path of the changed file.
+    #[arg(long, value_hint = ValueHint::AnyPath)]
+    pub file: OsString,
+    /// Reader the mark belongs to; defaults to USER, then USERNAME.
+    #[arg(long, value_name = "ID")]
+    pub reader: Option<String>,
 }
 
 #[derive(Args, Debug)]

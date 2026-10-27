@@ -1,17 +1,45 @@
 export type DisplayText = { display: string; lossy: boolean };
 
+/** A repository path, with its raw bytes as lowercase hex for routes that take a `path` parameter. */
+export type PathText = DisplayText & { raw: string };
+
 /** Formats a potentially lossy filesystem path for display. */
 export function formatPath(path: DisplayText): string {
 	return `${path.display}${path.lossy ? ' �' : ''}`;
 }
 
+/** The fingerprint a reader marked viewed, and the review revision they read it at. */
+export type ViewedState = { fingerprint: string; revision: number };
+
+/** Whether the reader viewed a file as it is now, viewed it before it changed, or has not viewed it. */
+export type FileViewState = 'viewed' | 'changed' | 'unviewed';
+
 export type FileSummary = {
 	id: string;
-	path: DisplayText;
+	path: PathText;
 	status: string;
 	contentKind: 'text' | 'binary';
 	openFindings: number;
+	/** The reader's viewed mark for this path, or `null`. */
+	viewed: ViewedState | null;
 };
+
+export type ViewedResponse = {
+	revision: number;
+	path: PathText;
+	viewed: ViewedState | null;
+};
+
+/** Reports whether the reader's mark holds the file's current fingerprint, its `id`. */
+export function fileViewState(file: Pick<FileSummary, 'id' | 'viewed'>): FileViewState {
+	if (!file.viewed) return 'unviewed';
+	return file.viewed.fingerprint === file.id ? 'viewed' : 'changed';
+}
+
+/** Returns the viewed route for a path. */
+export function viewedRoute(path: PathText): string {
+	return `/api/v1/viewed?path=${path.raw}`;
+}
 
 export type SemanticLine = {
 	kind: 'context' | 'addition' | 'deletion';
@@ -34,7 +62,7 @@ export type SemanticFileContent = { kind: 'text'; hunks: SemanticHunk[] } | { ki
 
 export type FindingSummary = {
 	id: string;
-	path: DisplayText;
+	path: PathText;
 	side: 'old' | 'new';
 	startLine: number;
 	endLine: number;
@@ -48,8 +76,8 @@ export type FindingSummary = {
 
 export type FileDetail = {
 	id: string;
-	path: DisplayText;
-	oldPath: DisplayText | null;
+	path: PathText;
+	oldPath: PathText | null;
 	status: string;
 	content: SemanticFileContent;
 	findings: FindingSummary[];
@@ -163,10 +191,9 @@ export function hasReviewMetadata(review: Pick<ReviewOverview, 'title' | 'descri
 	return Boolean(review?.title?.trim()) || reviewDescription(review) !== null;
 }
 
-/** Combines durable review readiness with browser-local file progress. */
-export function completionSummary(review: ReviewOverview, viewedFileIds: string[]): CompletionSummary {
-	const viewed = new Set(viewedFileIds);
-	const unviewedFiles = review.files.filter((file) => !viewed.has(file.id)).length;
+/** Combines review readiness with the files the reader has not viewed as they are now. */
+export function completionSummary(review: ReviewOverview): CompletionSummary {
+	const unviewedFiles = review.files.filter((file) => fileViewState(file) !== 'viewed').length;
 	return {
 		ready: review.readiness.ready && unviewedFiles === 0,
 		unviewedFiles,

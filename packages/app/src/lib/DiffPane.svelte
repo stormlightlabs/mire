@@ -1,7 +1,14 @@
 <script lang="ts">
 	import DiffViewer from './DiffViewer.svelte';
 	import FindingEditor from './FindingEditor.svelte';
-	import { formatPath, type FindingDetail, type FindingDraft, type FileDetail, type FindingSummary } from './review';
+	import {
+		formatPath,
+		type FileViewState,
+		type FindingDetail,
+		type FindingDraft,
+		type FileDetail,
+		type FindingSummary
+	} from './review';
 	import type { Theme } from './theme';
 
 	let {
@@ -10,6 +17,9 @@
 		activeFinding,
 		findingError,
 		theme,
+		viewState,
+		viewedError,
+		onToggleViewed,
 		onFindingClick,
 		onEditFinding,
 		onDecideFinding
@@ -19,6 +29,9 @@
 		activeFinding: FindingDetail | null;
 		findingError: string | null;
 		theme: Theme;
+		viewState: FileViewState;
+		viewedError: string | null;
+		onToggleViewed: () => void;
 		onFindingClick: (finding: FindingSummary) => void;
 		onEditFinding: (draft: FindingDraft) => Promise<string | null>;
 		onDecideFinding: (decision: 'resolve' | 'reopen' | 'dismiss' | 'accept-risk') => Promise<string | null>;
@@ -48,7 +61,16 @@
 			{#if file.oldPath && file.oldPath.display !== file.path.display}
 				<span class="renamed">from {formatPath(file.oldPath)}</span>
 			{/if}
+			<button
+				class="viewed-toggle"
+				class:viewed={viewState === 'viewed'}
+				aria-pressed={viewState === 'viewed'}
+				onclick={onToggleViewed}>
+				<span class={viewState === 'viewed' ? 'i-lucide-square-check' : 'i-lucide-square'}></span>
+				{viewState === 'changed' ? 'Changed since viewed' : 'Viewed'}
+			</button>
 		</header>
+		{#if viewedError}<p class="finding-error" role="alert">{viewedError}</p>{/if}
 
 		{#if activeFinding}
 			<article class="finding-detail" aria-live="polite">
@@ -114,6 +136,26 @@
 			'Google Sans',
 			sans-serif;
 		letter-spacing: -0.035em;
+	}
+	.viewed-toggle {
+		display: inline-flex;
+		flex-shrink: 0;
+		align-items: center;
+		gap: 0.35rem;
+		min-height: 2rem;
+		border: 1px solid var(--line-strong);
+		padding: 0.3rem 0.55rem;
+		background: var(--surface);
+		color: var(--ink);
+		font:
+			600 0.72rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
+	}
+	.viewed-toggle.viewed {
+		border-color: var(--ink);
+		background: var(--ink);
+		color: var(--surface);
 	}
 	.eyebrow {
 		color: var(--muted);

@@ -405,7 +405,9 @@ impl FileDiff {
         self.fingerprint
     }
 
-    fn canonical_path(&self) -> &BytePath {
+    /// Returns the file's canonical path: the new path, or the old path for a
+    /// deleted file.
+    pub fn canonical_path(&self) -> &BytePath {
         self.new
             .as_ref()
             .or(self.old.as_ref())

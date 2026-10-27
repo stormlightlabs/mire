@@ -43,6 +43,7 @@ pub fn reanchor_review(review: &Review, changeset: Changeset) -> Result<Review> 
     refreshed.title = review.title.clone();
     refreshed.description = review.description.clone();
     refreshed.walkthrough = walkthrough;
+    refreshed.viewed = review.viewed.clone();
     refreshed.extensions = review.extensions.clone();
     refreshed.validate()?;
     Ok(refreshed)

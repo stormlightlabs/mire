@@ -11,7 +11,7 @@ use serde_json::json;
 use thiserror::Error;
 
 /// Protocol schema emitted by non-interactive review commands.
-pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 3 };
+pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 4 };
 
 type Result<T> = std::result::Result<T, ProtocolError>;
 
@@ -79,6 +79,7 @@ enum ContextPayload<'a> {
         description: Option<&'a str>,
         files: Vec<FileManifest<'a>>,
         notes: Vec<NoteSummary<'a>>,
+        has_walkthrough: bool,
     },
     Patch {
         changeset: &'a Changeset,
@@ -137,8 +138,12 @@ impl LocationBatch {
     }
 }
 
+/// The file, side, and lines that locate a finding or a walkthrough step.
+///
+/// Supply `side` and `start`, `old_line`, or `new_line`. `end` defaults to
+/// the start line.
 #[derive(Debug, Deserialize)]
-struct LocationRequest {
+pub struct LocationFields {
     #[serde(alias = "path")]
     file: PathInput,
     #[serde(default)]
@@ -151,16 +156,11 @@ struct LocationRequest {
     new_line: Option<u64>,
     #[serde(default, alias = "end_line")]
     end: Option<u64>,
-    author: Author,
-    provenance: Provenance,
-    severity: NoteSeverity,
-    #[serde(alias = "kind")]
-    annotation_kind: AnnotationKind,
-    body: String,
 }
 
-impl LocationRequest {
-    fn into_input(self) -> Result<NoteInput> {
+impl LocationFields {
+    /// Validates the fields and returns the path, side, and line range.
+    pub fn into_parts(self) -> Result<(BytePath, AnchorSide, LineRange)> {
         let path = match self.file {
             PathInput::Text(path) => BytePath::new(path.into_bytes()),
             PathInput::Bytes(path) => BytePath::new(path),
@@ -182,6 +182,25 @@ impl LocationRequest {
         let end = LineNumber::new(end_value)
             .ok_or_else(|| ProtocolError::InvalidInput("line number must be greater than zero".to_owned()))?;
         let range = LineRange::new(start, end).map_err(|error| ProtocolError::InvalidInput(error.to_string()))?;
+        Ok((path, side, range))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct LocationRequest {
+    #[serde(flatten)]
+    location: LocationFields,
+    author: Author,
+    provenance: Provenance,
+    severity: NoteSeverity,
+    #[serde(alias = "kind")]
+    annotation_kind: AnnotationKind,
+    body: String,
+}
+
+impl LocationRequest {
+    fn into_input(self) -> Result<NoteInput> {
+        let (path, side, range) = self.location.into_parts()?;
         NoteInput::new(
             path,
             side,
@@ -358,6 +377,7 @@ pub fn context_json(review: &Review, selection: ContextSelection<'_>, limit: Opt
             description: review.description(),
             files: review.changeset().files().iter().map(FileManifest::from).collect(),
             notes: review.notes().iter().map(NoteSummary::from).collect(),
+            has_walkthrough: review.walkthrough().is_some(),
         },
         ContextSelection::Patch => ContextPayload::Patch { changeset: review.changeset() },
         ContextSelection::File(path) => {

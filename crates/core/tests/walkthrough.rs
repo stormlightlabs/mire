@@ -326,6 +326,24 @@ fn walkthrough_writes_need_the_current_revision() {
 }
 
 #[test]
+fn clearing_needs_the_current_revision_and_keeps_notes() {
+    let written = written_review(changeset(TWO_FILES));
+    let stale = ReviewRevision::new(1).unwrap();
+    assert_eq!(
+        written.clear_walkthrough(stale),
+        Err(ReviewError::RevisionConflict { expected: 1, actual: 2 })
+    );
+
+    let cleared = written.clear_walkthrough(written.revision()).unwrap();
+    assert_eq!(cleared.revision().get(), 3);
+    assert!(cleared.walkthrough().is_none());
+    assert_eq!(cleared.notes(), written.notes());
+
+    let again = cleared.clear_walkthrough(cleared.revision()).unwrap();
+    assert_eq!(again, cleared);
+}
+
+#[test]
 fn walkthrough_writes_reject_invalid_steps() {
     let review = review(changeset(TWO_FILES));
     let write = |steps| review.write_walkthrough(review.revision(), input(steps));

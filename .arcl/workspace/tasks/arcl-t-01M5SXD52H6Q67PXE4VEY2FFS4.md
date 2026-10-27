@@ -2,7 +2,7 @@
 id = "arcl-t-01M5SXD52H6Q67PXE4VEY2FFS4"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
 title = "Walkthrough CLI for agents"
-status = "pending"
+status = "in_progress"
 priority = "high"
 position = 7
 blocked-by = ["arcl-t-01M5SXD522EWRYNXQ1NZY6P3TM"]

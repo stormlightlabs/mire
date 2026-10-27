@@ -27,6 +27,10 @@ use crate::review_file::{
 };
 use crate::serve::{self, ServeError};
 use crate::skill::{self, SkillError};
+use crate::walkthrough::{
+    BatchError, WalkthroughBatch, apply_result_json, clear_result_json, rejection_json, walkthrough_json,
+    walkthrough_text,
+};
 use crate::watch::{WatchError, WatchSet};
 
 use crate::cli::*;
@@ -63,6 +67,8 @@ enum AppError {
     ProtocolInputTooLarge { input: OsString, limit: usize },
     #[error("invalid note batch JSON: {0}")]
     ProtocolJson(serde_json::Error),
+    #[error("invalid walkthrough batch JSON: {0}")]
+    WalkthroughJson(serde_json::Error),
     #[error("review protocol failed: {0}")]
     Protocol(ProtocolError),
     #[error("note mutation was rejected")]
@@ -144,6 +150,7 @@ impl AppError {
             Self::ProtocolInputIo { .. }
             | Self::ProtocolInputTooLarge { .. }
             | Self::ProtocolJson(_)
+            | Self::WalkthroughJson(_)
             | Self::Protocol(_)
             | Self::MutationRejected { .. } => 8,
         }
@@ -259,6 +266,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
             writeln!(io::stdout().lock(), "{}", path.display()).map_err(AppError::OutputIo)
         }
         Command::Session(arguments) => execute_session(arguments),
+        Command::Walkthrough(WalkthroughArgs { command }) => execute_walkthrough(command),
         Command::Watch(WatchArgs { staged, revisions, paths, language }) => {
             let request = DiffRequest { staged, revisions, paths };
             let changeset = git::load_diff(request.clone()).map_err(AppError::Git)?;
@@ -737,6 +745,56 @@ fn import_notes(review_path: &OsStr, input: &OsStr, expected_revision: u64) -> R
     write_bytes(&import_result_json(&updated, imported).map_err(AppError::Protocol)?)
 }
 
+fn execute_walkthrough(command: WalkthroughCommand) -> Result<(), AppError> {
+    match command {
+        WalkthroughCommand::Apply(WalkthroughApplyArgs { review, stdin: _ }) => apply_walkthrough(&review),
+        WalkthroughCommand::Show(WalkthroughShowArgs { review, format }) => {
+            let review = read_review(Path::new(&review)).map_err(AppError::ReviewFile)?;
+            let bytes = match format {
+                Some(_) => walkthrough_json(&review).map_err(AppError::Protocol)?,
+                None => walkthrough_text(&review),
+            };
+            write_bytes(&bytes)
+        }
+        WalkthroughCommand::Clear(WalkthroughClearArgs { review, revision }) => clear_walkthrough(&review, revision),
+    }
+}
+
+fn apply_walkthrough(review_path: &OsStr) -> Result<(), AppError> {
+    let review = read_review(Path::new(review_path)).map_err(AppError::ReviewFile)?;
+    let bytes = read_protocol_input(OsStr::new("-"), DEFAULT_MAX_REVIEW_FILE_BYTES)?;
+    let batch: WalkthroughBatch = serde_json::from_slice(&bytes).map_err(AppError::WalkthroughJson)?;
+    let write = batch.into_write().map_err(|error| match error {
+        BatchError::Protocol(error) => AppError::Protocol(error),
+        BatchError::Review(error) => walkthrough_rejected(&error),
+    })?;
+    let expected = ReviewRevision::new(write.revision).map_err(|error| walkthrough_rejected(&error))?;
+    let updated = review
+        .write_walkthrough(expected, write.input)
+        .map_err(|error| walkthrough_rejected(&error))?;
+    write_mutation(Path::new(review_path), write.revision, &updated)?;
+    write_bytes(&apply_result_json(&updated).map_err(AppError::Protocol)?)
+}
+
+fn clear_walkthrough(review_path: &OsStr, revision: u64) -> Result<(), AppError> {
+    let review = read_review(Path::new(review_path)).map_err(AppError::ReviewFile)?;
+    let expected = ReviewRevision::new(revision).map_err(|error| walkthrough_rejected(&error))?;
+    let updated = review
+        .clear_walkthrough(expected)
+        .map_err(|error| walkthrough_rejected(&error))?;
+    let cleared = updated.revision() != review.revision();
+    if cleared {
+        write_mutation(Path::new(review_path), revision, &updated)?;
+    }
+    write_bytes(&clear_result_json(&updated, cleared).map_err(AppError::Protocol)?)
+}
+
+fn walkthrough_rejected(error: &ReviewError) -> AppError {
+    rejection_json(error)
+        .map(|report| AppError::MutationRejected { report })
+        .unwrap_or_else(AppError::Protocol)
+}
+
 fn execute_session(arguments: SessionArgs) -> Result<(), AppError> {
     let response = match arguments.command {
         SessionCommand::List => serde_json::json!({
@@ -777,12 +835,18 @@ fn execute_session(arguments: SessionArgs) -> Result<(), AppError> {
         }
         SessionCommand::Walkthrough(SessionWalkthroughArgs { command }) => {
             let (session, action) = match command {
-                WalkthroughCommand::Start(SessionTarget { session }) => (session, mire_tui::WalkthroughAction::Start),
-                WalkthroughCommand::Next(SessionTarget { session }) => (session, mire_tui::WalkthroughAction::Next),
-                WalkthroughCommand::Previous(SessionTarget { session }) => {
+                SessionWalkthroughCommand::Start(SessionTarget { session }) => {
+                    (session, mire_tui::WalkthroughAction::Start)
+                }
+                SessionWalkthroughCommand::Next(SessionTarget { session }) => {
+                    (session, mire_tui::WalkthroughAction::Next)
+                }
+                SessionWalkthroughCommand::Previous(SessionTarget { session }) => {
                     (session, mire_tui::WalkthroughAction::Previous)
                 }
-                WalkthroughCommand::Stop(SessionTarget { session }) => (session, mire_tui::WalkthroughAction::Stop),
+                SessionWalkthroughCommand::Stop(SessionTarget { session }) => {
+                    (session, mire_tui::WalkthroughAction::Stop)
+                }
             };
             live_session::request_session(&session, mire_tui::LiveAction::Walkthrough { action })
                 .map_err(AppError::LiveSession)?

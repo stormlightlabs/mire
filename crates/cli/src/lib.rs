@@ -10,6 +10,7 @@ mod refresh;
 mod review_file;
 mod serve;
 mod skill;
+mod walkthrough;
 mod watch;
 
 pub use command::run;

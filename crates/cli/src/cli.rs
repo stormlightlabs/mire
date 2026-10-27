@@ -42,6 +42,8 @@ pub enum Command {
     Skill(SkillArgs),
     /// Inspect or control an open local Mire session.
     Session(SessionArgs),
+    /// Write, show, or clear a review's walkthrough.
+    Walkthrough(WalkthroughArgs),
     /// Review a Git comparison and reload it when it changes.
     Watch(WatchArgs),
 }
@@ -80,6 +82,16 @@ pub enum ReviewCommand {
     Status(ReviewStatusArgs),
     /// Export the captured changeset without review metadata.
     Export(ReviewExportArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum WalkthroughCommand {
+    /// Replace the walkthrough with a batch from standard input.
+    Apply(WalkthroughApplyArgs),
+    /// Print the walkthrough and what it leaves uncovered.
+    Show(WalkthroughShowArgs),
+    /// Remove the walkthrough.
+    Clear(WalkthroughClearArgs),
 }
 
 #[derive(Debug, Subcommand)]
@@ -455,7 +467,7 @@ pub struct SessionFocusArgs {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum WalkthroughCommand {
+pub enum SessionWalkthroughCommand {
     /// Start a walkthrough.
     Start(SessionTarget),
     /// Advance the walkthrough to the next visible finding.
@@ -469,7 +481,7 @@ pub enum WalkthroughCommand {
 #[derive(Args, Debug)]
 pub struct SessionWalkthroughArgs {
     #[command(subcommand)]
-    pub command: WalkthroughCommand,
+    pub command: SessionWalkthroughCommand,
 }
 
 #[derive(Args, Debug)]
@@ -488,6 +500,42 @@ pub struct ShowArgs {
     /// Reload the interactive review when the repository changes.
     #[arg(long)]
     pub watch: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WalkthroughArgs {
+    #[command(subcommand)]
+    pub command: WalkthroughCommand,
+}
+
+#[derive(Args, Debug)]
+pub struct WalkthroughApplyArgs {
+    /// JSON review file to update.
+    #[arg(value_hint = ValueHint::FilePath)]
+    pub review: OsString,
+    /// Read the walkthrough batch from standard input.
+    #[arg(long, required = true)]
+    pub stdin: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WalkthroughShowArgs {
+    /// JSON review file to inspect.
+    #[arg(value_hint = ValueHint::FilePath)]
+    pub review: OsString,
+    /// Structured output format.
+    #[arg(long, value_name = "FORMAT", value_parser = parse_json_format)]
+    pub format: Option<OutputFormat>,
+}
+
+#[derive(Args, Debug)]
+pub struct WalkthroughClearArgs {
+    /// JSON review file to update.
+    #[arg(value_hint = ValueHint::FilePath)]
+    pub review: OsString,
+    /// Revision read before clearing the walkthrough.
+    #[arg(long)]
+    pub revision: u64,
 }
 
 #[derive(Args, Debug)]

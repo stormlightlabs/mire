@@ -318,10 +318,10 @@ fn handle_live_requests(app: &mut App<'_>, control: Option<&LiveControl>, reload
                     Ok(()) => LiveResponse::State(app.live_state()),
                     Err(code) => LiveResponse::Error { code },
                 },
-                WalkthroughAction::Stop => {
-                    app.stop_walkthrough();
-                    LiveResponse::State(app.live_state())
-                }
+                WalkthroughAction::Stop => match app.stop_walkthrough() {
+                    Ok(()) => LiveResponse::State(app.live_state()),
+                    Err(code) => LiveResponse::Error { code },
+                },
                 WalkthroughAction::Next => match app.move_walkthrough(true) {
                     Ok(()) => LiveResponse::State(app.live_state()),
                     Err(code) => LiveResponse::Error { code },

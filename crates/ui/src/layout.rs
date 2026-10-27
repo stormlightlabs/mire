@@ -18,6 +18,9 @@ pub struct UiAreas {
     pub sidebar: Rect,
     /// The separator between file navigation and review content.
     pub sidebar_divider: Rect,
+    /// The walkthrough pane above the review stream, with no height when
+    /// walkthrough mode is closed.
+    pub walkthrough: Rect,
     /// The continuous review stream or help content.
     pub review: Rect,
     /// The bottom keyboard-hint bar.
@@ -50,9 +53,20 @@ impl UiAreas {
             body: vertical[1],
             sidebar: horizontal[0],
             sidebar_divider: horizontal[1],
+            walkthrough: Rect::new(horizontal[2].x, horizontal[2].y, horizontal[2].width, 0),
             review: horizontal[2],
             footer: vertical[2],
         }
+    }
+
+    /// Moves the top `height` rows of the review area into the walkthrough
+    /// pane, keeping at least one review row.
+    pub fn with_walkthrough(mut self, height: u16) -> Self {
+        let height = height.min(self.review.height.saturating_sub(1));
+        self.walkthrough = Rect::new(self.review.x, self.review.y, self.review.width, height);
+        self.review.y = self.review.y.saturating_add(height);
+        self.review.height -= height;
+        self
     }
 }
 
@@ -84,5 +98,18 @@ mod tests {
             );
             assert_eq!(areas.body.width, width);
         }
+    }
+
+    #[test]
+    fn walkthrough_pane_takes_rows_from_the_top_of_the_review() {
+        let areas = UiAreas::new(Rect::new(0, 0, 80, 12), true);
+        let with_pane = areas.with_walkthrough(4);
+        assert_eq!(
+            with_pane.walkthrough,
+            Rect::new(areas.review.x, areas.review.y, areas.review.width, 4)
+        );
+        assert_eq!(with_pane.review.y, areas.review.y + 4);
+        assert_eq!(with_pane.review.height, areas.review.height - 4);
+        assert_eq!(areas.with_walkthrough(100).review.height, 1);
     }
 }

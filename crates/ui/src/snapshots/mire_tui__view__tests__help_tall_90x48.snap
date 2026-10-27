@@ -1,0 +1,52 @@
+---
+source: crates/ui/src/view.rs
+expression: "snapshot(tall, 90, 48)"
+---
+ Mire review │ unified │ focus review │ context 3 │ wrap off │ file 1/2 · 1/8
+ Files         1/2 │ Navigation and layout
+▌ M file.txt       │ q            quit
+  M image.bin      │ ?            toggle help
+                   │ i            show title and description
+                   │ Tab          switch sidebar/review focus
+                   │ b            toggle sidebar
+                   │ j / Down     scroll or select next file
+                   │ k / Up       scroll or select previous file
+                   │ PgDn         page down
+                   │ PgUp         page up
+                   │ g / Home     first row
+                   │ G / End      last row
+                   │ ]            next file
+                   │ [            previous file
+                   │ }            next hunk
+                   │ {            previous hunk
+                   │ W            open or close the walkthrough
+                   │ J            next walkthrough step
+                   │ K            previous walkthrough step
+                   │ Enter / Space collapse or expand file/hunk
+                   │ Ctrl-P       jump to file
+                   │ /            search
+                   │ n            next search match
+                   │ N            previous search match
+                   │ +            show more context
+                   │ -            show less context
+                   │ w            toggle line wrapping
+                   │ 1            unified layout
+                   │ 2            split layout
+                   │ 3            automatic layout
+                   │ wheel        scroll review or sidebar
+                   │ left click   select a sidebar or review file
+                   │ v / c        select a range / create note
+                   │ p / P        next / previous note
+                   │ e            edit selected note
+                   │ r / d / o / a resolve / dismiss / reopen / accept risk
+                   │ f            filter notes
+                   │ left disclosure collapse or expand a file or hunk
+                   │ right click  create or edit a note
+                   │ note buttons edit or change note status
+                   │
+                   │
+                   │
+                   │
+                   │
+                   │
+ help  ? / Esc close  q quit

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use mire_core::{
     AnchorSide, Author, Changeset, FileContent, FileStatus, Fingerprint, NoteId, NoteSeverity, NoteStatus, Provenance,
-    Review, ReviewNote,
+    Review, ReviewNote, StepAnchor, Walkthrough,
 };
 use ratatui::layout::{Position, Rect};
 
@@ -17,6 +17,7 @@ use crate::notes::{EditorField, EditorTarget, LineSelection, NoteEditor};
 use crate::stream::{CollapseState, LayoutMode, ReviewStream, RowAnchor, RowKey};
 use crate::syntax::SyntaxCache;
 use crate::theme::ThemeFamily;
+use crate::walkthrough::{WalkthroughPosition, locate_anchor, pane_height, pane_line_count};
 
 const DEFAULT_TERMINAL_HEIGHT: u16 = 24;
 const DEFAULT_TERMINAL_WIDTH: u16 = 80;
@@ -54,6 +55,10 @@ pub enum InteractionMode {
     RangeSelection,
     /// The keyboard reference is visible.
     Help,
+    /// Walkthrough mode shows the overview or one step above the review.
+    Walkthrough,
+    /// Walkthrough mode is open while the file navigator has focus.
+    WalkthroughSidebar,
     /// The review has no source content to navigate.
     Review,
     /// A finding is under the review cursor.
@@ -95,6 +100,9 @@ pub struct AppPosition {
     selected_note_id: Option<String>,
     selected_path: Option<Vec<u8>>,
     sidebar_visible: bool,
+    walkthrough_active: bool,
+    walkthrough_authored: bool,
+    walkthrough_view: Option<WalkthroughPosition>,
     wrap_lines: bool,
 }
 
@@ -208,6 +216,7 @@ pub struct App<'a> {
     watch_state: Option<WatchState>,
     watch_error: Option<String>,
     walkthrough_active: bool,
+    walkthrough_view: Option<WalkthroughPosition>,
     syntax_cache: RefCell<SyntaxCache>,
     should_quit: bool,
 }
@@ -478,6 +487,10 @@ impl<'a> App<'a> {
             InteractionMode::RangeSelection
         } else if self.help_visible {
             InteractionMode::Help
+        } else if self.walkthrough_view.is_some() && matches!(self.focus, Focus::Sidebar) {
+            InteractionMode::WalkthroughSidebar
+        } else if self.walkthrough_view.is_some() {
+            InteractionMode::Walkthrough
         } else if !matches!(&self.state, AppState::Ready(stream) if !stream.is_empty()) {
             InteractionMode::Review
         } else if matches!(self.focus, Focus::Sidebar) {
@@ -679,8 +692,32 @@ impl<'a> App<'a> {
         self.watch_error = error;
     }
 
-    /// Returns the active walkthrough's finding position and total finding count.
+    /// Returns the review's authored walkthrough, if it has one.
+    pub fn walkthrough(&self) -> Option<&Walkthrough> {
+        self.review.as_ref()?.walkthrough()
+    }
+
+    /// Returns the walkthrough mode position, or `None` when the mode is closed.
+    pub const fn walkthrough_view(&self) -> Option<WalkthroughPosition> {
+        self.walkthrough_view
+    }
+
+    /// Reports whether a live-session client has started a walkthrough.
+    pub const fn walkthrough_active(&self) -> bool {
+        self.walkthrough_active
+    }
+
+    /// Returns the walkthrough position and its total.
+    ///
+    /// With walkthrough mode open on an authored walkthrough, this is the
+    /// one-based step number, 0 for the overview, and the step count.
+    /// Otherwise, while a live-session walkthrough runs, it is the selected
+    /// finding's position and the visible finding count.
     pub fn walkthrough_progress(&self) -> Option<(usize, usize)> {
+        if let (Some(walkthrough), Some(position)) = (self.walkthrough(), self.walkthrough_view) {
+            let steps = walkthrough.steps().len();
+            return Some((position.clamp(steps).number(), steps));
+        }
         if !self.walkthrough_active {
             return None;
         }
@@ -750,23 +787,39 @@ impl<'a> App<'a> {
             filter: self.filter_summary(),
             review_revision: self.review.as_ref().map(|review| review.revision().get()),
             walkthrough_active: self.walkthrough_active,
-            walkthrough_progress: self.walkthrough_progress(),
+            walkthrough_progress: self.walkthrough_active.then(|| self.walkthrough_progress()).flatten(),
         }
     }
 
-    /// Starts a walkthrough and focuses its first visible finding.
+    /// Starts a live-session walkthrough.
+    ///
+    /// A review with an authored walkthrough opens walkthrough mode on its
+    /// overview. Without one, the walkthrough focuses the first visible
+    /// finding.
     pub fn start_walkthrough(&mut self) -> Result<(), &'static str> {
         if self.live_control_busy() {
             return Err("interaction_busy");
         }
-        self.move_walkthrough(true)?;
+        if self.walkthrough().is_some() {
+            self.show_walkthrough(WalkthroughPosition::Overview);
+        } else {
+            self.move_finding(true)?;
+        }
         self.walkthrough_active = true;
         Ok(())
     }
 
-    /// Ends a walkthrough and returns navigation control to the local user.
-    pub fn stop_walkthrough(&mut self) {
+    /// Ends a live-session walkthrough, closes walkthrough mode, and returns
+    /// navigation control to the local user.
+    pub fn stop_walkthrough(&mut self) -> Result<(), &'static str> {
+        if self.live_control_busy() {
+            return Err("interaction_busy");
+        }
         self.walkthrough_active = false;
+        if self.walkthrough_view.is_some() {
+            self.close_walkthrough();
+        }
+        Ok(())
     }
 
     /// Applies a live presentation action without changing review data.
@@ -782,8 +835,8 @@ impl<'a> App<'a> {
             LiveAction::FocusLocation { path, side, start_line, end_line } => {
                 self.focus_live_location(path, *side, *start_line, *end_line)?
             }
-            LiveAction::Next => self.move_walkthrough(true)?,
-            LiveAction::Previous => self.move_walkthrough(false)?,
+            LiveAction::Next => self.move_finding(true)?,
+            LiveAction::Previous => self.move_finding(false)?,
             LiveAction::Inspect | LiveAction::Reload | LiveAction::Walkthrough { .. } => return Err("invalid_request"),
         }
         Ok(())
@@ -835,6 +888,9 @@ impl<'a> App<'a> {
             selected_note_id,
             selected_path,
             sidebar_visible: self.sidebar_visible,
+            walkthrough_active: self.walkthrough_active,
+            walkthrough_authored: self.walkthrough().is_some(),
+            walkthrough_view: self.walkthrough_view,
             wrap_lines: self.wrap_lines,
         }
     }
@@ -851,6 +907,16 @@ impl<'a> App<'a> {
         self.layout_mode = position.layout_mode;
         self.note_filter = position.note_filter;
         self.sidebar_visible = position.sidebar_visible;
+        let authored = self.walkthrough().is_some();
+        let steps = self.walkthrough().map_or(0, |walkthrough| walkthrough.steps().len());
+        self.walkthrough_view = position.walkthrough_view.map(|view| view.clamp(steps));
+        // A session walkthrough drives either authored steps or findings. When
+        // the reload adds or removes the authored walkthrough, the session's
+        // walkthrough ends, and a pane on removed steps closes.
+        self.walkthrough_active = position.walkthrough_active && position.walkthrough_authored == authored;
+        if position.walkthrough_active && position.walkthrough_authored && !authored {
+            self.walkthrough_view = None;
+        }
         self.wrap_lines = position.wrap_lines;
 
         let AppState::Ready(stream) = &self.state else {
@@ -915,12 +981,21 @@ impl<'a> App<'a> {
         self.review.as_ref()?.notes().get(index)
     }
 
-    /// Returns layout rectangles for the current terminal size.
+    /// Returns layout rectangles for the current terminal size, with the
+    /// walkthrough pane when walkthrough mode is open and help is hidden.
     pub fn areas(&self) -> UiAreas {
-        UiAreas::new(
+        let areas = UiAreas::new(
             Rect::new(0, 0, self.terminal_width, self.terminal_height),
             self.sidebar_visible,
-        )
+        );
+        match self.walkthrough_view {
+            Some(position) if !self.help_visible => {
+                let available = areas.review.height;
+                let lines = pane_line_count(self.walkthrough(), position, areas.review.width, available.into());
+                areas.with_walkthrough(pane_height(lines, available))
+            }
+            _ => areas,
+        }
     }
 
     /// Applies a terminal resize while preserving the top source-row anchor.
@@ -1058,6 +1133,7 @@ impl<'a> App<'a> {
             watch_state: None,
             watch_error: None,
             walkthrough_active: false,
+            walkthrough_view: None,
             syntax_cache,
             should_quit: false,
         }
@@ -1095,6 +1171,10 @@ impl<'a> App<'a> {
         }
         if self.help_visible {
             self.help_visible = false;
+            return true;
+        }
+        if self.walkthrough_view.is_some() {
+            self.close_walkthrough();
             return true;
         }
         if matches!(self.focus, Focus::Sidebar) {
@@ -1156,6 +1236,10 @@ impl<'a> App<'a> {
             Action::UnifiedLayout => self.set_layout(LayoutMode::Unified),
             Action::SplitLayout => self.set_layout(LayoutMode::Split),
             Action::AutomaticLayout => self.set_layout(LayoutMode::Automatic),
+            Action::ToggleWalkthrough if self.walkthrough_view.is_some() => self.close_walkthrough(),
+            Action::ToggleWalkthrough => self.show_walkthrough(WalkthroughPosition::Overview),
+            Action::NextStep => self.step_walkthrough(true),
+            Action::PreviousStep => self.step_walkthrough(false),
         }
         self.extend_selection_to_current();
     }
@@ -1640,8 +1724,102 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// Moves a live walkthrough to its next or previous visible finding.
+    /// Moves a live walkthrough to its next or previous authored step, or,
+    /// in a review without a walkthrough, to its next or previous visible
+    /// finding.
+    ///
+    /// On an authored walkthrough, the session walkthrough must be running:
+    /// without `start`, or after the terminal closed walkthrough mode, this
+    /// returns `walkthrough_inactive` and leaves the terminal where it is.
     pub fn move_walkthrough(&mut self, forward: bool) -> Result<(), &'static str> {
+        if self.live_control_busy() {
+            return Err("interaction_busy");
+        }
+        if self.walkthrough().is_some() {
+            if !self.walkthrough_active {
+                return Err("walkthrough_inactive");
+            }
+            self.step_walkthrough(forward);
+            return Ok(());
+        }
+        self.move_finding(forward)
+    }
+
+    /// Opens walkthrough mode on the next or previous position. Walkthrough
+    /// mode opens on the overview when it was closed.
+    fn step_walkthrough(&mut self, forward: bool) {
+        let current = self.walkthrough_view.unwrap_or(WalkthroughPosition::Overview);
+        let steps = self.walkthrough().map_or(0, |walkthrough| walkthrough.steps().len());
+        let target = if forward { current.next(steps) } else { current.previous() };
+        self.show_walkthrough(target);
+    }
+
+    /// Shows a walkthrough position and scrolls the diff to a step's first
+    /// placed anchor. Stale and ambiguous anchors leave the diff where it is.
+    fn show_walkthrough(&mut self, position: WalkthroughPosition) {
+        self.walkthrough_view = Some(position);
+        if let WalkthroughPosition::Step(index) = position {
+            self.scroll_to_step(index);
+        }
+        self.keep_cursor_visible();
+    }
+
+    /// Closes walkthrough mode. On an authored walkthrough this also ends a
+    /// live-session walkthrough, because the mode is where its steps live.
+    fn close_walkthrough(&mut self) {
+        self.walkthrough_view = None;
+        if self.walkthrough().is_some() {
+            self.walkthrough_active = false;
+        }
+        self.keep_cursor_visible();
+    }
+
+    /// Restores the cursor and scroll invariants after the review area changes height.
+    fn keep_cursor_visible(&mut self) {
+        if self.review.is_some() {
+            self.set_review_cursor(self.review_cursor);
+        } else {
+            self.clamp_scroll();
+        }
+    }
+
+    fn scroll_to_step(&mut self, index: usize) {
+        let anchor = self
+            .walkthrough()
+            .and_then(|walkthrough| walkthrough.steps().get(index))
+            .and_then(|step| step.anchors().iter().find_map(StepAnchor::current_anchor))
+            .cloned();
+        let location = match (&self.state, anchor) {
+            (AppState::Ready(stream), Some(anchor)) => locate_anchor(stream.changeset(), &anchor),
+            _ => None,
+        };
+        let Some((file, hunk, line)) = location else {
+            return;
+        };
+        let hunk_anchor = RowAnchor::Hunk { file, hunk };
+        if self.expand_for_anchor(hunk_anchor) {
+            self.rebuild_stream(self.current_anchor());
+        }
+        let rows = match &self.state {
+            AppState::Ready(stream) => stream.index_of_anchor(hunk_anchor).map(|hunk_row| {
+                let row = line
+                    .and_then(|line| stream.index_of_anchor(RowAnchor::Line { file, hunk, line }))
+                    .unwrap_or(hunk_row);
+                (hunk_row, row)
+            }),
+            AppState::Loading | AppState::Empty | AppState::Error(_) => None,
+        };
+        let Some((hunk_row, row)) = rows else {
+            return;
+        };
+        let cursor = if row.saturating_sub(hunk_row) < self.viewport_height() { row } else { hunk_row };
+        self.jump_to_row(cursor);
+        self.scroll = hunk_row.min(self.max_scroll());
+        self.selected_file = file;
+        self.ensure_sidebar_selection_visible();
+    }
+
+    fn move_finding(&mut self, forward: bool) -> Result<(), &'static str> {
         let has_notes = matches!(&self.state, AppState::Ready(stream) if stream.visible_keys(0, stream.len()).any(|key| matches!(key, RowKey::Note { .. })));
         if !has_notes {
             return Err("not_found");

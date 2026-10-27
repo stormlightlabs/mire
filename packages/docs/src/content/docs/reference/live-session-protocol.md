@@ -33,8 +33,23 @@ conversion.
 `focus` selects a finding by identifier or a changed file range. `next` and
 `previous` move between visible findings. `reload` asks a watched session to run
 its normal reload path; an unwatched session returns `reload_unavailable`.
-Walkthrough actions let another local process mark a session as being driven
-and advance or reverse its finding selection. They never write a review file.
+Walkthrough actions let another local process mark a session as being driven and
+move through a walkthrough. In a review with an authored walkthrough, `start`
+opens walkthrough mode on the overview, `next` and `previous` move between steps
+as `J` and `K` do, and `stop` closes the mode. Closing the mode in the terminal
+with `W` or `Esc` also ends the session walkthrough, so the next `inspect`
+reports `walkthrough_active: false`. While no session walkthrough runs, `next`
+and `previous` return `walkthrough_inactive` and the terminal does not move;
+send `start` to drive it again. A reload that adds or removes the walkthrough
+also ends the session walkthrough, and one that drops the current step moves it
+to the last remaining step. The state's `walkthrough_progress` is the step
+number and the step count, with `0` for the overview. Without an authored
+walkthrough, the actions move through visible findings and
+`walkthrough_progress` is the finding position and count. `walkthrough_progress`
+is `null` whenever `walkthrough_active` is false, including when `W` opened the
+mode in the terminal. Like the other actions, walkthrough actions return
+`interaction_busy` while the terminal has text entry open or unsaved review
+work. Walkthrough actions never write a review file.
 
 Every command emits one JSON response with `schema_version` `{ "major": 1,
 "minor": 0 }`. Successful responses have `status: "ok"`. Failures have
@@ -59,7 +74,8 @@ ranges at 10,000 lines. The server validates the schema version, operation, and
 all input sizes before passing a request to the TUI loop. It returns
 `invalid_request`, `unsupported_version`, `authentication_failed`,
 `payload_too_large`, `session_not_found`, `interaction_busy`,
-`reload_unavailable`, or `not_found` rather than exposing internal errors.
+`reload_unavailable`, `walkthrough_inactive`, or `not_found` rather than
+exposing internal errors.
 
 The socket protocol has no operation for note creation, editing, disposition,
 review-file writes, shell execution, environment inspection, or arbitrary file

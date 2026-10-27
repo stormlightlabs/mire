@@ -1,0 +1,28 @@
+---
+source: crates/ui/src/view.rs
+expression: "snapshot(open(&review, \"JJ\", 120, 24), 120, 24)"
+---
+ Mire review │ split │ focus review │ context 3 │ wrap off │ file 2/3 · 8/15 │ 0 open
+ Files                2/3 │ Step 2 of 3 · Move the dev server port
+  A docs/guide.md       +2│ The default port moves from 80 to 8080, so the server starts without root.
+▌ M src/lib.rs       +1 -1│─────────────────────────────────────────────────────────────────────────────────────────────
+  M src/parse/mod.rs +2 -1│ ▾ docs/guide.md                                                                     added +2
+                          │ ▾ @@ -0,0 +1,2 @@
+                          │                                              │     1 +# Guide
+                          │                                              │     2 +Read key = value lines.
+                          │ ▾ src/lib.rs                                                                  modified +1 -1
+                          │ ▾ @@ -1,3 +1,3 @@
+                          │    1  pub mod parse;                         │     1  pub mod parse;
+                          │    2 >pub const PORT: u16 = 80;              │     2 >pub const PORT: u16 = 8080;
+                          │    3  pub const HOST: &str = "localhost";    │     3  pub const HOST: &str = "localhost";
+                          │ ▾ src/parse/mod.rs                                                            modified +2 -1
+                          │ ▾ @@ -1,3 +1,4 @@
+                          │    1  pub fn split(line: &str) -> Option<(&s │     1  pub fn split(line: &str) -> Option<(&s
+                          │    2 -    line.split_once('=')               │     2 +    let (key, value) = line.split_once
+                          │                                              │     3 +    Some((key.trim(), value.trim()))
+                          │    3  }                                      │     4  }
+                          │
+                          │
+                          │
+                          │
+ walkthrough  J/K steps  j/k move  W / Esc close  ? help  q quit

@@ -56,6 +56,34 @@ or `Esc` to close it.
 When a title is set, the status bar shows it after "Mire review", shortened to
 fit.
 
+## Read a walkthrough
+
+A walkthrough is an agent's ordered explanation of a change, stored in the
+review file. Walkthrough mode shows it in a pane above the diff.
+
+| Key       | Action                                                 |
+| --------- | ------------------------------------------------------ |
+| `W`       | Open walkthrough mode on the overview, or close it     |
+| `J` / `K` | Show the next or previous step, opening the mode first |
+| `Esc`     | Close walkthrough mode                                 |
+
+The overview shows the walkthrough's summary and lists its steps. Each step
+shows "Step 2 of 5", its title, and its narrative, and moves the diff so the
+step's first hunk is at the top and the cursor is on its first line. `J` stops
+on the last step and `K` stops on the overview.
+
+After a refresh, a step's location can be stale, when its code no longer
+matches the diff, or ambiguous, when its code matches more than one place. The
+pane says which, and a step with no placed location leaves the diff where it
+was. Without a walkthrough, the pane says the review has none.
+
+![Walkthrough mode on step 2 of 3, with the narrative above the diff](/screencap_walkthrough.png)
+
+`mire session walkthrough start|next|previous|stop` drives the same mode from
+another process. Closing the mode with `W` or `Esc` ends that session
+walkthrough. See the
+[live-session protocol](/docs/reference/live-session-protocol/).
+
 ## Jump to a changed file
 
 Press `Ctrl-P` to filter changed paths as you type. Results show the file

@@ -36,6 +36,20 @@ const DESCRIPTION_FOOTER: &[(&str, &str)] = &[
 ];
 const RANGE_FOOTER: &[(&str, &str)] = &[("j/k", "extend"), ("c", "note"), ("v / Esc", "cancel")];
 const HELP_FOOTER: &[(&str, &str)] = &[("? / Esc", "close"), ("q", "quit")];
+const WALKTHROUGH_FOOTER: &[(&str, &str)] = &[
+    ("J/K", "steps"),
+    ("j/k", "move"),
+    ("W / Esc", "close"),
+    ("?", "help"),
+    ("q", "quit"),
+];
+const WALKTHROUGH_SIDEBAR_FOOTER: &[(&str, &str)] = &[
+    ("J/K", "steps"),
+    ("j/k", "files"),
+    ("Tab", "review"),
+    ("W / Esc", "close"),
+    ("q", "quit"),
+];
 const REVIEW_FOOTER: &[(&str, &str)] = &[("?", "help"), ("q", "quit")];
 const FINDING_FOOTER: &[(&str, &str)] = &[
     ("e", "edit"),
@@ -123,10 +137,13 @@ pub fn render_title(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Th
     if let Some(open) = app.open_finding_count() {
         push_title_segment(&mut spans, format!("{open} open"), theme.accent, theme);
     }
-    if let Some((current, total)) = app.walkthrough_progress() {
+    if app.walkthrough_active()
+        && let Some((current, total)) = app.walkthrough_progress()
+    {
+        let position = if current == 0 { "overview".to_owned() } else { format!("{current}/{total}") };
         push_title_segment(
             &mut spans,
-            format!("walkthrough {current}/{total} · session stop"),
+            format!("walkthrough {position} · session stop"),
             theme.accent,
             theme,
         );
@@ -167,6 +184,8 @@ fn footer_context(mode: InteractionMode) -> (&'static str, &'static [(&'static s
         InteractionMode::Description => ("description", DESCRIPTION_FOOTER),
         InteractionMode::RangeSelection => ("range", RANGE_FOOTER),
         InteractionMode::Help => ("help", HELP_FOOTER),
+        InteractionMode::Walkthrough => ("walkthrough", WALKTHROUGH_FOOTER),
+        InteractionMode::WalkthroughSidebar => ("walkthrough files", WALKTHROUGH_SIDEBAR_FOOTER),
         InteractionMode::Review => ("", REVIEW_FOOTER),
         InteractionMode::Finding => ("finding", FINDING_FOOTER),
         InteractionMode::Sidebar => ("files", SIDEBAR_FOOTER),

@@ -1,0 +1,20 @@
+---
+source: crates/ui/src/view.rs
+expression: "snapshot(open(&review, \"JJ\", 40, 16), 40, 16)"
+---
+ Mire review │ unified │ focus review │
+ Files      2/3 │ Step 2 of 3 · Move
+  A …cs/guide.md│ the dev server port
+▌ M src/lib.rs  │ The default port
+  M …arse/mod.rs│ moves from 80 to
+                │ 8080, so the server
+                │ starts without root.
+                │───────────────────────
+                │ ▾ @@ -1,3 +1,3 @@    │
+                │    1     1  pub mod p│
+                │    2       -pub const█
+                │          2 >pub const█
+                │    3     3  pub const█
+                │ ▾ src/parse/mod.rs   │
+                │ ▾ @@ -1,3 +1,4 @@    │
+ walkthrough  J/K steps  j/k move

@@ -1,0 +1,10 @@
+---
+source: crates/ui/src/view.rs
+expression: "snapshot(open(&review, \"W\", 20, 6), 20, 6)"
+---
+ Mire review │ unifi
+ File│ Overview · 3
+▌ A …│──────────────
+  M …│ ▾ docs/gu…  █
+  M …│ ▾ @@ -0,0 +1│
+ walkthrough

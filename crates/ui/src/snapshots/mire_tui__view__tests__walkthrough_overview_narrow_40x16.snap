@@ -1,0 +1,20 @@
+---
+source: crates/ui/src/view.rs
+expression: "snapshot(open(&review, \"W\", 40, 16), 40, 16)"
+---
+ Mire review │ unified │ focus review │
+ Files      1/3 │ Overview · 3 steps
+▌ A …cs/guide.md│ Parsed values keep
+  M src/lib.rs  │ their spaces, so
+  M …arse/mod.rs│ `port = 8080` fails
+                │ to match. This change
+                │ … 8 more lines
+                │───────────────────────
+                │ ▾ docs/guide.md      █
+                │ ▾ @@ -0,0 +1,2 @@    █
+                │          1 +# Guide  █
+                │          2 +Read key │
+                │ ▾ src/lib.rs         │
+                │ ▾ @@ -1,3 +1,3 @@    │
+                │    1     1  pub mod p│
+ walkthrough  J/K steps  j/k move

@@ -4,13 +4,14 @@ use std::path::Path;
 
 use axum::body::Body;
 use axum::extract::State;
+use axum::extract::rejection::JsonRejection;
 use axum::http::{Response, StatusCode, Uri};
 use axum::response::{IntoResponse, Json};
 use mire_core::{BytePath, Fingerprint, Review, ReviewError, ReviewRevision, ViewedMark};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use super::{AppState, PathText, Problem, ServerEventKind, local_author, problem, publish};
+use super::{AppState, PathText, Problem, announce_viewed, local_author, problem};
 use crate::review_file::{ReviewFileError, update_review_viewed};
 
 enum ViewedChange {
@@ -68,22 +69,27 @@ impl ViewedState {
     request_body = MarkViewedRequest,
     responses(
         (status = 200, description = "The reader's mark; the revision does not change", body = ViewedResponse),
-        (status = 400, description = "The path is not hex or not a valid path", body = Problem),
-        (status = 409, description = "The file did not have this fingerprint at this revision", body = Problem)
+        (status = 400, description = "The path is not hex or not a valid path (`invalid_path`), or the body is not JSON with a 64-hex-digit fingerprint and a positive revision (`invalid_viewed_mark`)", body = Problem),
+        (status = 409, description = "The file did not have this fingerprint at this revision", body = Problem),
+        (status = 422, description = "The reader or the review is at its limit of viewed marks", body = Problem),
+        (status = 423, description = "Another process holds the review lock", body = Problem)
     )
 )]
 pub async fn put_viewed(
-    State(state): State<AppState>, uri: Uri, axum::Json(request): axum::Json<MarkViewedRequest>,
+    State(state): State<AppState>, uri: Uri, body: Result<axum::Json<MarkViewedRequest>, JsonRejection>,
 ) -> Response<Body> {
     let Some(path) = query_path(&uri) else {
         return invalid_path();
     };
+    let Ok(axum::Json(request)) = body else {
+        return invalid_mark();
+    };
     let fingerprint = match serde_json::from_value::<Fingerprint>(serde_json::Value::String(request.fingerprint)) {
         Ok(fingerprint) => fingerprint,
-        Err(_) => return viewed_mismatch(),
+        Err(_) => return invalid_mark(),
     };
     let Ok(revision) = ReviewRevision::new(request.revision) else {
-        return viewed_mismatch();
+        return invalid_mark();
     };
     change_viewed(state, path, ViewedChange::Mark { fingerprint, revision }).await
 }
@@ -95,7 +101,8 @@ pub async fn put_viewed(
     params(("path" = String, Query, description = "The file's path bytes as lowercase hex, from a path's `raw` field")),
     responses(
         (status = 200, description = "The path with no mark; the revision does not change", body = ViewedResponse),
-        (status = 400, description = "The path is not hex or not a valid path", body = Problem)
+        (status = 400, description = "The path is not hex or not a valid path", body = Problem),
+        (status = 423, description = "Another process holds the review lock", body = Problem)
     )
 )]
 pub async fn delete_viewed(State(state): State<AppState>, uri: Uri) -> Response<Body> {
@@ -124,7 +131,7 @@ async fn change_viewed(state: AppState, path: BytePath, change: ViewedChange) ->
         tokio::task::spawn_blocking(move || apply_change(&review_path, &changed_reader, &changed_path, change)).await;
     match result {
         Ok(Ok(review)) => {
-            publish(&state, ServerEventKind::Viewed, Some(review.revision().get()));
+            announce_viewed(&state, &review);
             Json(ViewedResponse {
                 revision: review.revision().get(),
                 path: PathText::from_bytes(path.as_bytes()),
@@ -180,10 +187,14 @@ fn decode_hex(value: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
+/// Reads one lowercase hex digit. Uppercase is rejected so each path has one
+/// spelling.
 fn hex_value(digit: u8) -> Option<u8> {
-    char::from(digit)
-        .to_digit(16)
-        .and_then(|value| u8::try_from(value).ok())
+    match digit {
+        b'0'..=b'9' => Some(digit - b'0'),
+        b'a'..=b'f' => Some(digit - b'a' + 10),
+        _ => None,
+    }
 }
 
 fn invalid_path() -> Response<Body> {
@@ -191,6 +202,14 @@ fn invalid_path() -> Response<Body> {
         StatusCode::BAD_REQUEST,
         "invalid_path",
         "The path query parameter must be a file path's bytes as hex.",
+    )
+}
+
+fn invalid_mark() -> Response<Body> {
+    problem(
+        StatusCode::BAD_REQUEST,
+        "invalid_viewed_mark",
+        "The body must be JSON with a 64-hex-digit fingerprint and a positive revision.",
     )
 }
 

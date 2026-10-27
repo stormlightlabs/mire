@@ -144,7 +144,7 @@ Both commands print the reader's mark for the path, or `null` once cleared:
 
 ```json
 {
-	"schema_version": { "major": 1, "minor": 4 },
+	"schema_version": { "major": 1, "minor": 5 },
 	"status": "viewed",
 	"review_revision": 3,
 	"reader": "review-agent",
@@ -193,7 +193,7 @@ and limits.
 
 ```json
 {
-	"schema_version": { "major": 1, "minor": 4 },
+	"schema_version": { "major": 1, "minor": 5 },
 	"review_revision": 3,
 	"overview": "Move parsing behind one entry point.",
 	"author": { "id": "review-agent", "display_name": null },
@@ -241,7 +241,7 @@ zero-based `step_index`:
 
 ```json
 {
-	"schema_version": { "major": 1, "minor": 4 },
+	"schema_version": { "major": 1, "minor": 5 },
 	"status": "rejected",
 	"failures": [
 		{ "step_index": 1, "code": "location_not_found", "error": "source location is not present on one changed hunk" }
@@ -299,14 +299,18 @@ it was marked shows as changed since viewed.
 | `PUT /api/v1/viewed?path=`    | Marks the path viewed at the `fingerprint` and `revision` in the body. |
 | `DELETE /api/v1/viewed?path=` | Clears the reader's mark for the path.                                 |
 
-`path=` takes a path's `raw` field: its bytes as hex. Every path in a response
-carries `raw` next to `display` and `lossy`, so a path that is not valid UTF-8
-still round-trips. A value that is not hex or not a valid path fails with
-`invalid_path` (400). A mark for a fingerprint the file does not have at the
-current revision fails with `viewed_mismatch` (409). Neither route changes the
-review revision. Both send a `viewed` event on `GET /api/v1/events`, and the
-server also sends one when a mark written by the CLI or the terminal changes
-the file without changing its revision.
+`path=` takes a path's `raw` field: its bytes as lowercase hex. Every path in a
+response carries `raw` next to `display` and `lossy`, so a path that is not
+valid UTF-8 still round-trips. A value that is not lowercase hex or not a valid
+path fails with `invalid_path` (400). A body without a 64-digit hex
+`fingerprint` and a positive `revision` fails with `invalid_viewed_mark` (400).
+A mark for a fingerprint the file does not have at the current revision fails
+with `viewed_mismatch` (409). A mark past a limit fails with
+`too_many_viewed_marks` or `too_many_viewed_readers` (422), and a review another
+process is writing with `review_locked` (423). Neither route changes the review
+revision. Each change sends one `viewed` event on `GET /api/v1/events`, and the
+server also sends one when a mark written by the CLI or the terminal changes the
+file without changing its revision.
 
 ```sh
 # Serve a review on the default port

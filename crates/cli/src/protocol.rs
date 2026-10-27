@@ -12,7 +12,7 @@ use serde_json::json;
 use thiserror::Error;
 
 /// Protocol schema emitted by non-interactive review commands.
-pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 4 };
+pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 5 };
 
 /// The keys [`LocationFields`] reads, aliases included. Keep it in step with
 /// the struct: walkthrough steps reject any other key.

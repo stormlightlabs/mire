@@ -56,6 +56,7 @@ impl Fixture {
             request_ids: Arc::new(AtomicU64::new(1)),
             events: broadcast::channel(16).0,
             watch_status: Arc::new(Mutex::new(WatchStatus::Unavailable)),
+            announced_viewed: Arc::new(Mutex::new(ViewedMap::new())),
         };
         Self { directory, state }
     }
@@ -697,7 +698,7 @@ async fn the_watcher_announces_a_write_made_before_it_started() {
 
     // The review is at revision 2, but the server read revision 1 before it
     // printed its URL, so the watcher must report the write it never saw.
-    let watcher = start_watcher(state, 1, ViewedMap::new(), shutdown_receiver);
+    let watcher = start_watcher(state, 1, shutdown_receiver);
     let received = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match events.recv().await {
@@ -769,6 +770,7 @@ async fn viewed_marks_reject_bad_paths_and_changed_fingerprints() {
         "/api/v1/viewed?path=%66%69".to_owned(),
         format!("/api/v1/viewed?path=2e2e2f{raw}"),
         format!("/api/v1/viewed?path={raw}&path={raw}"),
+        format!("/api/v1/viewed?path={}", raw.to_uppercase()),
     ] {
         let (status, problem) = send_json(fixture.state(), api_request(Method::PUT, &route, Some(&body))).await;
         assert_eq!(status, StatusCode::BAD_REQUEST, "{route}");
@@ -777,9 +779,18 @@ async fn viewed_marks_reject_bad_paths_and_changed_fingerprints() {
 
     let route = format!("/api/v1/viewed?path={raw}");
     for body in [
+        r#"{"fingerprint":"not hex","revision":2}"#.to_owned(),
+        format!(r#"{{"fingerprint":"{id}","revision":0}}"#),
+        r#"{"revision":2}"#.to_owned(),
+        "not json".to_owned(),
+    ] {
+        let (status, problem) = send_json(fixture.state(), api_request(Method::PUT, &route, Some(&body))).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(problem["code"], "invalid_viewed_mark", "{body}");
+    }
+    for body in [
         format!(r#"{{"fingerprint":"{id}","revision":1}}"#),
         format!(r#"{{"fingerprint":"{}","revision":2}}"#, "0".repeat(64)),
-        r#"{"fingerprint":"not hex","revision":2}"#.to_owned(),
     ] {
         let (status, problem) = send_json(fixture.state(), api_request(Method::PUT, &route, Some(&body))).await;
         assert_eq!(status, StatusCode::CONFLICT, "{body}");
@@ -829,8 +840,7 @@ fn the_watcher_announces_marks_that_change_without_a_new_revision() {
     let state = fixture.state();
     let mut events = state.events.subscribe();
     let review = read_review(fixture.path()).expect("review");
-    let mut known = review.viewed().clone();
-    announce_viewed(&state, &mut known, &review);
+    announce_viewed(&state, &review);
     assert!(events.try_recv().is_err(), "unchanged marks are not announced");
 
     let file = &review.changeset().files()[0];
@@ -842,10 +852,46 @@ fn the_watcher_announces_marks_that_change_without_a_new_revision() {
             review.revision(),
         )
         .expect("mark");
-    announce_viewed(&state, &mut known, &marked);
+    announce_viewed(&state, &marked);
     let event = events.try_recv().expect("an event for the new mark");
     assert_eq!((event.kind, event.revision), (ServerEventKind::Viewed, Some(2)));
-    assert_eq!(&known, marked.viewed());
-    announce_viewed(&state, &mut known, &marked);
+    announce_viewed(&state, &marked);
     assert!(events.try_recv().is_err(), "a known mark is not announced again");
+}
+
+#[tokio::test]
+async fn a_viewed_route_and_the_watcher_announce_one_change_once() {
+    let fixture = Fixture::with_note();
+    let (id, raw) = first_file(&fixture).await;
+    let mut events = fixture.state.events.subscribe();
+    let route = format!("/api/v1/viewed?path={raw}");
+    let body = format!(r#"{{"fingerprint":"{id}","revision":2}}"#);
+    let (status, _) = send_json(fixture.state(), api_request(Method::PUT, &route, Some(&body))).await;
+    assert_eq!(status, StatusCode::OK);
+    let event = events.try_recv().expect("the route announces the mark");
+    assert_eq!(event.kind, ServerEventKind::Viewed);
+
+    // The watcher then reloads the file the route wrote.
+    announce_viewed(&fixture.state, &read_review(fixture.path()).expect("review"));
+    assert!(
+        events.try_recv().is_err(),
+        "the watcher does not announce the mark again"
+    );
+
+    // A mark the watcher saw first is not announced again by the route.
+    let review = read_review(fixture.path()).expect("review");
+    let cleared = review
+        .unmark_viewed(local_author().id(), &BytePath::new(b"file.rs".to_vec()).expect("path"))
+        .expect("clear");
+    announce_viewed(&fixture.state, &cleared);
+    assert_eq!(
+        events.try_recv().expect("the watcher announces").kind,
+        ServerEventKind::Viewed
+    );
+    let (status, _) = send_json(fixture.state(), api_request(Method::DELETE, &route, None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        events.try_recv().is_err(),
+        "the route does not announce the clear again"
+    );
 }

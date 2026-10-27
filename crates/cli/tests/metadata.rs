@@ -102,7 +102,7 @@ fn review_init_stores_title_and_description_and_context_reports_them() {
     assert_eq!(review["description"], "Fixes the parser.\n\nIt also trims spaces.");
 
     let context = json(&fixture.mire(&["context", "review.json"], b""));
-    assert_eq!(context["schema_version"]["minor"], 4);
+    assert_eq!(context["schema_version"]["minor"], 5);
     assert_eq!(context["payload"]["title"], "Fix the parser");
     assert_eq!(
         context["payload"]["description"],

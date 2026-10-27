@@ -73,6 +73,10 @@ struct AppState {
     request_ids: Arc<AtomicU64>,
     events: broadcast::Sender<ServerEvent>,
     watch_status: Arc<Mutex<WatchStatus>>,
+    /// Viewed marks as of the last `Viewed` event or revision change. The
+    /// watcher and the viewed routes both compare against it, so one change
+    /// sends one event.
+    announced_viewed: Arc<Mutex<ViewedMap>>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -422,14 +426,10 @@ pub async fn run(arguments: ServeArgs) -> Result<(), ServeError> {
         request_ids: Arc::new(AtomicU64::new(1)),
         events,
         watch_status: Arc::new(Mutex::new(initial_watch_status)),
+        announced_viewed: Arc::new(Mutex::new(initial_review.viewed().clone())),
     };
     let (shutdown, shutdown_receiver) = watch::channel(false);
-    let watcher = start_watcher(
-        state.clone(),
-        initial_revision,
-        initial_review.viewed().clone(),
-        shutdown_receiver,
-    );
+    let watcher = start_watcher(state.clone(), initial_revision, shutdown_receiver);
 
     println!("Mire review server: {session_url}");
     if arguments.open {
@@ -485,13 +485,11 @@ async fn shutdown_signal() {
     eprintln!("Shutting down Mire review server…");
 }
 
-fn start_watcher(
-    state: AppState, initial_revision: u64, initial_viewed: ViewedMap, shutdown: watch::Receiver<bool>,
-) -> JoinHandle<()> {
-    tokio::task::spawn_blocking(move || watch_review(state, initial_revision, initial_viewed, shutdown))
+fn start_watcher(state: AppState, initial_revision: u64, shutdown: watch::Receiver<bool>) -> JoinHandle<()> {
+    tokio::task::spawn_blocking(move || watch_review(state, initial_revision, shutdown))
 }
 
-fn watch_review(state: AppState, initial_revision: u64, initial_viewed: ViewedMap, shutdown: watch::Receiver<bool>) {
+fn watch_review(state: AppState, initial_revision: u64, shutdown: watch::Receiver<bool>) {
     let review_parent = watched_file_parent(&state.review_path);
     let mut review_watcher = match WatchSet::new(&review_parent, false) {
         Ok(watcher) => watcher,
@@ -520,7 +518,6 @@ fn watch_review(state: AppState, initial_revision: u64, initial_viewed: ViewedMa
     );
     let mut source_retry = Instant::now() + Duration::from_secs(2);
     let mut revision = Some(initial_revision);
-    let mut viewed = initial_viewed;
     // The review file is checked once after the watchers exist, which catches
     // a write that landed before they could report it.
     let mut first_pass = true;
@@ -560,10 +557,10 @@ fn watch_review(state: AppState, initial_revision: u64, initial_viewed: ViewedMa
             match read_review(&state.review_path) {
                 Ok(review) if revision != Some(review.revision().get()) => {
                     announce_revision(&state, &mut revision, review.revision().get(), false);
-                    viewed = review.viewed().clone();
+                    remember_viewed(&state, review.viewed());
                 }
                 Ok(review) => {
-                    announce_viewed(&state, &mut viewed, &review);
+                    announce_viewed(&state, &review);
                     if !source_degraded {
                         set_watch_status(
                             &state,
@@ -586,7 +583,7 @@ fn watch_review(state: AppState, initial_revision: u64, initial_viewed: ViewedMa
                         result.review().revision().get(),
                         result.changed(),
                     );
-                    viewed = result.review().viewed().clone();
+                    remember_viewed(&state, result.review().viewed());
                     if source_watcher.is_some() {
                         source_degraded = false;
                         set_watch_status(&state, WatchStatus::Watching);
@@ -620,14 +617,29 @@ fn announce_revision(state: &AppState, announced: &mut Option<u64>, current: u64
 }
 
 /// Publishes `Viewed` when the review's marks differ from the ones last
-/// seen at the same revision. Marks never advance the revision, so a mark
-/// written by the CLI or the terminal reaches open tabs only this way.
-fn announce_viewed(state: &AppState, known: &mut ViewedMap, review: &Review) {
-    if known == review.viewed() {
-        return;
+/// announced. Marks never advance the revision, so a mark written by the CLI
+/// or the terminal reaches open tabs only this way. A viewed route calls it
+/// after its write, and the watcher then finds nothing new.
+fn announce_viewed(state: &AppState, review: &Review) {
+    let changed = state.announced_viewed.lock().is_ok_and(|mut known| {
+        if *known == *review.viewed() {
+            false
+        } else {
+            *known = review.viewed().clone();
+            true
+        }
+    });
+    if changed {
+        publish(state, ServerEventKind::Viewed, Some(review.revision().get()));
     }
-    *known = review.viewed().clone();
-    publish(state, ServerEventKind::Viewed, Some(review.revision().get()));
+}
+
+/// Records marks that arrived with a new revision. The revision's own event
+/// already tells tabs to reload them.
+fn remember_viewed(state: &AppState, viewed: &ViewedMap) {
+    if let Ok(mut known) = state.announced_viewed.lock() {
+        known.clone_from(viewed);
+    }
 }
 
 fn create_source_watcher(state: &AppState) -> Result<Option<WatchSet>, crate::watch::WatchError> {

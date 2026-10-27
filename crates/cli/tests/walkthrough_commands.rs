@@ -75,10 +75,16 @@ fn invalid_anchors_are_rejected_with_stable_codes_and_write_nothing() {
         "Both sides",
         json!({ "file": "src/lib.rs", "old_line": 2, "new_line": 2 }),
     );
-    let rejected = fixture.apply(&batch(1, vec![malformed]));
+    let rejected = fixture.apply(&batch(1, vec![contract_step(), malformed]));
     assert_eq!(rejected.status.code(), Some(8));
     let report: Value = serde_json::from_slice(&rejected.stderr).unwrap();
+    assert_eq!(report["status"], "rejected");
+    assert_eq!(report["failures"][0]["step_index"], 1);
     assert_eq!(report["failures"][0]["code"], "invalid_input");
+    assert_eq!(
+        report["failures"][0]["error"],
+        "supply either side and start, old_line, or new_line"
+    );
 
     let mut human = batch(1, vec![contract_step()]);
     human["provenance"] = json!({ "kind": "human" });
@@ -97,6 +103,7 @@ fn stale_revisions_are_rejected_for_apply_and_clear() {
     let stale_apply = fixture.apply(&batch(1, vec![implementation_step()]));
     assert_eq!(stale_apply.status.code(), Some(8));
     let report: Value = serde_json::from_slice(&stale_apply.stderr).unwrap();
+    assert_eq!(report["schema_version"], json!({ "major": 1, "minor": 4 }));
     assert_eq!(report["failures"][0]["code"], "revision_conflict");
     assert_eq!(report["failures"][0]["expected"], 1);
     assert_eq!(report["failures"][0]["actual"], 2);

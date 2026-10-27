@@ -207,7 +207,8 @@ Codes include `location_not_found`, `context_only_location`,
 `ambiguous_location`, `step_without_anchors`, `duplicate_step_id`,
 `forward_step_dependency`, `human_provenance_forbidden`, and
 `revision_conflict`, which also reports `expected` and `actual`. A location
-with conflicting or missing line fields fails with `invalid_input`.
+with conflicting or missing line fields is a step failure with the code
+`invalid_input`.
 
 `walkthrough show` prints the overview, each step with its anchors and their
 re-anchor states, and what the walkthrough leaves out: hunks no anchor covers,

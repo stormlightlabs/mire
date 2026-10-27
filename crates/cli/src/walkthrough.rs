@@ -55,8 +55,16 @@ impl AnchorState {
 /// Why a walkthrough batch could not become a core write.
 #[derive(Debug)]
 pub enum BatchError {
-    /// The batch breaks the protocol, such as a malformed location.
+    /// The batch breaks the protocol, such as an unsupported schema major.
     Protocol(ProtocolError),
+    /// A step holds a malformed location, such as one with both `old_line`
+    /// and `new_line`.
+    InvalidLocation {
+        /// The zero-based index of the step.
+        index: usize,
+        /// Why the location is malformed.
+        error: ProtocolError,
+    },
     /// The batch breaks a review rule, such as the step identifier rules.
     Review(ReviewError),
 }
@@ -163,7 +171,7 @@ struct UncoveredFile<'a> {
 impl WalkthroughBatch {
     /// Validates the batch schema and converts it into a core walkthrough write.
     ///
-    /// Malformed locations fail with [`BatchError::Protocol`]. Step
+    /// Malformed locations fail with [`BatchError::InvalidLocation`]. Step
     /// identifiers that break the identifier rules fail with
     /// [`BatchError::Review`] holding [`ReviewError::InvalidStep`].
     pub fn into_write(self) -> std::result::Result<WalkthroughWrite, BatchError> {
@@ -200,15 +208,12 @@ impl StepRequest {
             .locations
             .into_iter()
             .map(|location| {
-                let (path, side, range) = location.into_parts().map_err(|error| match error {
-                    ProtocolError::InvalidInput(message) => {
-                        ProtocolError::InvalidInput(format!("walkthrough step {index}: {message}"))
-                    }
-                    other => other,
-                })?;
+                let (path, side, range) = location
+                    .into_parts()
+                    .map_err(|error| BatchError::InvalidLocation { index, error })?;
                 Ok(StepLocation::new(path, side, range))
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<std::result::Result<Vec<_>, BatchError>>()?;
         Ok(StepInput::new(
             id,
             self.title,
@@ -275,6 +280,26 @@ pub fn rejection_json(error: &ReviewError) -> Result<Vec<u8>> {
         "schema_version": CURRENT_PROTOCOL_SCHEMA_VERSION,
         "status": "rejected",
         "failures": [failure],
+    }))
+}
+
+/// Serializes a walkthrough write rejected for a malformed step location.
+///
+/// The failure names the step by `step_index` and carries the location
+/// error's code, such as `invalid_input`, and its reason alone.
+pub fn location_rejection_json(index: usize, error: &ProtocolError) -> Result<Vec<u8>> {
+    let reason = match error {
+        ProtocolError::InvalidInput(reason) => reason.clone(),
+        other => other.to_string(),
+    };
+    to_json_line(&json!({
+        "schema_version": CURRENT_PROTOCOL_SCHEMA_VERSION,
+        "status": "rejected",
+        "failures": [{
+            "step_index": index,
+            "code": error.error_code(),
+            "error": reason,
+        }],
     }))
 }
 

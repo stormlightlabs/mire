@@ -605,6 +605,17 @@ pub fn import_error_json(error: &NoteImportError) -> Result<Vec<u8>> {
     rejection_json(failures)
 }
 
+/// Serializes a write rejected because the review file moved past the
+/// revision the caller read.
+pub fn revision_conflict_json(expected: u64, actual: u64) -> Result<Vec<u8>> {
+    rejection_json(vec![json!({
+        "code": "revision_conflict",
+        "error": format!("review revision conflict: expected {expected}, found {actual}"),
+        "expected": expected,
+        "actual": actual,
+    })])
+}
+
 fn rejection_json(failures: Vec<serde_json::Value>) -> Result<Vec<u8>> {
     let value = json!({
         "schema_version": CURRENT_PROTOCOL_SCHEMA_VERSION,

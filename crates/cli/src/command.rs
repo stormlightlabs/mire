@@ -20,6 +20,7 @@ use crate::output_file::{OutputFileError, write_output_atomic};
 use crate::protocol::{
     ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, context_json, import_error_json,
     import_result_json, notes_json, notes_markdown, protocol_error_json, review_status_json, review_status_text,
+    revision_conflict_json,
 };
 use crate::refresh::{RefreshError, refresh_review as refresh_review_file};
 use crate::review_file::{
@@ -28,8 +29,8 @@ use crate::review_file::{
 use crate::serve::{self, ServeError};
 use crate::skill::{self, SkillError};
 use crate::walkthrough::{
-    BatchError, WalkthroughBatch, apply_result_json, clear_result_json, rejection_json, walkthrough_json,
-    walkthrough_text,
+    BatchError, WalkthroughBatch, apply_result_json, clear_result_json, location_rejection_json, rejection_json,
+    walkthrough_json, walkthrough_text,
 };
 use crate::watch::{WatchError, WatchSet};
 
@@ -710,20 +711,9 @@ fn disposition_note(arguments: NoteDispositionArgs, status: NoteStatus) -> Resul
 fn write_mutation(path: &Path, expected_revision: u64, review: &Review) -> Result<(), AppError> {
     let expected = ReviewRevision::new(expected_revision).map_err(AppError::InitializeReview)?;
     write_review_atomic_if_revision(path, expected, review).map_err(|error| match error {
-        ReviewFileError::RevisionConflict { expected, actual } => {
-            let report = serde_json::to_vec(&serde_json::json!({
-                "schema_version": { "major": 1, "minor": 1 },
-                "status": "rejected",
-                "failures": [{
-                    "code": "revision_conflict",
-                    "error": format!("review revision conflict: expected {expected}, found {actual}"),
-                    "expected": expected,
-                    "actual": actual,
-                }],
-            }))
-            .unwrap_or_else(|_| b"{\"status\":\"rejected\"}".to_vec());
-            AppError::MutationRejected { report: [report, b"\n".to_vec()].concat() }
-        }
+        ReviewFileError::RevisionConflict { expected, actual } => revision_conflict_json(expected, actual)
+            .map(|report| AppError::MutationRejected { report })
+            .unwrap_or_else(AppError::Protocol),
         other => AppError::ReviewFile(other),
     })
 }
@@ -767,6 +757,9 @@ fn apply_walkthrough(review_path: &OsStr) -> Result<(), AppError> {
     let write = batch.into_write().map_err(|error| match error {
         BatchError::Protocol(error) => AppError::Protocol(error),
         BatchError::Review(error) => walkthrough_rejected(&error),
+        BatchError::InvalidLocation { index, error } => location_rejection_json(index, &error)
+            .map(|report| AppError::MutationRejected { report })
+            .unwrap_or_else(AppError::Protocol),
     })?;
     let expected = ReviewRevision::new(write.revision).map_err(|error| walkthrough_rejected(&error))?;
     let updated = review

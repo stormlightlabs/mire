@@ -66,6 +66,81 @@ fn review_files_without_a_walkthrough_still_load() {
 }
 
 #[test]
+fn step_ids_follow_the_title_rules() {
+    assert_eq!(
+        StepId::new(" "),
+        Err(ReviewError::BlankField { field: "step identifier" })
+    );
+    assert_eq!(
+        StepId::new("a\nb"),
+        Err(ReviewError::MultilineField { field: "step identifier" })
+    );
+    assert_eq!(
+        StepId::new("a\u{1b}b"),
+        Err(ReviewError::ControlCharacter { field: "step identifier" })
+    );
+    assert!(matches!(
+        StepId::new(""),
+        Err(ReviewError::InvalidTextField { field: "step identifier", .. })
+    ));
+    assert_eq!(StepId::new("parser-fix").unwrap().as_str(), "parser-fix");
+}
+
+#[test]
+fn walkthrough_carried_through_an_older_refresh_loads_with_stale_anchors() {
+    let written = written_review(changeset(TWO_FILES));
+    let walkthrough = serde_json::to_value(&written).unwrap()["walkthrough"].clone();
+
+    // A Mire that predates walkthroughs refreshes the capture, keeps the
+    // walkthrough as an unknown field, and does not re-anchor it.
+    let refreshed = review(changeset(
+        b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+fixed\n--- a/other.txt\n+++ b/other.txt\n@@ -1 +1 @@\n-a\n+b\n",
+    ));
+    let line = LineNumber::new(1).unwrap();
+    let note = mire_core::NoteInput::new(
+        BytePath::new(b"other.txt".to_vec()).unwrap(),
+        AnchorSide::New,
+        LineRange::new(line, line).unwrap(),
+        agent(),
+        Provenance::Agent { producer: "test".to_owned() },
+        mire_core::NoteSeverity::Low,
+        mire_core::AnnotationKind::Comment,
+        "Finding".to_owned(),
+    )
+    .unwrap();
+    let refreshed = refreshed.apply_notes(vec![note]).unwrap();
+    let mut json = serde_json::to_value(&refreshed).unwrap();
+    json["schema_version"]["minor"] = 4.into();
+    json["walkthrough"] = walkthrough;
+
+    let loaded: Review = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(loaded.notes().len(), 1);
+    let Some(ReanchorOutcome::Stale { original_anchor, evidence }) = first_outcome(&loaded) else {
+        panic!("an anchor that no longer matches the capture should load as stale");
+    };
+    assert_eq!(
+        original_anchor,
+        written.walkthrough().unwrap().steps()[0].anchors()[0].anchor()
+    );
+    assert!(evidence.path_match());
+    assert!(loaded.walkthrough().unwrap().steps()[0].has_unsettled_anchor());
+    assert_eq!(
+        loaded.walkthrough_coverage().unwrap().uncovered_hunks,
+        [
+            HunkLocation { file_index: 0, hunk_index: 0 },
+            HunkLocation { file_index: 1, hunk_index: 0 }
+        ]
+    );
+    let reloaded: Review = serde_json::from_str(&serde_json::to_string(&loaded).unwrap()).unwrap();
+    assert_eq!(reloaded, loaded);
+
+    // Structural rules still reject the file.
+    json["walkthrough"]["steps"][0]["depends_on"] = serde_json::json!(["missing"]);
+    let error = serde_json::from_value::<Review>(json).unwrap_err();
+    assert!(error.to_string().contains("missing"), "{error}");
+}
+
+#[test]
 fn walkthrough_writes_need_the_current_revision() {
     let review = review(changeset(TWO_FILES));
     let written = review
@@ -112,12 +187,16 @@ fn walkthrough_writes_reject_invalid_steps() {
     );
     assert_eq!(
         write(vec![step(None, "Two\nlines", "file.txt", &[])]),
-        Err(step_error(0, ReviewError::MultilineStepTitle))
+        Err(step_error(0, ReviewError::MultilineField { field: "step title" }))
     );
     assert_eq!(
         write(vec![step(None, "Missing", "absent.txt", &[])]),
         Err(step_error(0, ReviewError::LocationNotFound))
     );
+    let error = write(vec![step(None, "Missing", "absent.txt", &[])]).unwrap_err();
+    assert_eq!(error.error_code(), "invalid_walkthrough_step");
+    assert_eq!(error.cause_code(), "location_not_found");
+    assert_eq!(ReviewError::LocationNotFound.cause_code(), "location_not_found");
     assert_eq!(
         write(vec![StepInput::new(
             None,
@@ -224,6 +303,19 @@ fn coverage_counts_only_exact_and_moved_anchors() {
         [HunkLocation { file_index: 2, hunk_index: 0 }]
     );
     assert_eq!(coverage.uncovered_files, [1]);
+
+    let moved = written
+        .reanchor(changeset(
+            b"--- a/file.txt\n+++ b/file.txt\n@@ -1,2 +1,3 @@\n context\n+inserted\n-old\n+bug\n--- a/other.txt\n+++ b/other.txt\n@@ -1 +1 @@\n-a\n+c\n",
+        ))
+        .unwrap();
+    assert!(matches!(first_outcome(&moved), Some(ReanchorOutcome::Moved { .. })));
+    let coverage = moved.walkthrough_coverage().unwrap();
+    assert_eq!(
+        coverage.uncovered_hunks,
+        [HunkLocation { file_index: 1, hunk_index: 0 }]
+    );
+    assert!(coverage.uncovered_files.is_empty());
 
     let stale = written
         .reanchor(changeset(

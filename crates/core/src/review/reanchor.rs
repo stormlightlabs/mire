@@ -91,6 +91,15 @@ pub fn classify_anchor(
     }
 }
 
+/// Marks one recorded anchor stale against `current` without searching for a
+/// new location, for an anchor whose previous capture is no longer known.
+pub fn stale_outcome(anchor: &Anchor, outcome: Option<&ReanchorOutcome>, current: &Changeset) -> ReanchorOutcome {
+    ReanchorOutcome::Stale {
+        original_anchor: anchor.clone(),
+        evidence: stale_evidence(current, &source_anchors(anchor, outcome)),
+    }
+}
+
 fn stale_evidence(changeset: &Changeset, source_anchors: &[Anchor]) -> ReanchorEvidence {
     let path_match = source_anchors.iter().any(|anchor| {
         changeset

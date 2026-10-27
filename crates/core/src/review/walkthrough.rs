@@ -31,10 +31,11 @@ const MAX_STEP_ID_BYTES: usize = 128;
 pub struct StepId(String);
 
 impl StepId {
-    /// Creates a bounded, non-empty step identifier.
+    /// Creates a step identifier: one line of at most 128 bytes, not blank,
+    /// with no control characters.
     pub fn new(value: impl Into<String>) -> Result<Self> {
         let value = value.into();
-        validate_text("step identifier", &value, MAX_STEP_ID_BYTES)?;
+        validate_line("step identifier", &value, MAX_STEP_ID_BYTES)?;
         Ok(Self(value))
     }
 
@@ -341,6 +342,25 @@ pub fn reanchor_walkthrough(walkthrough: &Walkthrough, previous: &Changeset, cur
     refreshed
 }
 
+/// Marks stale every step anchor that no longer matches `changeset`.
+///
+/// A capture can change under a walkthrough without a re-anchor, as when a
+/// Mire that predates walkthroughs refreshes the review and keeps the
+/// walkthrough as an unknown field. Those anchors cannot be matched again
+/// because the capture they were recorded against is gone, so they become
+/// stale rather than making the review fail to load.
+pub fn settle_unmatched_anchors(changeset: &Changeset, walkthrough: &mut Walkthrough) {
+    for anchor in walkthrough.steps.iter_mut().flat_map(|step| step.anchors.iter_mut()) {
+        if validate_anchor_state(changeset, &anchor.anchor, anchor.reanchor_outcome.as_ref()).is_err() {
+            anchor.reanchor_outcome = Some(reanchor::stale_outcome(
+                &anchor.anchor,
+                anchor.reanchor_outcome.as_ref(),
+                changeset,
+            ));
+        }
+    }
+}
+
 /// Lists the hunks no exact or moved step anchor overlaps, and the files that have no hunks.
 pub fn coverage(changeset: &Changeset, walkthrough: &Walkthrough) -> WalkthroughCoverage {
     let anchors = walkthrough
@@ -374,7 +394,7 @@ fn validate_step(changeset: &Changeset, step: &WalkthroughStep, earlier: &BTreeS
     if earlier.contains(&step.id) {
         return Err(ReviewError::DuplicateStepId(step.id.0.clone()));
     }
-    validate_title(&step.title)?;
+    validate_line("step title", &step.title, MAX_STEP_TITLE_BYTES)?;
     validate_markdown("step narrative", &step.narrative)?;
     if let Some(diagram) = &step.diagram {
         validate_markdown("step diagram", diagram)?;
@@ -391,16 +411,17 @@ fn validate_step(changeset: &Changeset, step: &WalkthroughStep, earlier: &BTreeS
     Ok(())
 }
 
-fn validate_title(title: &str) -> Result<()> {
-    validate_text("step title", title, MAX_STEP_TITLE_BYTES)?;
-    if title.contains(['\n', '\r']) {
-        return Err(ReviewError::MultilineStepTitle);
+/// Checks a one-line field: bounded, not blank, and free of control characters.
+fn validate_line(field: &'static str, text: &str, max: usize) -> Result<()> {
+    validate_text(field, text, max)?;
+    if text.contains(['\n', '\r']) {
+        return Err(ReviewError::MultilineField { field });
     }
-    if title.chars().any(char::is_control) {
-        return Err(ReviewError::ControlCharacter { field: "step title" });
+    if text.chars().any(char::is_control) {
+        return Err(ReviewError::ControlCharacter { field });
     }
-    if title.trim().is_empty() {
-        return Err(ReviewError::BlankField { field: "step title" });
+    if text.trim().is_empty() {
+        return Err(ReviewError::BlankField { field });
     }
     Ok(())
 }

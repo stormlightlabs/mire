@@ -62,19 +62,26 @@ an author and provenance, as a note does. Each step has an `id`, a one-line
 `title`, a Markdown `narrative`, one or more anchors, optional `depends_on`
 step ids, and an optional Mermaid `diagram`.
 
-Mire keeps the steps in the order the agent wrote them. A write gives each step
-a path, side, and line range, and Mire resolves each one to an anchor with the
-note rules. A write replaces the whole walkthrough. Supplied step ids are kept.
-A step without one gets `step-<n>`, where `n` is its position, counting up past
-ids already taken. `depends_on` may name only an earlier step whose id the
-agent supplied, so the steps have no cycles. Walkthrough writes cannot claim
-human provenance.
+Mire keeps the steps in the order the agent wrote them. A write names the review
+revision it read, gives each step a path, side, and line range, and replaces the
+whole walkthrough. Mire resolves each location to an anchor with the note rules.
+A write against an older revision fails with `revision_conflict`. Supplied step
+ids are kept. A step id, like a title, is one line with no control characters. A
+step without one gets `step-<n>`, where `n` is its position, counting up past
+ids already taken. `depends_on` may name only an earlier step whose id the agent
+supplied, so the steps have no cycles. Walkthrough writes cannot claim human
+provenance.
 
 A refresh re-anchors every step anchor with the note rules and records the
 same `exact`, `moved`, `stale`, or `ambiguous` result on that anchor. A hunk is
 covered when an exact or moved step anchor overlaps it. Stale and ambiguous
 anchors cover nothing. Files with no hunks, such as binary, rename-only, and
 mode-only files, are never covered.
+
+A step anchor that no longer matches the stored capture when the review loads
+is marked `stale`. This happens when a Mire release without walkthroughs
+refreshes the review, because it keeps the walkthrough without re-anchoring
+it.
 
 A walkthrough has these limits:
 
@@ -107,7 +114,7 @@ Its description is at most 65,536 characters, GitHub's limit for a pull
 request body, and carries no control characters other than newline and tab.
 Review files written before titles or walkthroughs existed still load.
 
-A location batch, a walkthrough write, and a source refresh validate the entire transaction before
+A location batch and a source refresh validate the entire transaction before
 Mire atomically replaces the review file.
 
 Failed validation leaves the previous file unchanged.

@@ -156,9 +156,9 @@ pub enum ReviewError {
         actual: usize,
         limit: usize,
     },
-    /// A walkthrough step title spans more than one line.
-    #[error("step title must be a single line")]
-    MultilineStepTitle,
+    /// A one-line walkthrough field, such as a step title or identifier, spans more than one line.
+    #[error("{field} must be a single line")]
+    MultilineField { field: &'static str },
     /// A walkthrough has no steps.
     #[error("walkthrough must contain at least one step")]
     EmptyWalkthrough,
@@ -183,6 +183,18 @@ pub enum ReviewError {
 }
 
 impl ReviewError {
+    /// Returns the code of the error that caused this one.
+    ///
+    /// [`ReviewError::InvalidStep`] reports the code of the step's own error,
+    /// such as `location_not_found`. Every other error reports
+    /// [`ReviewError::error_code`].
+    pub fn cause_code(&self) -> &'static str {
+        match self {
+            ReviewError::InvalidStep { reason, .. } => reason.cause_code(),
+            other => other.error_code(),
+        }
+    }
+
     pub const fn error_code(&self) -> &'static str {
         match self {
             ReviewError::UnsupportedSchemaMajor { .. } => "unsupported_schema_major",
@@ -220,7 +232,7 @@ impl ReviewError {
             ReviewError::RevisionConflict { .. } => "revision_conflict",
             ReviewError::BlankField { .. } => "blank_field",
             ReviewError::TextTooLarge { .. } => "text_too_large",
-            ReviewError::MultilineStepTitle => "multiline_step_title",
+            ReviewError::MultilineField { .. } => "multiline_field",
             ReviewError::EmptyWalkthrough => "empty_walkthrough",
             ReviewError::TooManySteps { .. } => "too_many_steps",
             ReviewError::TooManyStepAnchors { .. } => "too_many_step_anchors",
@@ -1430,6 +1442,9 @@ impl<'de> Deserialize<'de> for Review {
             walkthrough: wire.walkthrough,
             extensions: wire.extensions,
         };
+        if let Some(walkthrough) = &mut review.walkthrough {
+            walkthrough::settle_unmatched_anchors(&review.changeset, walkthrough);
+        }
         review.canonicalize();
         review.validate().map_err(de::Error::custom)?;
         Ok(review)

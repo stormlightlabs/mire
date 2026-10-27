@@ -2,10 +2,11 @@
 id = "arcl-t-01M5SXD532Q361H4WGVT0TPE37"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
 title = "Render walkthroughs in the TUI"
-status = "in_progress"
+status = "completed"
 priority = "high"
 position = 8
 blocked-by = ["arcl-t-01M5SXD52H6Q67PXE4VEY2FFS4"]
+evidence = "Done in #11 at c1bcfae: TUI walkthrough mode (W, J/K, Esc) with overview, narrative, progress and stale/ambiguous warnings; live-session walkthrough driving; snapshots; just shots scenarios; docs screenshot"
 +++
 
 Render walkthroughs in the TUI: a narrative pane and step navigation that scrolls to each step's anchored hunks.

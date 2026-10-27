@@ -2,9 +2,10 @@
 id = "arcl-t-01M5SXD5050AF2R8PA2JZCPXVF"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
 title = "Make the watch tests reliable under load"
-status = "in_progress"
+status = "completed"
 priority = "normal"
 position = 2
+evidence = "Done in #17 at 650ad92: watch loops no longer drop q or open input on reload; watch and serve tests wait on output with deadlines, write by rename, no #[ignore]; 10/10 under load."
 +++
 
 The PTY tests in `crates/cli/tests/watch.rs` hang when the machine is busy: under load the TUI does not exit after the test sends `q`, and `cargo test` waits forever. `source_backed_review_watch_refreshes_the_review_file` hung locally and `patch_watch_reloads_and_recovers_after_rename_delete_and_recreate` hung in CI. Each passes when run alone.

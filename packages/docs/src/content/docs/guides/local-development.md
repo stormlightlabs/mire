@@ -184,12 +184,27 @@ pnpm --filter @stormlightlabs/mire-app run test:unit
 # Type checking
 pnpm --filter @stormlightlabs/mire-app run check
 
-# Full suite (unit + e2e)
-pnpm --filter @stormlightlabs/mire-app run test
+# Browser end-to-end tests
+just e2e
 ```
 
-Playwright e2e tests require a running `mire serve` instance because the app
-needs a session secret to render review data.
+`just e2e` builds the web app and the `mire` binary, then runs the Playwright
+tests in `packages/app/tests`. Each test creates a temporary Git repository
+with a review, starts `mire serve` on it, and drives Chromium through loading
+the review, moving between files and findings, resolving a finding, marking a
+file viewed, exporting notes, and refreshing after a source edit. The test
+stops the server and removes the repository when it ends, pass or fail.
+
+The tests run `target/debug/mire`; set `MIRE_BIN` to test another build. They
+need Playwright's Chromium, which you install once:
+
+```sh
+pnpm --filter @stormlightlabs/mire-app exec playwright install chromium
+```
+
+To use a Chromium that is already installed, set `MIRE_E2E_CHROMIUM` to its
+executable. `just check` leaves these tests out to stay fast; CI runs them in
+the `e2e` job of the Check workflow.
 
 ## Troubleshooting
 

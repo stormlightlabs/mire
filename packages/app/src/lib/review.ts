@@ -36,6 +36,23 @@ export function fileViewState(file: Pick<FileSummary, 'id' | 'viewed'>): FileVie
 	return file.viewed.fingerprint === file.id ? 'viewed' : 'changed';
 }
 
+/**
+ * Finds the file to keep open after the review reloads. A file's `id` is its
+ * fingerprint, so a source change gives it a new one; the file is then found by
+ * its raw path. Falls back to the first file when the open one left the review.
+ */
+export function reopenedFile(
+	files: FileSummary[],
+	previous: Pick<FileSummary, 'id' | 'path'> | null
+): FileSummary | null {
+	if (previous) {
+		const same =
+			files.find((file) => file.id === previous.id) ?? files.find((file) => file.path.raw === previous.path.raw);
+		if (same) return same;
+	}
+	return files[0] ?? null;
+}
+
 /** Returns the viewed route for a path. */
 export function viewedRoute(path: PathText): string {
 	return `/api/v1/viewed?path=${path.raw}`;

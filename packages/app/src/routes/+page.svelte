@@ -12,6 +12,7 @@
 		fileViewState,
 		filterFindings,
 		hasReviewMetadata,
+		reopenedFile,
 		reviewDescription,
 		reviewTitle,
 		viewedRoute
@@ -150,10 +151,12 @@
 
 	async function reloadReview() {
 		if (!review) return;
+		const previous = activeSummary;
 		try {
 			review = await request<ReviewOverview>('/api/v1/review');
 			conflictRevision = null;
-			if (activeFile) await selectFile(activeFile);
+			const next = reopenedFile(review.files, previous);
+			if (next) await selectFile(next.id);
 		} catch (cause) {
 			error = handleErr(cause, 'The review could not be reloaded.');
 		}

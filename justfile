@@ -8,6 +8,12 @@ check:
     pnpm -r --if-present lint
     pnpm -r --if-present test:unit --run
 
+# Build the web app and the binary, then run the Playwright tests against `mire serve`
+e2e:
+    pnpm --filter @stormlightlabs/mire-app build
+    cargo build -p mire
+    pnpm --filter @stormlightlabs/mire-app test:e2e
+
 # Format Rust and frontend sources
 fmt:
     cargo fmt --all

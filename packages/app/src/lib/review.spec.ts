@@ -4,6 +4,7 @@ import {
 	completionSummary,
 	fileViewState,
 	hasReviewMetadata,
+	reopenedFile,
 	reviewDescription,
 	reviewTitle,
 	viewedRoute,
@@ -72,6 +73,24 @@ describe('viewed state', () => {
 
 	it('addresses a path by its raw hex bytes', () => {
 		expect(viewedRoute({ display: 'a�', lossy: true, raw: '61ff' })).toBe('/api/v1/viewed?path=61ff');
+	});
+});
+
+describe('reopenedFile', () => {
+	it('follows a file whose fingerprint changed by its raw path', () => {
+		const reloaded = review();
+		reloaded.files[1].id = 'second-changed';
+
+		const previous = { id: 'second', path: { display: 'second.rs', lossy: false, raw: '7365636f6e642e7273' } };
+		expect(reopenedFile(reloaded.files, previous)?.id).toBe('second-changed');
+	});
+
+	it('falls back to the first file when the open one left the review', () => {
+		const previous = { id: 'gone', path: { display: 'gone.rs', lossy: false, raw: '676f6e652e7273' } };
+
+		expect(reopenedFile(review().files, previous)?.id).toBe('first');
+		expect(reopenedFile(review().files, null)?.id).toBe('first');
+		expect(reopenedFile([], previous)).toBeNull();
 	});
 });
 

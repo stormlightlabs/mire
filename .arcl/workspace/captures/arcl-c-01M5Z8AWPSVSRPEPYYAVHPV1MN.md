@@ -1,7 +1,7 @@
 +++
 id = "arcl-c-01M5Z8AWPSVSRPEPYYAVHPV1MN"
 title = "Watchers can record a half-written source file as a revision"
-status = "captured"
+status = "discarded"
 created-at = "2026-10-27T18:00:37.337Z"
 +++
 

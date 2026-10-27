@@ -36,3 +36,36 @@ jobs:
       - uses: extractions/setup-just@v3
 
       - run: just check
+
+  # Drives the browser review surface through the built `mire serve` binary.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: extractions/setup-just@v3
+
+      - run: pnpm --filter @stormlightlabs/mire-app exec playwright install --with-deps chromium
+
+      - run: just e2e
+
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: packages/app/test-results
+          retention-days: 7

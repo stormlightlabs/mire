@@ -91,9 +91,10 @@ The desktop app uses three coordinated regions:
 
 Several controls need explicit product semantics before implementation:
 
-- **Viewed:** Keep this as browser-local progress, keyed by a server-issued opaque
-  review identity and file fingerprint. It is useful orientation, but is not yet
-  part of the durable review schema.
+- **Viewed:** Store each reader's viewed marks in the review file, keyed by path
+  and fingerprint, so the terminal, the browser and the CLI agree.
+  [Checkpoints and viewed state](packages/docs/src/content/docs/concepts/checkpoints-and-viewed-state.md)
+  holds the design.
 - **Finish review:** Present a readiness summary and export choices. Do not write
   a new global status or imply a remote approval.
 - **Reply:** The review model has editable findings and decision events, not
@@ -101,8 +102,8 @@ Several controls need explicit product semantics before implementation:
   only after designing a durable event model for CLI and web consumers together.
 - **Category:** Use Mire's annotation intent (`comment`, `defect`, `suggestion`,
   or `question`) rather than introducing a web-only category taxonomy.
-- **Reviewed:** Derive this label from browser-local viewed state and open finding
-  counts. Do not persist a second file status.
+- **Reviewed:** Derive this label from the reader's viewed marks and open
+  finding counts. Do not persist a second file status.
 
 The implementation must also cover these states:
 
@@ -318,12 +319,12 @@ Use one SvelteKit route and small components around explicit state modules:
 - conflict, refresh, export, empty, and error dialogs
 
 Keep server data separate from ephemeral UI state. The server revision, files,
-findings, and anchors come from API responses. Active panes, filters, diff mode,
-expanded context, and viewed fingerprints are client state. Persist only harmless
-preferences and viewed fingerprints in local storage, namespaced by a stable,
-server-issued opaque review identity; never persist the session secret or draft
-note text. Derive that identity from the canonical review-file identity without
-exposing the path itself.
+findings, anchors, and viewed marks come from API responses. Active panes,
+filters, diff mode, and expanded context are client state. Persist only harmless
+preferences in local storage, namespaced by a stable, server-issued opaque review
+identity; never persist the session secret or draft note text. Derive that
+identity from the canonical review-file identity without exposing the path
+itself.
 
 Build the diff from semantic hunk and line DTOs rather than parsing patch text in
 the browser. Start with bounded DOM rendering and measure real large reviews
@@ -363,7 +364,7 @@ without the session secret.
 ### 2. Human decisions
 
 Add finding editing, all existing decisions including reopen, revision-conflict
-recovery, filters, keyboard navigation, and browser-local viewed progress.
+recovery, filters, keyboard navigation, and viewed progress.
 
 Exit when web and CLI mutations interleave without lost updates and a conflict
 preserves the user's draft.
@@ -406,7 +407,7 @@ output.
   listener and temporary review files. They cover unauthorized access, conditional
   writes, conflicts, invalid input, asset fallback, and security headers.
 - TypeScript unit tests cover filters, readiness, split pairing, context expansion,
-  event reduction, and local viewed-state namespacing.
+  event reduction, and viewed marks.
 - Svelte browser component tests use accessible locators for file/finding
   navigation, decisions, conflict dialogs, drawers, focus restoration, and empty
   states.

@@ -134,10 +134,181 @@ fn walkthrough_carried_through_an_older_refresh_loads_with_stale_anchors() {
     let reloaded: Review = serde_json::from_str(&serde_json::to_string(&loaded).unwrap()).unwrap();
     assert_eq!(reloaded, loaded);
 
+    // The next write records the stale outcome and keeps the original anchor.
+    let line = LineNumber::new(1).unwrap();
+    let note = mire_core::NoteInput::new(
+        BytePath::new(b"other.txt".to_vec()).unwrap(),
+        AnchorSide::New,
+        LineRange::new(line, line).unwrap(),
+        agent(),
+        Provenance::Agent { producer: "test".to_owned() },
+        mire_core::NoteSeverity::Low,
+        mire_core::AnnotationKind::Comment,
+        "Second".to_owned(),
+    )
+    .unwrap();
+    let saved = serde_json::to_value(loaded.apply_notes(vec![note]).unwrap()).unwrap();
+    let anchor = &saved["walkthrough"]["steps"][0]["anchors"][0];
+    assert_eq!(anchor["reanchor_outcome"]["kind"], "stale");
+    assert_eq!(
+        anchor["anchor"],
+        json["walkthrough"]["steps"][0]["anchors"][0]["anchor"]
+    );
+    assert_eq!(anchor["reanchor_outcome"]["original_anchor"], anchor["anchor"]);
+    assert_eq!(saved["walkthrough"]["steps"][0]["title"], "Step");
+
     // Structural rules still reject the file.
     json["walkthrough"]["steps"][0]["depends_on"] = serde_json::json!(["missing"]);
-    let error = serde_json::from_value::<Review>(json).unwrap_err();
+    let error = serde_json::from_value::<Review>(json.clone()).unwrap_err();
     assert!(error.to_string().contains("missing"), "{error}");
+}
+
+#[test]
+fn stored_steps_with_repeated_dependencies_fail_to_load() {
+    let review = review(changeset(TWO_FILES));
+    let written = review
+        .write_walkthrough(
+            review.revision(),
+            input(vec![
+                step(Some("a"), "First", "file.txt", &[]),
+                step(None, "Second", "file.txt", &["a"]),
+            ]),
+        )
+        .unwrap();
+    let mut json = serde_json::to_value(&written).unwrap();
+    json["walkthrough"]["steps"][1]["depends_on"] = serde_json::json!(["a", "a", "a"]);
+    let error = serde_json::from_value::<Review>(json).unwrap_err();
+    assert!(error.to_string().contains("more than once"), "{error}");
+}
+
+#[test]
+fn older_refresh_keeps_ambiguous_candidates_that_still_resolve() {
+    let three_hunks =
+        b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-a\n+bug\n@@ -10 +10 @@\n-b\n+bug\n@@ -20 +20 @@\n-c\n+bug\n";
+    let ambiguous = written_review(changeset(b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+bug\n"))
+        .reanchor(changeset(three_hunks))
+        .unwrap();
+    let Some(ReanchorOutcome::Ambiguous { candidates, .. }) = first_outcome(&ambiguous) else {
+        panic!("three equal hunks should leave the step anchor ambiguous");
+    };
+    assert_eq!(candidates.len(), 3);
+    let walkthrough = serde_json::to_value(&ambiguous).unwrap()["walkthrough"].clone();
+
+    // An older Mire refreshes to a capture without the third hunk.
+    let refreshed = review(changeset(
+        b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-a\n+bug\n@@ -10 +10 @@\n-b\n+bug\n",
+    ));
+    let mut json = serde_json::to_value(&refreshed).unwrap();
+    json["walkthrough"] = walkthrough.clone();
+    let loaded: Review = serde_json::from_value(json.clone()).unwrap();
+    let Some(ReanchorOutcome::Ambiguous { original_anchor, candidates }) = first_outcome(&loaded) else {
+        panic!("two remaining candidates should stay ambiguous");
+    };
+    assert_eq!(
+        candidates.as_slice(),
+        &first_outcome(&ambiguous).unwrap().candidates()[..2]
+    );
+    assert_eq!(original_anchor, first_outcome(&ambiguous).unwrap().original_anchor());
+
+    // With one candidate left, the anchor is stale and keeps its original anchor.
+    let refreshed = review(changeset(b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-a\n+bug\n"));
+    let mut json = serde_json::to_value(&refreshed).unwrap();
+    json["walkthrough"] = walkthrough;
+    let loaded: Review = serde_json::from_value(json).unwrap();
+    let Some(ReanchorOutcome::Stale { original_anchor, .. }) = first_outcome(&loaded) else {
+        panic!("one remaining candidate should settle as stale");
+    };
+    assert_eq!(original_anchor, first_outcome(&ambiguous).unwrap().original_anchor());
+}
+
+#[test]
+fn well_formed_walkthroughs_load_without_change() {
+    let original = changeset(
+        b"--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+x\n--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-old\n+y\n--- a/c.txt\n+++ b/c.txt\n@@ -1 +1 @@\n-old\n+z\n",
+    );
+    let review = review(original);
+    let written = review
+        .write_walkthrough(
+            review.revision(),
+            input(vec![
+                step(None, "Exact", "a.txt", &[]),
+                step(None, "Moved", "b.txt", &[]),
+                step(None, "Ambiguous", "c.txt", &[]),
+            ]),
+        )
+        .unwrap();
+    let refreshed = written
+        .reanchor(changeset(
+            b"--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+x\n--- a/b.txt\n+++ b/b.txt\n@@ -1,2 +1,3 @@\n context\n+inserted\n-old\n+y\n--- a/c.txt\n+++ b/c.txt\n@@ -1 +1,2 @@\n-old\n+z\n+z\n",
+        ))
+        .unwrap();
+    let outcomes = refreshed
+        .walkthrough()
+        .unwrap()
+        .steps()
+        .iter()
+        .map(|step| step.anchors()[0].reanchor_outcome().unwrap())
+        .collect::<Vec<_>>();
+    assert!(matches!(outcomes[0], ReanchorOutcome::Exact { .. }));
+    assert!(matches!(outcomes[1], ReanchorOutcome::Moved { .. }));
+    assert!(matches!(outcomes[2], ReanchorOutcome::Ambiguous { .. }));
+
+    let file = serde_json::to_string_pretty(&refreshed).unwrap();
+    let loaded: Review = serde_json::from_str(&file).unwrap();
+    assert_eq!(loaded, refreshed);
+    assert_eq!(serde_json::to_string_pretty(&loaded).unwrap(), file);
+}
+
+#[test]
+fn corrupt_step_anchors_fail_to_load() {
+    let original = changeset(TWO_FILES);
+    let written = written_review(original.clone());
+    let exact = written.reanchor(changeset(
+        b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+bug\n--- a/third.txt\n+++ b/third.txt\n@@ -1 +1 @@\n-x\n+y\n",
+    ))
+    .unwrap();
+    assert!(matches!(first_outcome(&exact), Some(ReanchorOutcome::Exact { .. })));
+    let ambiguous = written
+        .reanchor(changeset(
+            b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1,2 @@\n-old\n+bug\n+bug\n",
+        ))
+        .unwrap();
+    assert!(matches!(
+        first_outcome(&ambiguous),
+        Some(ReanchorOutcome::Ambiguous { .. })
+    ));
+    let load = |review: &Review, corrupt: &dyn Fn(&mut serde_json::Value)| {
+        let mut json = serde_json::to_value(review).unwrap();
+        corrupt(&mut json["walkthrough"]["steps"][0]["anchors"][0]);
+        serde_json::from_value::<Review>(json)
+    };
+
+    // A content fingerprint that differs from the content its location resolves to.
+    let error = load(&written, &|anchor| {
+        anchor["anchor"]["content_fingerprint"] = anchor["anchor"]["hunk_fingerprint"].clone();
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("fingerprint"), "{error}");
+    let error = load(&exact, &|anchor| {
+        let candidate = &mut anchor["reanchor_outcome"]["candidate"]["anchor"];
+        candidate["content_fingerprint"] = candidate["hunk_fingerprint"].clone();
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("fingerprint"), "{error}");
+
+    // An original anchor that differs from the step anchor.
+    let error = load(&exact, &|anchor| {
+        anchor["reanchor_outcome"]["original_anchor"]["range"]["end"] = 2.into();
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("fingerprint"), "{error}");
+
+    // An ambiguous outcome with one candidate.
+    let error = load(&ambiguous, &|anchor| {
+        anchor["reanchor_outcome"]["candidates"].as_array_mut().unwrap().pop();
+    })
+    .unwrap_err();
+    assert!(error.to_string().contains("ambiguous"), "{error}");
 }
 
 #[test]
@@ -178,6 +349,16 @@ fn walkthrough_writes_reject_invalid_steps() {
         write(vec![step(Some("self"), "Self", "file.txt", &["self"])]),
         Err(step_error(0, ReviewError::ForwardStepDependency("self".to_owned())))
     );
+    let repeated = write(vec![
+        step(Some("a"), "First", "file.txt", &[]),
+        step(None, "Second", "file.txt", &["a", "a", "a"]),
+    ])
+    .unwrap_err();
+    assert_eq!(
+        repeated,
+        step_error(1, ReviewError::DuplicateStepDependency("a".to_owned()))
+    );
+    assert_eq!(repeated.cause_code(), "duplicate_step_dependency");
     assert_eq!(
         write(vec![
             step(Some("same"), "First", "file.txt", &[]),

@@ -177,6 +177,9 @@ pub enum ReviewError {
     /// A step depends on a step that does not come before it.
     #[error("step depends on {0:?}, which is not an earlier step with a supplied identifier")]
     ForwardStepDependency(String),
+    /// A step lists the same dependency more than once.
+    #[error("step lists dependency {0:?} more than once")]
+    DuplicateStepDependency(String),
     /// One walkthrough step failed validation.
     #[error("walkthrough step {index}: {reason}")]
     InvalidStep { index: usize, reason: Box<ReviewError> },
@@ -239,6 +242,7 @@ impl ReviewError {
             ReviewError::StepWithoutAnchors => "step_without_anchors",
             ReviewError::DuplicateStepId(_) => "duplicate_step_id",
             ReviewError::ForwardStepDependency(_) => "forward_step_dependency",
+            ReviewError::DuplicateStepDependency(_) => "duplicate_step_dependency",
             ReviewError::InvalidStep { .. } => "invalid_walkthrough_step",
         }
     }
@@ -1689,6 +1693,31 @@ fn validate_note(changeset: &Changeset, note: &ReviewNote) -> Result<()> {
     validate_author(&note.author)?;
     validate_note_body(note.body())?;
     validate_provenance(note.provenance())
+}
+
+/// Reports whether `anchor` no longer resolves to a location in `changeset`:
+/// its path, hunk, or line range is missing, or its hunk is no longer unique.
+///
+/// An anchor that resolves to content with a different fingerprint is an
+/// error, because the same location always yields the same fingerprint.
+fn anchor_is_unmatched(changeset: &Changeset, anchor: &Anchor) -> Result<bool> {
+    match anchor_content_fingerprint(
+        changeset,
+        &anchor.path,
+        anchor.side,
+        anchor.range,
+        anchor.hunk_fingerprint,
+    ) {
+        Ok(actual) if actual == anchor.content_fingerprint => Ok(false),
+        Ok(_) => Err(ReviewError::ContentFingerprintMismatch),
+        Err(
+            ReviewError::FileSideNotFound { .. }
+            | ReviewError::HunkNotFound
+            | ReviewError::AmbiguousAnchor
+            | ReviewError::LineRangeNotFound { .. },
+        ) => Ok(true),
+        Err(error) => Err(error),
+    }
 }
 
 /// Checks a recorded anchor, and its latest re-anchor outcome, against the current capture.

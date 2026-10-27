@@ -9,8 +9,8 @@ use serde_json::Value;
 use crate::{BytePath, Changeset, FileContent, FileDiff};
 
 use super::{
-    Anchor, AnchorSide, Author, LineRange, Provenance, ReanchorOutcome, Result, ReviewError, reanchor, resolve_range,
-    validate_anchor_state, validate_author, validate_provenance, validate_text,
+    Anchor, AnchorSide, Author, LineRange, Provenance, ReanchorOutcome, Result, ReviewError, anchor_is_unmatched,
+    reanchor, resolve_range, validate_anchor_state, validate_author, validate_provenance, validate_text,
 };
 
 /// Maximum number of steps in one walkthrough.
@@ -261,6 +261,7 @@ pub fn build_walkthrough(changeset: &Changeset, input: WalkthroughInput) -> Resu
                 ReviewError::ForwardStepDependency(dependency.0.clone()),
             ));
         }
+        check_unique_dependencies(&step.depends_on).map_err(|error| step_error(index, error))?;
         if let Some(id) = &step.id
             && !supplied.insert(id.clone())
         {
@@ -342,21 +343,24 @@ pub fn reanchor_walkthrough(walkthrough: &Walkthrough, previous: &Changeset, cur
     refreshed
 }
 
-/// Marks stale every step anchor that no longer matches `changeset`.
+/// Settles every step anchor whose location is gone from `changeset`.
 ///
 /// A capture can change under a walkthrough without a re-anchor, as when a
 /// Mire that predates walkthroughs refreshes the review and keeps the
-/// walkthrough as an unknown field. Those anchors cannot be matched again
-/// because the capture they were recorded against is gone, so they become
-/// stale rather than making the review fail to load.
+/// walkthrough as an unknown field. An anchor, or a candidate, that no longer
+/// resolves cannot be matched again because the capture it was recorded
+/// against is gone. Such an anchor becomes stale, and an ambiguous anchor
+/// keeps the candidates that still resolve while at least two remain.
+///
+/// Every other inconsistency is left in place for [`validate_walkthrough`] to
+/// reject: an outcome whose original anchor differs from the anchor, an
+/// ambiguous outcome with fewer than two candidates, and an anchor that
+/// resolves to content with a different fingerprint. A walkthrough whose
+/// anchors all resolve is not changed.
 pub fn settle_unmatched_anchors(changeset: &Changeset, walkthrough: &mut Walkthrough) {
     for anchor in walkthrough.steps.iter_mut().flat_map(|step| step.anchors.iter_mut()) {
-        if validate_anchor_state(changeset, &anchor.anchor, anchor.reanchor_outcome.as_ref()).is_err() {
-            anchor.reanchor_outcome = Some(reanchor::stale_outcome(
-                &anchor.anchor,
-                anchor.reanchor_outcome.as_ref(),
-                changeset,
-            ));
+        if let Some(outcome) = settled_outcome(changeset, anchor) {
+            anchor.reanchor_outcome = Some(outcome);
         }
     }
 }
@@ -390,6 +394,50 @@ pub fn coverage(changeset: &Changeset, walkthrough: &Walkthrough) -> Walkthrough
     coverage
 }
 
+/// Returns the outcome an unmatched step anchor settles to, or `None` when
+/// the anchor still resolves or is inconsistent in a way validation rejects.
+fn settled_outcome(changeset: &Changeset, step_anchor: &StepAnchor) -> Option<ReanchorOutcome> {
+    let anchor = &step_anchor.anchor;
+    let outcome = step_anchor.reanchor_outcome.as_ref();
+    let unmatched = |candidate: &Anchor| anchor_is_unmatched(changeset, candidate);
+    match outcome {
+        Some(outcome) if outcome.original_anchor() != anchor => None,
+        None => unmatched(anchor)
+            .ok()?
+            .then(|| reanchor::stale_outcome(anchor, None, changeset)),
+        Some(ReanchorOutcome::Exact { candidate, .. } | ReanchorOutcome::Moved { candidate, .. }) => {
+            unmatched(candidate.anchor())
+                .ok()?
+                .then(|| reanchor::stale_outcome(anchor, outcome, changeset))
+        }
+        Some(ReanchorOutcome::Stale { .. }) => None,
+        Some(ReanchorOutcome::Ambiguous { candidates, .. }) => {
+            if candidates.len() < 2 {
+                return None;
+            }
+            let flags = candidates
+                .iter()
+                .map(|candidate| unmatched(candidate.anchor()))
+                .collect::<Result<Vec<_>>>()
+                .ok()?;
+            if !flags.contains(&true) {
+                return None;
+            }
+            let kept = candidates
+                .iter()
+                .zip(flags)
+                .filter(|(_, unmatched)| !unmatched)
+                .map(|(candidate, _)| candidate.clone())
+                .collect::<Vec<_>>();
+            Some(if kept.len() >= 2 {
+                ReanchorOutcome::Ambiguous { original_anchor: anchor.clone(), candidates: kept }
+            } else {
+                reanchor::stale_outcome(anchor, outcome, changeset)
+            })
+        }
+    }
+}
+
 fn validate_step(changeset: &Changeset, step: &WalkthroughStep, earlier: &BTreeSet<&StepId>) -> Result<()> {
     if earlier.contains(&step.id) {
         return Err(ReviewError::DuplicateStepId(step.id.0.clone()));
@@ -402,6 +450,7 @@ fn validate_step(changeset: &Changeset, step: &WalkthroughStep, earlier: &BTreeS
     if let Some(dependency) = step.depends_on.iter().find(|id| !earlier.contains(id)) {
         return Err(ReviewError::ForwardStepDependency(dependency.0.clone()));
     }
+    check_unique_dependencies(&step.depends_on)?;
     if step.anchors.is_empty() {
         return Err(ReviewError::StepWithoutAnchors);
     }
@@ -434,6 +483,16 @@ fn validate_markdown(field: &'static str, text: &str) -> Result<()> {
         return Err(ReviewError::BlankField { field });
     }
     Ok(())
+}
+
+/// Rejects a dependency list that names one step more than once. With the
+/// earlier-steps rule, this bounds the list by the number of steps.
+fn check_unique_dependencies(depends_on: &[StepId]) -> Result<()> {
+    let mut seen = BTreeSet::new();
+    match depends_on.iter().find(|id| !seen.insert(*id)) {
+        Some(id) => Err(ReviewError::DuplicateStepDependency(id.0.clone())),
+        None => Ok(()),
+    }
 }
 
 fn check_counts(steps: usize, anchors: usize) -> Result<()> {

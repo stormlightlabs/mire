@@ -69,7 +69,8 @@ A write against an older revision fails with `revision_conflict`. Supplied step
 ids are kept. A step id, like a title, is one line with no control characters. A
 step without one gets `step-<n>`, where `n` is its position, counting up past
 ids already taken. `depends_on` may name only an earlier step whose id the agent
-supplied, so the steps have no cycles. Walkthrough writes cannot claim human
+supplied, and may name each step once, so the steps have no cycles. A repeated
+id fails with `duplicate_step_dependency`. Walkthrough writes cannot claim human
 provenance.
 
 A refresh re-anchors every step anchor with the note rules and records the
@@ -78,10 +79,14 @@ covered when an exact or moved step anchor overlaps it. Stale and ambiguous
 anchors cover nothing. Files with no hunks, such as binary, rename-only, and
 mode-only files, are never covered.
 
-A step anchor that no longer matches the stored capture when the review loads
-is marked `stale`. This happens when a Mire release without walkthroughs
-refreshes the review, because it keeps the walkthrough without re-anchoring
-it.
+A step anchor whose path, hunk, or line range is missing from the stored
+capture when the review loads is marked `stale`. An ambiguous anchor drops only
+the candidates that are missing, and stays ambiguous while two remain. This
+happens when a Mire release without walkthroughs refreshes the review, because
+it keeps the walkthrough without re-anchoring it. The change is made in memory;
+the next write saves it, as a refresh would, and keeps the original anchor. Any
+other mismatch, such as a changed content fingerprint, fails the load as it does
+for a note. A file whose anchors all match loads unchanged.
 
 A walkthrough has these limits:
 

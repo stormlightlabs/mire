@@ -18,9 +18,9 @@ use crate::git::{self, DiffRequest, GitError, ShowRequest};
 use crate::live_session::{self, LiveSession, LiveSessionError};
 use crate::output_file::{OutputFileError, write_output_atomic};
 use crate::protocol::{
-    ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, context_json, import_error_json,
-    import_result_json, notes_json, notes_markdown, protocol_error_json, review_status_json, review_status_text,
-    revision_conflict_json,
+    ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, check_schema_major, context_json,
+    import_error_json, import_result_json, notes_json, notes_markdown, protocol_error_json, review_status_json,
+    review_status_text, revision_conflict_json,
 };
 use crate::refresh::{RefreshError, refresh_review as refresh_review_file};
 use crate::review_file::{
@@ -52,6 +52,8 @@ enum AppError {
     ReviewFile(ReviewFileError),
     #[error("cannot create review: {0}")]
     CreateReviewFile(ReviewFileError),
+    #[error("cannot write review: {0}")]
+    WriteReviewFile(ReviewFileError),
     #[error("cannot initialize review: {0}")]
     InitializeReview(ReviewError),
     #[error("cannot resolve review destination {path:?}: {source}")]
@@ -143,6 +145,7 @@ impl AppError {
             Self::Git(_) => 6,
             Self::ReviewFile(_)
             | Self::CreateReviewFile(_)
+            | Self::WriteReviewFile(_)
             | Self::InitializeReview(_)
             | Self::ReviewDestination { .. }
             | Self::ReviewDestinationPath(_)
@@ -684,6 +687,7 @@ fn add_note(arguments: NoteAddArgs) -> Result<(), AppError> {
 fn apply_notes(review_path: &OsStr) -> Result<(), AppError> {
     let review = read_review(Path::new(review_path)).map_err(AppError::ReviewFile)?;
     let bytes = read_protocol_input(OsStr::new("-"), DEFAULT_MAX_REVIEW_FILE_BYTES)?;
+    check_schema_major(&bytes).map_err(AppError::Protocol)?;
     let batch: LocationBatch = serde_json::from_slice(&bytes).map_err(AppError::ProtocolJson)?;
     let (revision, inputs) = batch.into_inputs().map_err(AppError::Protocol)?;
     let applied = inputs.len();
@@ -714,13 +718,14 @@ fn write_mutation(path: &Path, expected_revision: u64, review: &Review) -> Resul
         ReviewFileError::RevisionConflict { expected, actual } => revision_conflict_json(expected, actual)
             .map(|report| AppError::MutationRejected { report })
             .unwrap_or_else(AppError::Protocol),
-        other => AppError::ReviewFile(other),
+        other => AppError::WriteReviewFile(other),
     })
 }
 
 fn import_notes(review_path: &OsStr, input: &OsStr, expected_revision: u64) -> Result<(), AppError> {
     let review = read_review(Path::new(review_path)).map_err(AppError::ReviewFile)?;
     let bytes = read_protocol_input(input, DEFAULT_MAX_REVIEW_FILE_BYTES)?;
+    check_schema_major(&bytes).map_err(AppError::Protocol)?;
     let batch: NoteBatch = serde_json::from_slice(&bytes).map_err(AppError::ProtocolJson)?;
     let notes = batch.into_notes().map_err(AppError::Protocol)?;
     let imported = notes.len();
@@ -753,6 +758,7 @@ fn execute_walkthrough(command: WalkthroughCommand) -> Result<(), AppError> {
 fn apply_walkthrough(review_path: &OsStr) -> Result<(), AppError> {
     let review = read_review(Path::new(review_path)).map_err(AppError::ReviewFile)?;
     let bytes = read_protocol_input(OsStr::new("-"), DEFAULT_MAX_REVIEW_FILE_BYTES)?;
+    check_schema_major(&bytes).map_err(AppError::Protocol)?;
     let batch: WalkthroughBatch = serde_json::from_slice(&bytes).map_err(AppError::WalkthroughJson)?;
     let write = batch.into_write().map_err(|error| match error {
         BatchError::Protocol(error) => AppError::Protocol(error),

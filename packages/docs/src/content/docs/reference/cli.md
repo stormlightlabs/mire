@@ -186,12 +186,16 @@ Each step has a one-line `title`, a Markdown `narrative`, and one or more
 `locations`. `id`, `depends_on`, and a Mermaid `diagram` are optional. A step
 without an `id` gets `step-<n>`. A location takes `file` (or `path`) and either
 `new_line`, `old_line`, or `side` with `start`. `end` (or `end_line`) is the
-inclusive last line and defaults to the first.
+inclusive last line and defaults to the first. Any other field in the batch, a
+step, or a location is an error.
 
 On success, `apply` prints `status: "applied"`, the new `review_revision`, and
-the step ids in order. A rejected batch exits with status `8` and prints a
-report on standard error. Each failure has a `code`, an `error` message, and,
-for a step failure, the zero-based `step_index`:
+the step ids in order. A rejected batch exits with status `8`. Input that is
+not a batch, such as empty input, invalid UTF-8, malformed JSON, or an unknown
+or missing field, prints one `mire: invalid walkthrough batch JSON` line on
+standard error. Any other rejection prints a report on standard error. Each
+failure has a `code`, an `error` message, and, for a step failure, the
+zero-based `step_index`:
 
 ```json
 {
@@ -206,13 +210,16 @@ for a step failure, the zero-based `step_index`:
 Codes include `location_not_found`, `context_only_location`,
 `ambiguous_location`, `step_without_anchors`, `duplicate_step_id`,
 `forward_step_dependency`, `human_provenance_forbidden`, and
-`revision_conflict`, which also reports `expected` and `actual`. A location
+`revision_conflict`, which also reports `expected` and `actual`. A batch with a
+`schema_version` major other than `1` fails with `unsupported_schema_major`,
+whatever its other fields. A location
 with conflicting or missing line fields is a step failure with the code
 `invalid_input`.
 
 `walkthrough show` prints the overview, each step with its anchors and their
 re-anchor states, and what the walkthrough leaves out: hunks no anchor covers,
-and files with no hunks. Stale and ambiguous anchors cover nothing.
+and files with no hunks. Control characters other than newline and tab print
+as escapes such as `\u{1b}`, so stored text cannot rewrite the terminal. Stale and ambiguous anchors cover nothing.
 `--format json` prints the same as one document with `review_revision`,
 `walkthrough`, and `coverage`. Without a walkthrough, the last two are `null`. Each anchor has a `state` of `original`,
 `exact`, `moved`, `stale`, or `ambiguous`, the recorded `anchor`, the

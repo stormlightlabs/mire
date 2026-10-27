@@ -10,6 +10,7 @@ mod refresh;
 mod review_file;
 mod serve;
 mod skill;
+mod terminal_text;
 mod walkthrough;
 mod watch;
 

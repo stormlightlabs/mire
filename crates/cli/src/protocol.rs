@@ -13,6 +13,12 @@ use thiserror::Error;
 /// Protocol schema emitted by non-interactive review commands.
 pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 4 };
 
+/// The keys [`LocationFields`] reads, aliases included. Keep it in step with
+/// the struct: walkthrough steps reject any other key.
+pub const LOCATION_FIELDS: [&str; 8] = [
+    "file", "path", "side", "start", "old_line", "new_line", "end", "end_line",
+];
+
 type Result<T> = std::result::Result<T, ProtocolError>;
 
 /// A bounded context selection.
@@ -184,6 +190,11 @@ impl LocationFields {
         let range = LineRange::new(start, end).map_err(|error| ProtocolError::InvalidInput(error.to_string()))?;
         Ok((path, side, range))
     }
+}
+
+#[derive(Deserialize)]
+struct SchemaProbe {
+    schema_version: SchemaVersion,
 }
 
 #[derive(Debug, Deserialize)]
@@ -556,6 +567,24 @@ pub fn import_result_json(review: &Review, imported: usize) -> Result<Vec<u8>> {
     let mut bytes = serde_json::to_vec(&value).map_err(ProtocolError::Serialize)?;
     bytes.push(b'\n');
     Ok(bytes)
+}
+
+/// Rejects a protocol input whose `schema_version` has an unsupported major.
+///
+/// It reads only `schema_version`, so a batch from another major fails with
+/// `unsupported_schema_major` even when the rest of its shape differs. Input
+/// without a readable `schema_version` passes, and the full parse reports it.
+pub fn check_schema_major(input: &[u8]) -> Result<()> {
+    let Ok(SchemaProbe { schema_version }) = serde_json::from_slice(input) else {
+        return Ok(());
+    };
+    if schema_version.major != CURRENT_PROTOCOL_SCHEMA_VERSION.major {
+        return Err(ProtocolError::UnsupportedSchemaMajor {
+            found: schema_version.major,
+            supported: CURRENT_PROTOCOL_SCHEMA_VERSION.major,
+        });
+    }
+    Ok(())
 }
 
 /// Serializes every rejected note from an atomic import.

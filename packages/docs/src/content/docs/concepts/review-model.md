@@ -97,6 +97,10 @@ A walkthrough has these limits:
 | Overview, and each narrative and diagram | 1 MiB  |
 | Step title, one line                     | 1 KiB  |
 
+A whole review file is at most 128 MiB. Mire refuses to write a review larger
+than that, such as one with a very large walkthrough, and leaves the file as it
+was, so every file it writes can be read back.
+
 [Walkthrough design](/docs/concepts/walkthrough-design/) records where these
 fields come from.
 

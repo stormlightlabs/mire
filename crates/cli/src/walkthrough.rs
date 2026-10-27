@@ -10,7 +10,8 @@ use mire_core::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::protocol::{CURRENT_PROTOCOL_SCHEMA_VERSION, LocationFields, ProtocolError};
+use crate::protocol::{CURRENT_PROTOCOL_SCHEMA_VERSION, LOCATION_FIELDS, LocationFields, ProtocolError};
+use crate::terminal_text::escape_controls;
 
 type Result<T> = std::result::Result<T, ProtocolError>;
 
@@ -76,7 +77,11 @@ impl From<ProtocolError> for BatchError {
 }
 
 /// A schema-versioned walkthrough write read by `walkthrough apply`.
+///
+/// Unknown fields in the batch, its steps and their locations are rejected,
+/// so a misspelled field such as `depends_onn` is not silently dropped.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WalkthroughBatch {
     schema_version: SchemaVersion,
     review_revision: u64,
@@ -96,17 +101,26 @@ pub struct WalkthroughWrite {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct StepRequest {
     #[serde(default)]
     id: Option<String>,
     title: String,
     narrative: String,
-    locations: Vec<LocationFields>,
+    locations: Vec<StepLocationRequest>,
     #[serde(default)]
     depends_on: Vec<String>,
     #[serde(default)]
     diagram: Option<String>,
 }
+
+/// One step location, with the fields of [`LocationFields`] and no others.
+///
+/// `LocationFields` cannot deny unknown fields itself because notes flatten
+/// it into their requests, so this type checks the keys before parsing.
+#[derive(Debug, Deserialize)]
+#[serde(try_from = "serde_json::Map<String, Value>")]
+struct StepLocationRequest(LocationFields);
 
 #[derive(Serialize)]
 struct WalkthroughDocument<'a> {
@@ -194,6 +208,22 @@ impl WalkthroughBatch {
     }
 }
 
+impl TryFrom<serde_json::Map<String, Value>> for StepLocationRequest {
+    type Error = String;
+
+    fn try_from(fields: serde_json::Map<String, Value>) -> std::result::Result<Self, Self::Error> {
+        if let Some(unknown) = fields.keys().find(|key| !LOCATION_FIELDS.contains(&key.as_str())) {
+            return Err(format!(
+                "unknown location field `{unknown}`, expected one of {}",
+                LOCATION_FIELDS.map(|field| format!("`{field}`")).join(", ")
+            ));
+        }
+        serde_json::from_value(Value::Object(fields))
+            .map(Self)
+            .map_err(|error| error.to_string())
+    }
+}
+
 impl StepRequest {
     fn into_input(self, index: usize) -> std::result::Result<StepInput, BatchError> {
         let step_error = |reason| BatchError::Review(ReviewError::InvalidStep { index, reason: Box::new(reason) });
@@ -209,6 +239,7 @@ impl StepRequest {
             .into_iter()
             .map(|location| {
                 let (path, side, range) = location
+                    .0
                     .into_parts()
                     .map_err(|error| BatchError::InvalidLocation { index, error })?;
                 Ok(StepLocation::new(path, side, range))
@@ -317,11 +348,18 @@ pub fn walkthrough_json(review: &Review) -> Result<Vec<u8>> {
 }
 
 /// Renders the walkthrough as plain text for a terminal.
+///
+/// Control characters other than newline and tab in the stored text, such as
+/// ESC or CR in a narrative, are printed as visible `\u{..}` escapes.
 pub fn walkthrough_text(review: &Review) -> Vec<u8> {
+    escape_controls(&render_text(review)).into_owned().into_bytes()
+}
+
+fn render_text(review: &Review) -> String {
     let mut output = format!("review revision: {}\n", review.revision().get());
     let Some(walkthrough) = review.walkthrough() else {
         output.push_str("walkthrough: none\n");
-        return output.into_bytes();
+        return output;
     };
     let author = walkthrough.author();
     let _ = writeln!(
@@ -342,7 +380,7 @@ pub fn walkthrough_text(review: &Review) -> Vec<u8> {
     if let Some(coverage) = review.walkthrough_coverage() {
         push_coverage(&mut output, review, &coverage);
     }
-    output.into_bytes()
+    output
 }
 
 fn walkthrough_view(walkthrough: &Walkthrough) -> WalkthroughView<'_> {

@@ -29,6 +29,9 @@ pub enum ReviewFileError {
     /// In-memory review validation failed before any filesystem change.
     #[error("review validation failed before writing {path:?}: {source}")]
     InvalidReview { path: PathBuf, source: ReviewError },
+    /// The serialized review exceeds the read limit, so it was not written.
+    #[error("review for {path:?} would be {actual} bytes; limit is {limit} bytes, so it was not written")]
+    OutputTooLarge { path: PathBuf, actual: u64, limit: usize },
     /// The validated review could not be serialized before any filesystem change.
     #[error("cannot serialize review for {path:?}: {source}")]
     Serialize { path: PathBuf, source: serde_json::Error },
@@ -84,19 +87,11 @@ pub fn read_review(path: impl AsRef<Path>) -> Result<Review, ReviewFileError> {
 /// Serialization and validation finish before this function creates a sibling
 /// temporary file. A failure before the final rename leaves the destination
 /// untouched. An abandoned temporary file can be removed after confirming the
-/// destination still loads with [`read_review`].
+/// destination still loads with [`read_review`]. A review that would exceed
+/// [`DEFAULT_MAX_REVIEW_FILE_BYTES`] fails with
+/// [`ReviewFileError::OutputTooLarge`], so every written file can be read back.
 pub fn write_review_atomic(path: impl AsRef<Path>, review: &Review) -> Result<(), ReviewFileError> {
-    let path = path.as_ref();
-    let serialized = serialize_review(path, review)?;
-    let (parent, file_name) = destination_parts(path)?;
-    let (temporary_path, temporary) = prepare_temporary(parent, file_name, path, &serialized)?;
-    drop(temporary);
-
-    if let Err(source) = fs::rename(&temporary_path, path) {
-        let _ = fs::remove_file(&temporary_path);
-        return Err(ReviewFileError::Replace { path: path.to_owned(), source });
-    }
-    sync_directory(parent, path)
+    replace_review(path.as_ref(), review, DEFAULT_MAX_REVIEW_FILE_BYTES)
 }
 
 /// Atomically replaces a review only when its stored revision matches `expected`.
@@ -118,10 +113,11 @@ pub fn write_review_atomic_if_revision(
 ///
 /// The completed sibling file is linked at the destination only after its
 /// contents have been synchronized. Readers therefore see either no destination
-/// or the complete review.
+/// or the complete review. Like [`write_review_atomic`], it refuses a review
+/// larger than [`DEFAULT_MAX_REVIEW_FILE_BYTES`].
 pub fn create_review_atomic(path: impl AsRef<Path>, review: &Review) -> Result<(), ReviewFileError> {
     let path = path.as_ref();
-    let serialized = serialize_review(path, review)?;
+    let serialized = serialize_review(path, review, DEFAULT_MAX_REVIEW_FILE_BYTES)?;
     let (parent, file_name) = destination_parts(path)?;
     let (temporary_path, temporary) = prepare_temporary(parent, file_name, path, &serialized)?;
     drop(temporary);
@@ -163,13 +159,29 @@ impl Drop for ReviewLock {
     }
 }
 
-fn serialize_review(path: &Path, review: &Review) -> Result<Vec<u8>, ReviewFileError> {
+fn replace_review(path: &Path, review: &Review, limit: usize) -> Result<(), ReviewFileError> {
+    let serialized = serialize_review(path, review, limit)?;
+    let (parent, file_name) = destination_parts(path)?;
+    let (temporary_path, temporary) = prepare_temporary(parent, file_name, path, &serialized)?;
+    drop(temporary);
+
+    if let Err(source) = fs::rename(&temporary_path, path) {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(ReviewFileError::Replace { path: path.to_owned(), source });
+    }
+    sync_directory(parent, path)
+}
+
+fn serialize_review(path: &Path, review: &Review, limit: usize) -> Result<Vec<u8>, ReviewFileError> {
     review
         .validate()
         .map_err(|source| ReviewFileError::InvalidReview { path: path.to_owned(), source })?;
     let mut serialized =
         serde_json::to_vec(review).map_err(|source| ReviewFileError::Serialize { path: path.to_owned(), source })?;
     serialized.push(b'\n');
+    if serialized.len() > limit {
+        return Err(ReviewFileError::OutputTooLarge { path: path.to_owned(), actual: serialized.len() as u64, limit });
+    }
     Ok(serialized)
 }
 
@@ -245,6 +257,29 @@ mod tests {
         write_review_atomic(&path, &review).unwrap();
         assert_eq!(read_review(&path).unwrap(), review);
         assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_review_larger_than_the_read_limit_is_not_written() {
+        let directory = test_directory();
+        let path = directory.join("review.json");
+        let original = review(1);
+        write_review_atomic(&path, &original).unwrap();
+        let before = fs::read(&path).unwrap();
+        let limit = before.len() - 1;
+
+        let error = replace_review(&path, &review(2), limit).unwrap_err();
+        assert!(
+            matches!(error, ReviewFileError::OutputTooLarge { actual, limit: reported, .. }
+                if actual == before.len() as u64 && reported == limit),
+            "{error:?}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(fs::read_dir(&directory).unwrap().count(), 1);
+
+        replace_review(&path, &review(2), before.len()).unwrap();
+        assert_eq!(read_review(&path).unwrap(), review(2));
         fs::remove_dir_all(directory).unwrap();
     }
 

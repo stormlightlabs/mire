@@ -225,6 +225,94 @@ files with no hunks:
 }
 
 #[test]
+fn show_escapes_terminal_controls_in_stored_text() {
+    let fixture = Fixture::new();
+    let hostile = "clear\u{1b}[2J\u{1b}[H osc\u{1b}]0;owned\u{7} cr\rnul\0 csi\u{9b}1A";
+    let one_line = "clear\u{1b}[2J osc\u{1b}]0;owned\u{7} nul\0 csi\u{9b}1A";
+    let mut step = contract_step();
+    step["id"] = json!("contract");
+    step["narrative"] = json!(format!("Narrative {hostile}\n\tindented"));
+    step["diagram"] = json!(format!("Diagram {hostile}"));
+    let mut input = batch(1, vec![step]);
+    input["overview"] = json!(format!("Overview {hostile}\nevery hunk is covered"));
+    input["author"] = json!({ "id": "review-agent", "display_name": format!("Name {one_line}") });
+    input["provenance"] = json!({ "kind": "agent", "producer": format!("Producer {one_line}") });
+    assert_success(&fixture.apply(&input));
+
+    let shown = mire(&["walkthrough", "show", fixture.review_str()]);
+    assert_success(&shown);
+    for control in [0x1b_u8, 0x07, b'\r', 0x00] {
+        assert!(!shown.stdout.contains(&control), "raw control {control:#x} in output");
+    }
+    let text = String::from_utf8(shown.stdout).unwrap();
+    assert!(!text.contains('\u{9b}'), "{text}");
+    let escaped = "clear\\u{1b}[2J\\u{1b}[H osc\\u{1b}]0;owned\\u{7} cr\\u{d}nul\\u{0} csi\\u{9b}1A";
+    for label in ["Overview", "Narrative", "Diagram"] {
+        assert!(
+            text.contains(&format!("{label} {escaped}")),
+            "{label} not escaped: {text}"
+        );
+    }
+    let escaped_line = "clear\\u{1b}[2J osc\\u{1b}]0;owned\\u{7} nul\\u{0} csi\\u{9b}1A";
+    for label in ["Name", "Producer"] {
+        assert!(
+            text.contains(&format!("{label} {escaped_line}")),
+            "{label} not escaped: {text}"
+        );
+    }
+    assert!(text.contains("\n   \tindented\n"), "{text}");
+}
+
+#[test]
+fn unknown_fields_are_rejected_and_write_nothing() {
+    let fixture = Fixture::new();
+    let before = fs::read(&fixture.review_path).unwrap();
+
+    let mut misspelled = implementation_step();
+    misspelled["depends_onn"] = misspelled["depends_on"].take();
+    misspelled.as_object_mut().unwrap().remove("depends_on");
+    let mut extra_batch = batch(1, vec![contract_step()]);
+    extra_batch["overveiw"] = json!("Typo.");
+    let extra_location = step(
+        Some("a"),
+        "Extra",
+        json!({ "file": "src/lib.rs", "new_line": 2, "lines": 3 }),
+    );
+    let cases = [
+        (batch(1, vec![contract_step(), misspelled]), "depends_onn"),
+        (extra_batch, "overveiw"),
+        (batch(1, vec![extra_location]), "lines"),
+    ];
+    for (input, field) in cases {
+        let rejected = fixture.apply(&input);
+        assert_eq!(rejected.status.code(), Some(8));
+        let stderr = String::from_utf8(rejected.stderr).unwrap();
+        assert!(stderr.contains(&format!("`{field}`")), "{stderr}");
+        assert_eq!(fs::read(&fixture.review_path).unwrap(), before);
+    }
+
+    let aliases = step(
+        Some("a"),
+        "Aliases",
+        json!({ "path": "src/lib.rs", "side": "new", "start": 2, "end_line": 2 }),
+    );
+    assert_success(&fixture.apply(&batch(1, vec![aliases])));
+}
+
+#[test]
+fn an_unsupported_schema_major_is_reported_before_the_shape_is_checked() {
+    let fixture = Fixture::new();
+    let before = fs::read(&fixture.review_path).unwrap();
+    let input = json!({ "schema_version": { "major": 2, "minor": 0 }, "walkthrough": {} });
+    let rejected = fixture.apply(&input);
+    assert_eq!(rejected.status.code(), Some(8));
+    let report: Value = serde_json::from_slice(&rejected.stderr).unwrap();
+    assert_eq!(report["status"], "rejected");
+    assert_eq!(report["failures"][0]["code"], "unsupported_schema_major");
+    assert_eq!(fs::read(&fixture.review_path).unwrap(), before);
+}
+
+#[test]
 fn refresh_reports_anchor_states_in_show() {
     let directory = temp_directory("refresh");
     let root = directory.join("repository");

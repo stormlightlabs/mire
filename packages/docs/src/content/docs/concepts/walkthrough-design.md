@@ -86,19 +86,19 @@ by what blocks a merge.
 
 ### CodeRabbit
 
-| Decision | Item                                                                                                              |
-| -------- | ----------------------------------------------------------------------------------------------------------------- |
-| Adopt    | Steps ordered as the change would be explained, not by path. Mire keeps the agent's order.                        |
-| Adopt    | A step groups by meaning across files: contract, implementation, and tests in one step.                           |
-| Adopt    | Each step anchors to line ranges, and its narrative sits next to them.                                            |
-| Adopt    | Dependencies between steps are recorded explicitly.                                                               |
-| Adopt    | Overview first, then next and previous step keys.                                                                 |
-| Adapt    | Regrouping on each run becomes re-anchoring: steps keep their order and report exact, moved, stale, or ambiguous. |
-| Adapt    | Per-layer diagrams become an optional Mermaid source on a step, written by the agent.                             |
-| Adapt    | Viewed files stay browser-local progress, as the web review already does.                                         |
-| Skip     | Cohorts. One ordered list of steps comes first. Parallel groups wait for a real need.                             |
-| Skip     | Effort estimate, merge risk, related issues and pull requests, labels, reviewers, chat, and the poem.             |
-| Skip     | Separate type, category, and effort labels on findings. Mire keeps severity and annotation intent.                |
+| Decision | Item                                                                                                                                |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Adopt    | Steps ordered as the change would be explained, not by path. Mire keeps the agent's order.                                          |
+| Adopt    | A step groups by meaning across files: contract, implementation, and tests in one step.                                             |
+| Adopt    | Each step anchors to line ranges, and its narrative sits next to them.                                                              |
+| Adopt    | Dependencies between steps are recorded explicitly.                                                                                 |
+| Adopt    | Overview first, then next and previous step keys.                                                                                   |
+| Adapt    | Regrouping on each run becomes re-anchoring: steps keep their order and report exact, moved, stale, or ambiguous.                   |
+| Adapt    | Per-layer diagrams become an optional Mermaid source on a step, written by the agent.                                               |
+| Adapt    | Viewed marks live in the review file, per reader; see [Checkpoints and viewed state](/docs/concepts/checkpoints-and-viewed-state/). |
+| Skip     | Cohorts. One ordered list of steps comes first. Parallel groups wait for a real need.                                               |
+| Skip     | Effort estimate, merge risk, related issues and pull requests, labels, reviewers, chat, and the poem.                               |
+| Skip     | Separate type, category, and effort labels on findings. Mire keeps severity and annotation intent.                                  |
 
 ## Proposed fields
 

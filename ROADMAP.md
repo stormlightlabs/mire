@@ -91,8 +91,8 @@ The desktop app uses three coordinated regions:
 
 Several controls need explicit product semantics before implementation:
 
-- **Viewed:** Store each reader's viewed marks in the review file, keyed by file
-  fingerprint, so the terminal, the browser and the CLI agree.
+- **Viewed:** Store each reader's viewed marks in the review file, keyed by path
+  and fingerprint, so the terminal, the browser and the CLI agree.
   [Checkpoints and viewed state](packages/docs/src/content/docs/concepts/checkpoints-and-viewed-state.md)
   holds the design.
 - **Finish review:** Present a readiness summary and export choices. Do not write

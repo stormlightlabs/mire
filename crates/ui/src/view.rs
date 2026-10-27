@@ -1017,6 +1017,14 @@ new file mode 100644
             "walkthrough_overview_narrow_40x16",
             snapshot(open(&review, "W", 40, 16), 40, 16)
         );
+        insta::assert_snapshot!(
+            "walkthrough_step_tiny_20x6",
+            snapshot(open(&review, "JJ", 20, 6), 20, 6)
+        );
+        insta::assert_snapshot!(
+            "walkthrough_overview_tiny_20x6",
+            snapshot(open(&review, "W", 20, 6), 20, 6)
+        );
         let mut files = open(&review, "W", 120, 24);
         files.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         insta::assert_snapshot!("walkthrough_sidebar_120x24", snapshot(files, 120, 24));

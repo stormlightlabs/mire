@@ -17,7 +17,7 @@ use crate::notes::{EditorField, EditorTarget, LineSelection, NoteEditor};
 use crate::stream::{CollapseState, LayoutMode, ReviewStream, RowAnchor, RowKey};
 use crate::syntax::SyntaxCache;
 use crate::theme::ThemeFamily;
-use crate::walkthrough::{WalkthroughPosition, locate_anchor, pane_height, pane_lines};
+use crate::walkthrough::{WalkthroughPosition, locate_anchor, pane_height, pane_line_count};
 
 const DEFAULT_TERMINAL_HEIGHT: u16 = 24;
 const DEFAULT_TERMINAL_WIDTH: u16 = 80;
@@ -101,6 +101,7 @@ pub struct AppPosition {
     selected_path: Option<Vec<u8>>,
     sidebar_visible: bool,
     walkthrough_active: bool,
+    walkthrough_authored: bool,
     walkthrough_view: Option<WalkthroughPosition>,
     wrap_lines: bool,
 }
@@ -810,11 +811,15 @@ impl<'a> App<'a> {
 
     /// Ends a live-session walkthrough, closes walkthrough mode, and returns
     /// navigation control to the local user.
-    pub fn stop_walkthrough(&mut self) {
+    pub fn stop_walkthrough(&mut self) -> Result<(), &'static str> {
+        if self.live_control_busy() {
+            return Err("interaction_busy");
+        }
         self.walkthrough_active = false;
         if self.walkthrough_view.is_some() {
             self.close_walkthrough();
         }
+        Ok(())
     }
 
     /// Applies a live presentation action without changing review data.
@@ -884,6 +889,7 @@ impl<'a> App<'a> {
             selected_path,
             sidebar_visible: self.sidebar_visible,
             walkthrough_active: self.walkthrough_active,
+            walkthrough_authored: self.walkthrough().is_some(),
             walkthrough_view: self.walkthrough_view,
             wrap_lines: self.wrap_lines,
         }
@@ -901,9 +907,16 @@ impl<'a> App<'a> {
         self.layout_mode = position.layout_mode;
         self.note_filter = position.note_filter;
         self.sidebar_visible = position.sidebar_visible;
-        self.walkthrough_active = position.walkthrough_active;
+        let authored = self.walkthrough().is_some();
         let steps = self.walkthrough().map_or(0, |walkthrough| walkthrough.steps().len());
         self.walkthrough_view = position.walkthrough_view.map(|view| view.clamp(steps));
+        // A session walkthrough drives either authored steps or findings. When
+        // the reload adds or removes the authored walkthrough, the session's
+        // walkthrough ends, and a pane on removed steps closes.
+        self.walkthrough_active = position.walkthrough_active && position.walkthrough_authored == authored;
+        if position.walkthrough_active && position.walkthrough_authored && !authored {
+            self.walkthrough_view = None;
+        }
         self.wrap_lines = position.wrap_lines;
 
         let AppState::Ready(stream) = &self.state else {
@@ -977,8 +990,9 @@ impl<'a> App<'a> {
         );
         match self.walkthrough_view {
             Some(position) if !self.help_visible => {
-                let lines = pane_lines(self.walkthrough(), position, areas.review.width).len();
-                areas.with_walkthrough(pane_height(lines, areas.review.height))
+                let available = areas.review.height;
+                let lines = pane_line_count(self.walkthrough(), position, areas.review.width, available.into());
+                areas.with_walkthrough(pane_height(lines, available))
             }
             _ => areas,
         }
@@ -1713,8 +1727,18 @@ impl<'a> App<'a> {
     /// Moves a live walkthrough to its next or previous authored step, or,
     /// in a review without a walkthrough, to its next or previous visible
     /// finding.
+    ///
+    /// On an authored walkthrough, the session walkthrough must be running:
+    /// without `start`, or after the terminal closed walkthrough mode, this
+    /// returns `walkthrough_inactive` and leaves the terminal where it is.
     pub fn move_walkthrough(&mut self, forward: bool) -> Result<(), &'static str> {
+        if self.live_control_busy() {
+            return Err("interaction_busy");
+        }
         if self.walkthrough().is_some() {
+            if !self.walkthrough_active {
+                return Err("walkthrough_inactive");
+            }
             self.step_walkthrough(forward);
             return Ok(());
         }

@@ -160,42 +160,17 @@ impl StepHealth {
 /// Agent-written text is wrapped by [`wrap_text`], which drops control
 /// characters so a narrative cannot move the terminal cursor.
 pub fn pane_lines(walkthrough: Option<&Walkthrough>, position: WalkthroughPosition, width: u16) -> Vec<PaneLine> {
-    let width = usize::from(width).saturating_sub(PANE_PADDING).max(1);
-    let mut lines = Vec::new();
-    let Some(walkthrough) = walkthrough else {
-        push_wrapped(&mut lines, PaneStyle::Heading, "Walkthrough", width);
-        push_wrapped(&mut lines, PaneStyle::Body, NO_WALKTHROUGH, width);
-        push_wrapped(&mut lines, PaneStyle::Muted, NO_WALKTHROUGH_HINT, width);
-        return lines;
-    };
-    let steps = walkthrough.steps();
-    match position.clamp(steps.len()) {
-        WalkthroughPosition::Overview => {
-            let count = format!("{} {}", steps.len(), plural(steps.len(), "step", "steps"));
-            push_wrapped(&mut lines, PaneStyle::Heading, &format!("Overview · {count}"), width);
-            match walkthrough.overview() {
-                Some(overview) => push_wrapped(&mut lines, PaneStyle::Body, overview, width),
-                None => push_wrapped(&mut lines, PaneStyle::Muted, NO_OVERVIEW, width),
-            }
-            for (index, step) in steps.iter().enumerate() {
-                let tag = StepHealth::of(step)
-                    .tag()
-                    .map_or(String::new(), |tag| format!(" ({tag})"));
-                let entry = format!("{}. {}{tag}", index + 1, single_line(step.title()));
-                push_wrapped(&mut lines, PaneStyle::Muted, &entry, width);
-            }
-        }
-        WalkthroughPosition::Step(index) => {
-            let step = &steps[index];
-            let heading = format!("Step {} of {} · {}", index + 1, steps.len(), single_line(step.title()));
-            push_wrapped(&mut lines, PaneStyle::Heading, &heading, width);
-            for warning in StepHealth::of(step).warnings() {
-                push_wrapped(&mut lines, PaneStyle::Warning, &warning, width);
-            }
-            push_wrapped(&mut lines, PaneStyle::Body, step.narrative(), width);
-        }
-    }
-    lines
+    build_pane(walkthrough, position, width, usize::MAX)
+}
+
+/// Counts the pane's lines for a position, stopping at `limit`.
+///
+/// Layout needs only enough lines to fill the pane, so this skips wrapping
+/// the rest of a long step list.
+pub fn pane_line_count(
+    walkthrough: Option<&Walkthrough>, position: WalkthroughPosition, width: u16, limit: usize,
+) -> usize {
+    build_pane(walkthrough, position, width, limit).len()
 }
 
 /// Returns the pane height for its lines: the lines and a divider, at most
@@ -249,7 +224,9 @@ pub fn render_walkthrough(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, them
     }
     let text_rows = usize::from(area.height.saturating_sub(DIVIDER_HEIGHT));
     let mut lines = pane_lines(app.walkthrough(), position, area.width);
-    if lines.len() > text_rows && text_rows > 0 {
+    // The first line names the overview or step, so it stays when the pane
+    // has a single text row. The cut marker needs a row of its own below it.
+    if lines.len() > text_rows && text_rows > 1 {
         let hidden = lines.len() - text_rows + 1;
         lines.truncate(text_rows - 1);
         lines.push(PaneLine { style: PaneStyle::Muted, text: format!("… {hidden} more lines") });
@@ -277,6 +254,51 @@ pub fn render_walkthrough(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, them
             .block(Block::new().borders(Borders::BOTTOM).border_style(theme.divider)),
         area,
     );
+}
+
+fn build_pane(
+    walkthrough: Option<&Walkthrough>, position: WalkthroughPosition, width: u16, limit: usize,
+) -> Vec<PaneLine> {
+    let width = usize::from(width).saturating_sub(PANE_PADDING).max(1);
+    let mut lines = Vec::new();
+    let Some(walkthrough) = walkthrough else {
+        push_wrapped(&mut lines, PaneStyle::Heading, "Walkthrough", width);
+        push_wrapped(&mut lines, PaneStyle::Body, NO_WALKTHROUGH, width);
+        push_wrapped(&mut lines, PaneStyle::Muted, NO_WALKTHROUGH_HINT, width);
+        return lines;
+    };
+    let steps = walkthrough.steps();
+    match position.clamp(steps.len()) {
+        WalkthroughPosition::Overview => {
+            let count = format!("{} {}", steps.len(), plural(steps.len(), "step", "steps"));
+            push_wrapped(&mut lines, PaneStyle::Heading, &format!("Overview · {count}"), width);
+            match walkthrough.overview() {
+                Some(overview) => push_wrapped(&mut lines, PaneStyle::Body, overview, width),
+                None => push_wrapped(&mut lines, PaneStyle::Muted, NO_OVERVIEW, width),
+            }
+            for (index, step) in steps.iter().enumerate() {
+                if lines.len() >= limit {
+                    break;
+                }
+                let tag = StepHealth::of(step)
+                    .tag()
+                    .map_or(String::new(), |tag| format!(" ({tag})"));
+                let entry = format!("{}. {}{tag}", index + 1, single_line(step.title()));
+                push_wrapped(&mut lines, PaneStyle::Muted, &entry, width);
+            }
+        }
+        WalkthroughPosition::Step(index) => {
+            let step = &steps[index];
+            let heading = format!("Step {} of {} · {}", index + 1, steps.len(), single_line(step.title()));
+            push_wrapped(&mut lines, PaneStyle::Heading, &heading, width);
+            for warning in StepHealth::of(step).warnings() {
+                push_wrapped(&mut lines, PaneStyle::Warning, &warning, width);
+            }
+            push_wrapped(&mut lines, PaneStyle::Body, step.narrative(), width);
+        }
+    }
+    lines.truncate(limit);
+    lines
 }
 
 fn push_wrapped(lines: &mut Vec<PaneLine>, style: PaneStyle, text: &str, width: usize) {
@@ -370,6 +392,12 @@ new file mode 100644
 
     /// A review of [`PATCH`] with a three-step walkthrough.
     pub fn walkthrough_review() -> Review {
+        walkthrough_review_with_steps(3)
+    }
+
+    /// A review of [`PATCH`] with the first `count` steps of the walkthrough
+    /// [`walkthrough_review`] has.
+    pub fn walkthrough_review_with_steps(count: usize) -> Review {
         let review = plain_review();
         let location = |path: &str, start: u64, end: u64| {
             StepLocation::new(
@@ -388,31 +416,33 @@ new file mode 100644
                 None,
             )
         };
+        let mut steps = vec![
+            step(
+                "Trim keys and values",
+                "`split` now trims both sides and returns `None` when there is no `=`. Check that callers expect trimmed text.",
+                "src/parse/mod.rs",
+                2,
+                3,
+            ),
+            step(
+                "Move the dev server port",
+                "The default port moves from 80 to 8080, so the server starts without root.",
+                "src/lib.rs",
+                2,
+                2,
+            ),
+            step(
+                "Document the format",
+                "The guide names the `key = value` format the parser reads.",
+                "docs/guide.md",
+                1,
+                2,
+            ),
+        ];
+        steps.truncate(count);
         let input = WalkthroughInput::new(
             Some("Parsed values keep their spaces, so `port = 8080` fails to match. This change trims them and moves the dev server port.".to_owned()),
-            vec![
-                step(
-                    "Trim keys and values",
-                    "`split` now trims both sides and returns `None` when there is no `=`. Check that callers expect trimmed text.",
-                    "src/parse/mod.rs",
-                    2,
-                    3,
-                ),
-                step(
-                    "Move the dev server port",
-                    "The default port moves from 80 to 8080, so the server starts without root.",
-                    "src/lib.rs",
-                    2,
-                    2,
-                ),
-                step(
-                    "Document the format",
-                    "The guide names the `key = value` format the parser reads.",
-                    "docs/guide.md",
-                    1,
-                    2,
-                ),
-            ],
+            steps,
             Author::new("review-agent", None).unwrap(),
             Provenance::Agent { producer: "fixture".to_owned() },
         );
@@ -430,7 +460,7 @@ new file mode 100644
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    use super::fixtures::{plain_review, refreshed_review, walkthrough_review};
+    use super::fixtures::{plain_review, refreshed_review, walkthrough_review, walkthrough_review_with_steps};
     use super::*;
     use crate::AppOptions;
     use crate::app::InteractionMode;
@@ -531,7 +561,7 @@ mod tests {
         app.move_walkthrough(false).unwrap();
         assert_eq!(app.live_state().walkthrough_progress, Some((1, 3)));
 
-        app.stop_walkthrough();
+        app.stop_walkthrough().unwrap();
         assert!(!app.live_state().walkthrough_active);
         assert_eq!(app.walkthrough_view(), None);
         assert_eq!(app.live_state().walkthrough_progress, None);
@@ -551,16 +581,115 @@ mod tests {
         assert!(!state.walkthrough_active);
         assert_eq!(state.walkthrough_progress, None);
 
-        app.move_walkthrough(true).unwrap();
-        let state = app.live_state();
-        assert!(!state.walkthrough_active);
-        assert_eq!(state.walkthrough_progress, None);
+        let scroll = app.scroll();
+        assert_eq!(app.move_walkthrough(true), Err("walkthrough_inactive"));
+        assert_eq!(app.walkthrough_view(), None);
+        assert_eq!(app.scroll(), scroll);
 
         app.start_walkthrough().unwrap();
         app.move_walkthrough(true).unwrap();
         press(&mut app, 'W');
         assert!(!app.live_state().walkthrough_active);
         assert_eq!(app.walkthrough_view(), None);
+    }
+
+    #[test]
+    fn live_steps_without_start_are_refused_and_leave_the_terminal_in_place() {
+        let review = walkthrough_review();
+        let mut app = App::review_with_options(&review, AppOptions::default());
+        app.resize(120, 24);
+        let (scroll, path) = (app.scroll(), selected_path(&app));
+        assert_eq!(app.move_walkthrough(true), Err("walkthrough_inactive"));
+        assert_eq!(app.move_walkthrough(false), Err("walkthrough_inactive"));
+        assert_eq!(app.walkthrough_view(), None);
+        assert_eq!(app.scroll(), scroll);
+        assert_eq!(selected_path(&app), path);
+
+        // A walkthrough the terminal opened with W is not a session walkthrough.
+        press(&mut app, 'W');
+        assert_eq!(app.move_walkthrough(true), Err("walkthrough_inactive"));
+        assert_eq!(app.walkthrough_view(), Some(WalkthroughPosition::Overview));
+
+        // Without an authored walkthrough, the steps stay finding navigation.
+        let plain = plain_review();
+        let mut app = App::review_with_options(&plain, AppOptions::default());
+        app.resize(120, 24);
+        assert_ne!(app.move_walkthrough(true), Err("walkthrough_inactive"));
+    }
+
+    #[test]
+    fn live_walkthrough_commands_wait_while_the_terminal_takes_input() {
+        let review = walkthrough_review();
+        let mut app = App::review_with_options(&review, AppOptions::default());
+        app.resize(120, 24);
+        app.start_walkthrough().unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        assert!(app.live_control_busy());
+        let (scroll, path) = (app.scroll(), selected_path(&app));
+        assert_eq!(app.move_walkthrough(true), Err("interaction_busy"));
+        assert_eq!(app.move_walkthrough(false), Err("interaction_busy"));
+        assert_eq!(app.stop_walkthrough(), Err("interaction_busy"));
+        assert_eq!(app.walkthrough_view(), Some(WalkthroughPosition::Overview));
+        assert!(app.live_state().walkthrough_active);
+        assert_eq!(app.scroll(), scroll);
+        assert_eq!(selected_path(&app), path);
+    }
+
+    #[test]
+    fn reload_without_the_walkthrough_ends_the_session_walkthrough() {
+        let review = walkthrough_review();
+        let mut app = App::review_with_options(&review, AppOptions::default());
+        app.resize(120, 24);
+        app.start_walkthrough().unwrap();
+        app.move_walkthrough(true).unwrap();
+        let position = app.position();
+
+        let plain = plain_review();
+        let mut reloaded = App::review_with_options(&plain, AppOptions::default());
+        reloaded.resize(120, 24);
+        reloaded.restore_position(&position);
+        let state = reloaded.live_state();
+        assert!(!state.walkthrough_active);
+        assert_eq!(state.walkthrough_progress, None);
+        assert_eq!(reloaded.walkthrough_view(), None);
+    }
+
+    #[test]
+    fn reload_with_fewer_steps_clamps_the_session_walkthrough() {
+        let review = walkthrough_review();
+        let mut app = App::review_with_options(&review, AppOptions::default());
+        app.resize(120, 24);
+        app.start_walkthrough().unwrap();
+        for _ in 0..3 {
+            app.move_walkthrough(true).unwrap();
+        }
+        assert_eq!(app.live_state().walkthrough_progress, Some((3, 3)));
+        let position = app.position();
+
+        let shorter = walkthrough_review_with_steps(1);
+        let mut reloaded = App::review_with_options(&shorter, AppOptions::default());
+        reloaded.resize(120, 24);
+        reloaded.restore_position(&position);
+        let state = reloaded.live_state();
+        assert!(state.walkthrough_active);
+        assert_eq!(state.walkthrough_progress, Some((1, 1)));
+        assert_eq!(reloaded.walkthrough_view(), Some(WalkthroughPosition::Step(0)));
+        reloaded.stop_walkthrough().unwrap();
+        assert!(!reloaded.live_state().walkthrough_active);
+    }
+
+    #[test]
+    fn pane_line_count_stops_at_its_limit() {
+        let review = walkthrough_review();
+        let full = pane_lines(review.walkthrough(), WalkthroughPosition::Overview, 120).len();
+        assert_eq!(
+            pane_line_count(review.walkthrough(), WalkthroughPosition::Overview, 120, usize::MAX),
+            full
+        );
+        assert_eq!(
+            pane_line_count(review.walkthrough(), WalkthroughPosition::Overview, 120, 2),
+            2
+        );
     }
 
     #[test]

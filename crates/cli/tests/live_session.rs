@@ -159,6 +159,9 @@ fn live_session_walkthrough_steps_through_authored_steps() {
         "TUI exited before live discovery"
     );
     let session = listed_session(&directory.0);
+    let early = session_command(&directory.0, &["walkthrough", "next", &session]);
+    assert_eq!(early["status"], "error", "{early}");
+    assert_eq!(early["error"]["code"], "walkthrough_inactive");
     let started = session_command(&directory.0, &["walkthrough", "start", &session]);
     assert_eq!(started["status"], "ok", "{started}");
     assert_eq!(started["result"]["walkthrough_active"], true);

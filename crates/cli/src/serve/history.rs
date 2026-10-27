@@ -14,6 +14,17 @@ use utoipa::ToSchema;
 use super::{AppState, PathText, Problem, SemanticFileContent, load_current_review, problem, viewed};
 use crate::history::{self, CheckpointContent, CheckpointFailure};
 
+/// The body of `GET /api/v1/history`: the file's history without `revision`,
+/// or its hunks at that revision with it.
+#[derive(Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum HistoryResult {
+    /// The revisions that changed the file.
+    History(HistoryResponse),
+    /// The file's hunks at the requested revision.
+    Checkpoint(CheckpointResponse),
+}
+
 /// One revision that changed a file.
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -110,7 +121,7 @@ pub fn file_history(review: &Review, path: &BytePath, held: &BTreeSet<ObjectId>)
         ("revision" = Option<u64>, Query, description = "Review revision to read the file at")
     ),
     responses(
-        (status = 200, description = "Without `revision`, the file's history; with it, a `CheckpointResponse`", body = HistoryResponse),
+        (status = 200, description = "Without `revision`, a `HistoryResponse`; with it, a `CheckpointResponse`", body = HistoryResult),
         (status = 400, description = "The path is not hex or not a valid path (`invalid_path`), or the revision is not a positive number (`invalid_revision`)", body = Problem),
         (status = 404, description = "The file has no checkpoint at this revision (`checkpoint_not_found`), or Mire cannot rebuild its hunks (`checkpoint_unavailable`)", body = Problem)
     )
@@ -136,15 +147,16 @@ pub async fn get_history(State(state): State<AppState>, uri: Uri) -> Response<Bo
     let result = tokio::task::spawn_blocking(move || match revision {
         None => {
             let held = history::held_blobs(&review);
-            Ok(Json(HistoryResponse {
+            Ok(Json(HistoryResult::History(HistoryResponse {
                 revision: review.revision().get(),
                 path: PathText::from_bytes(path.as_bytes()),
                 history: file_history(&review, &path, &held),
-            })
+            }))
             .into_response())
         }
         Some(revision) => history::file_at_revision(&review, &path, revision).map(|(checkpoint, row, content)| {
-            checkpoint_response(&review, &path, checkpoint, row, content).into_response()
+            let Json(response) = checkpoint_response(&review, &path, checkpoint, row, content);
+            Json(HistoryResult::Checkpoint(response)).into_response()
         }),
     })
     .await;

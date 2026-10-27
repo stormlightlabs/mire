@@ -15,6 +15,12 @@ use thiserror::Error;
 
 const MAX_GIT_METADATA_BYTES: usize = 1024 * 1024;
 const MAX_GIT_STDERR_BYTES: usize = 1024 * 1024;
+/// Object ids sent to one `git cat-file --batch-check` run.
+const BLOB_CHECK_CHUNK: usize = 4096;
+/// The longest line `git cat-file --batch-check` prints for one id: a 64-digit
+/// id, the longest type name or `missing`, and a 20-digit size, with
+/// separators.
+const MAX_BLOB_CHECK_LINE_BYTES: usize = 128;
 
 type Result<T> = std::result::Result<T, GitError>;
 
@@ -205,24 +211,7 @@ pub fn missing_blobs(binding: &SourceBinding, objects: &BTreeSet<ObjectId>) -> R
         return Ok(BTreeSet::new());
     }
     let repository = validate_repository_binding(binding)?;
-    let mut input = Vec::new();
-    for object in objects {
-        input.extend_from_slice(object.as_str().as_bytes());
-        input.push(b'\n');
-    }
-    let arguments = [OsString::from("cat-file"), OsString::from("--batch-check")];
-    let output = run_git_with_input(Some(&repository.root), &arguments, input, MAX_GIT_METADATA_BYTES)?;
-    ensure_success("check objects", &output, &[0])?;
-    let mut held = BTreeSet::new();
-    for line in output.stdout.split(|byte| *byte == b'\n') {
-        let mut fields = line.split(|byte| *byte == b' ');
-        if let (Some(id), Some(b"blob")) = (fields.next(), fields.next())
-            && let Some(id) = std::str::from_utf8(id).ok().and_then(ObjectId::new)
-        {
-            held.insert(id);
-        }
-    }
-    Ok(objects.difference(&held).cloned().collect())
+    missing_blobs_at(&repository.root, objects)
 }
 
 /// Rebuilds a file's hunks from the blobs of its two sides in the bound
@@ -504,6 +493,44 @@ fn one_sided_patch(content: &[u8], added: bool) -> Option<Vec<u8>> {
     Some(patch)
 }
 
+/// Checks `objects` in chunks of [`BLOB_CHECK_CHUNK`] ids, so each run's
+/// output limit follows from its input and no id count can exceed it. Any
+/// failed run fails the whole check.
+fn missing_blobs_at(root: &Path, objects: &BTreeSet<ObjectId>) -> Result<BTreeSet<ObjectId>> {
+    let ids = objects.iter().collect::<Vec<_>>();
+    let mut held = BTreeSet::new();
+    for chunk in ids.chunks(BLOB_CHECK_CHUNK) {
+        held.extend(held_blobs_at(root, chunk)?);
+    }
+    Ok(objects.difference(&held).cloned().collect())
+}
+
+fn held_blobs_at(root: &Path, ids: &[&ObjectId]) -> Result<BTreeSet<ObjectId>> {
+    let mut input = Vec::new();
+    for id in ids {
+        input.extend_from_slice(id.as_str().as_bytes());
+        input.push(b'\n');
+    }
+    let arguments = [OsString::from("cat-file"), OsString::from("--batch-check")];
+    let limit = ids.len() * MAX_BLOB_CHECK_LINE_BYTES;
+    let output = run_git_with_input(Some(root), &arguments, input, limit)?;
+    ensure_success("check objects", &output, &[0])?;
+    Ok(parse_batch_check(&output.stdout))
+}
+
+fn parse_batch_check(stdout: &[u8]) -> BTreeSet<ObjectId> {
+    let mut held = BTreeSet::new();
+    for line in stdout.split(|byte| *byte == b'\n') {
+        let mut fields = line.split(|byte| *byte == b' ');
+        if let (Some(id), Some(b"blob")) = (fields.next(), fields.next())
+            && let Some(id) = std::str::from_utf8(id).ok().and_then(ObjectId::new)
+        {
+            held.insert(id);
+        }
+    }
+    held
+}
+
 fn run_git(cwd: Option<&Path>, arguments: &[OsString], stdout_limit: usize) -> Result<GitOutput> {
     run_git_with_literal_pathspecs(cwd, arguments, stdout_limit, true)
 }
@@ -741,6 +768,34 @@ mod tests {
         let capture = read_stream(&b"abcdef"[..], 3).unwrap();
         assert_eq!(capture.bytes, b"abc");
         assert!(capture.exceeded_limit);
+    }
+
+    #[test]
+    fn blob_check_covers_more_ids_than_one_run_prints() {
+        let root = std::env::temp_dir().join(format!("mire-blob-check-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let git = |arguments: &[&str]| {
+            let output = Command::new("git").args(arguments).current_dir(&root).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            output.stdout
+        };
+        git(&["init", "--quiet"]);
+        fs::write(root.join("held.txt"), "held\n").unwrap();
+        let stdout = git(&["hash-object", "-w", "held.txt"]);
+        let held = ObjectId::new(std::str::from_utf8(trim_ascii(&stdout)).unwrap()).unwrap();
+        // Enough absent ids that their `missing` lines pass the old 1 MiB cap.
+        let mut objects = (1..=30_000u64)
+            .map(|index| ObjectId::new(&format!("{index:040x}")).unwrap())
+            .collect::<BTreeSet<_>>();
+        let absent = objects.clone();
+        objects.insert(held.clone());
+
+        let missing = missing_blobs_at(&root, &objects).unwrap();
+
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(missing, absent);
+        assert!(!missing.contains(&held));
     }
 
     #[test]

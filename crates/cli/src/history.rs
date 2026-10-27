@@ -69,18 +69,22 @@ impl CheckpointFailure {
 
 /// Keeps patch copies on the rows the current revision's checkpoint recorded
 /// when the bound repository does not hold their blobs. A review without a
-/// source binding keeps none, and a failed Git check keeps every copy that
-/// fits.
-pub fn keep_missing_copies(review: Review) -> Review {
+/// source binding keeps none.
+///
+/// A failed Git check returns the error rather than a guess. Reading it as
+/// "every blob missing" would spend the history budget on copies Git does not
+/// need and compact older copies to make room; reading it as "none missing"
+/// would skip copies Git cannot replace.
+pub fn keep_missing_copies(review: Review) -> Result<Review, git::GitError> {
     let Some(binding) = review.source_binding() else {
-        return review;
+        return Ok(review);
     };
     let Some(checkpoint) = review
         .checkpoints()
         .last()
         .filter(|checkpoint| checkpoint.revision() == review.revision())
     else {
-        return review;
+        return Ok(review);
     };
     let objects = checkpoint
         .files()
@@ -88,13 +92,14 @@ pub fn keep_missing_copies(review: Review) -> Review {
         .flat_map(|row| row.old_object().into_iter().chain(row.new_object()))
         .cloned()
         .collect::<BTreeSet<_>>();
-    let missing = git::missing_blobs(binding, &objects).unwrap_or_else(|_| objects.clone());
-    review.keep_checkpoint_copies(|file| needs_copy(file, &missing))
+    let missing = git::missing_blobs(binding, &objects)?;
+    Ok(review.keep_checkpoint_copies(|file| needs_copy(file, &missing)))
 }
 
 /// Returns the blob ids in the review's history that the bound repository
 /// holds. A review without a source binding, or a failed Git check, holds
-/// none.
+/// none: this only decides which rows can be shown, and when the check fails,
+/// reading the blobs from Git would fail too.
 pub fn held_blobs(review: &Review) -> BTreeSet<ObjectId> {
     let Some(binding) = review.source_binding() else {
         return BTreeSet::new();

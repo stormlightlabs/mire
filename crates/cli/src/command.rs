@@ -316,7 +316,7 @@ fn initialize_review(arguments: ReviewInitArgs) -> Result<(), AppError> {
     .and_then(|review| review.with_source_binding(source_binding))
     .and_then(|review| review.with_metadata(title, description))
     .map_err(AppError::InitializeReview)?;
-    let review = keep_missing_copies(review);
+    let review = keep_missing_copies(review).map_err(AppError::Git)?;
     create_review_atomic(Path::new(&destination), &review).map_err(AppError::CreateReviewFile)?;
 
     let stdout = io::stdout();
@@ -785,8 +785,8 @@ fn file_history(arguments: FileHistoryArgs) -> Result<(), AppError> {
             .collect::<Vec<_>>();
         return write_bytes(&file_history_json(&review, &path, &entries).map_err(AppError::Protocol)?);
     };
-    let revision = ReviewRevision::new(revision)
-        .map_err(|error| checkpoint_rejection(history::CheckpointFailure::NotFound.code(), &error.to_string()))?;
+    let revision =
+        ReviewRevision::new(revision).map_err(|error| checkpoint_rejection("invalid_revision", &error.to_string()))?;
     let (checkpoint_revision, row, rebuilt) = history::file_at_revision(&review, &path, revision)
         .map_err(|failure| checkpoint_rejection(failure.code(), failure.message()))?;
     write_bytes(

@@ -140,6 +140,18 @@ fn worktree_checkpoints_keep_copies_because_git_lacks_the_blobs() {
         ]),
         "checkpoint_not_found"
     );
+    assert_eq!(
+        fixture.rejection(&[
+            "file",
+            "history",
+            fixture.review(),
+            "--file",
+            "a.txt",
+            "--revision",
+            "0"
+        ]),
+        "invalid_revision"
+    );
 
     // A mark at the older revision is checked against the file as it was.
     let old = entries[1]["fingerprint"].as_str().unwrap();

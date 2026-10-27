@@ -521,6 +521,21 @@ async fn exports_and_the_openapi_document_are_typed_downloads() {
     ] {
         assert!(paths.contains_key(path), "the OpenAPI document lists {path}");
     }
+    let history = &paths["/api/v1/history"]["get"]["responses"]["200"]["content"]["application/json"]["schema"];
+    assert_eq!(history["$ref"], "#/components/schemas/HistoryResult");
+    let variants = document["components"]["schemas"]["HistoryResult"]["oneOf"]
+        .as_array()
+        .expect("the history body is one of two shapes")
+        .iter()
+        .map(|variant| variant["$ref"].as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        variants,
+        [
+            "#/components/schemas/HistoryResponse",
+            "#/components/schemas/CheckpointResponse"
+        ]
+    );
 }
 
 #[tokio::test]

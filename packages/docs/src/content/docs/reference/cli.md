@@ -204,9 +204,9 @@ With `--revision`, the command prints the file's hunks at that revision, the
 `checkpoint_revision` of the row it found, and `source`: `capture` when the
 file has not changed since, `git` when Mire read both blobs from the bound
 repository, or `copy` for the patch copy. A file with no row at that revision
-fails with `checkpoint_not_found`, and a row whose blobs Git no longer holds
-and that has no copy with `checkpoint_unavailable`. Both exit with status `8`
-and a report on standard error.
+fails with `checkpoint_not_found`, a row whose blobs Git no longer holds and
+that has no copy with `checkpoint_unavailable`, and a `--revision` of `0` with
+`invalid_revision`. Each exits with status `8` and a report on standard error.
 
 ## Note commands
 
@@ -365,8 +365,10 @@ revision. Each change sends one `viewed` event on `GET /api/v1/events`, and the
 server also sends one when a mark written by the CLI or the terminal changes the
 file without changing its revision.
 
-Each file in `GET /api/v1/review` also has `history`, the entries
-`mire file history` prints, and each finding from `GET /api/v1/findings/{note_id}`
+Each file in `GET /api/v1/review` also has `history`: the entries
+`mire file history` prints, without `old_object` and `new_object`. Each entry
+has `revision`, `fingerprint`, `available`, `copy`, `baseline` and `gap`, the
+same fields `GET /api/v1/history?path=` returns. Each finding from `GET /api/v1/findings/{note_id}`
 has `checkpoint`: the `revision` and `path` of the row it was written on, or
 `null`. The history and checkpoint routes return `source`,
 `checkpointRevision`, `fingerprint` and the hunks as `content`, or fail with

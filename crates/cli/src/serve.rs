@@ -401,6 +401,7 @@ enum FindingMutationError {
         viewed::MarkViewedRequest,
         viewed::ViewedResponse,
         history::HistoryEntry,
+        history::HistoryResult,
         history::HistoryResponse,
         history::CheckpointResponse,
         history::CheckpointLink,

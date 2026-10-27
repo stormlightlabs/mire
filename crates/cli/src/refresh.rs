@@ -61,7 +61,7 @@ pub fn reload_review(review: &Review) -> Result<Review, RefreshError> {
     if refreshed.revision() == review.revision() {
         return Ok(refreshed);
     }
-    Ok(keep_missing_copies(refreshed))
+    keep_missing_copies(refreshed).map_err(RefreshError::Git)
 }
 
 /// Repeats a bound Git comparison, re-anchors its notes, and atomically saves it.

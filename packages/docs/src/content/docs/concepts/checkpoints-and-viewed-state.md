@@ -102,7 +102,8 @@ worktree side to print the `index` line but does not store the blob, and the
 next edit replaces the file on disk. When a refresh records a checkpoint, Mire
 checks the file's blobs with `git cat-file --batch-check`, the batch form of
 `git cat-file -e`. If Git does not hold one, or a side has no id, Mire keeps a
-patch copy. Binary files get no copy. Mire never writes objects into the
+patch copy. Binary files get no copy. If the check itself fails, the refresh
+fails and the review file stays as it was. Mire never writes objects into the
 reviewed repository.
 
 A blob can also disappear later, when Git prunes an unreachable object. Mire

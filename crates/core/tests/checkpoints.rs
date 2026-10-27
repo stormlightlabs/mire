@@ -122,8 +122,6 @@ fn history_stays_within_its_budget_by_folding_the_oldest_checkpoint() {
     // Each copy serializes to about 920 KiB, so seventeen fit in 16 MiB.
     let line = |index: usize| format!("{index:04}{}", "x".repeat(235_000));
     let mut review = review(&[("a.txt", &line(0)), ("b.txt", "steady")]).keep_checkpoint_copies(|_| true);
-    let mut skipped_at_budget = None;
-    let mut kept_after_skip = false;
     for index in 1..22 {
         review = review
             .reanchor(changeset(&[("a.txt", &line(index)), ("b.txt", "steady")]))
@@ -139,14 +137,11 @@ fn history_stays_within_its_budget_by_folding_the_oldest_checkpoint() {
             review.revision(),
             "every refresh records its checkpoint"
         );
-        match (newest.files()[0].copy(), skipped_at_budget) {
-            (PatchCopy::Skipped, None) => skipped_at_budget = Some(index),
-            (PatchCopy::Kept(_), Some(_)) => kept_after_skip = true,
-            _ => {}
-        }
+        assert!(
+            newest.files()[0].copy().hunks().is_some(),
+            "folding the oldest checkpoint made room for the copy at refresh {index}"
+        );
     }
-    assert!(skipped_at_budget.is_some(), "the budget skipped a copy");
-    assert!(kept_after_skip, "compaction freed space for a later copy");
 
     let oldest = review.checkpoints()[0].revision();
     assert!(oldest > revision(1), "the oldest checkpoints were folded");
@@ -161,6 +156,162 @@ fn history_stays_within_its_budget_by_folding_the_oldest_checkpoint() {
     );
     let (_, row) = review.file_at_revision(&path("a.txt"), review.revision()).unwrap();
     assert_eq!(row.fingerprint(), Some(review.changeset().files()[0].fingerprint()));
+}
+
+#[test]
+fn copies_that_fit_are_kept_when_others_pass_the_budget() {
+    // Each copy serializes to about 365 KiB, so 45 of 48 fit in 16 MiB.
+    let names = (0..48).map(|file| format!("f{file:02}.txt")).collect::<Vec<_>>();
+    let first = review(&names.iter().map(|name| (name.as_str(), "small")).collect::<Vec<_>>());
+    let mut patch = String::new();
+    for (file, name) in names.iter().enumerate() {
+        patch.push_str(&format!("--- a/{name}\n+++ b/{name}\n@@ -1 +1,1500 @@\n-old\n"));
+        for line in 0..1500 {
+            patch.push_str(&format!("+line {line} of file {file} padding padding padding\n"));
+        }
+    }
+    let large = parse_patch(
+        patch.as_bytes(),
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .unwrap();
+    let second = first.reanchor(large).unwrap();
+    let kept = second.clone().keep_checkpoint_copies(|_| true);
+
+    assert!(kept.history_bytes() <= MAX_HISTORY_BYTES);
+    let rows = kept.checkpoints().last().unwrap().files();
+    let held = rows.iter().filter(|row| row.copy().hunks().is_some()).count();
+    assert!(held >= 40, "copies that fit were dropped: {held} of 48 kept");
+    assert!(held < 48, "the budget skipped the copies that do not fit");
+    // Each skipped copy is one that did not fit beside the kept ones.
+    let room = MAX_HISTORY_BYTES - kept.history_bytes();
+    let one_copy = (kept.history_bytes() - second.history_bytes()) / held;
+    assert!(room < one_copy, "a skipped copy would have fit");
+    assert_eq!(
+        kept.checkpoints().len(),
+        2,
+        "folding the small checkpoint could not make room, so it was not folded"
+    );
+}
+
+#[test]
+fn pinned_rows_no_note_references_are_removed() {
+    let first = review(&[("a.txt", "new"), ("b.txt", "two")]).keep_checkpoint_copies(|_| true);
+    let noted = first.apply_notes(vec![note_on("b.txt")]).unwrap();
+    let second = noted
+        .reanchor(changeset(&[("a.txt", "newer"), ("b.txt", "two")]))
+        .unwrap();
+    let folded = second.clone().compact_history(second.history_bytes() - 1);
+    assert_eq!(folded.pinned_checkpoints().len(), 1, "the note's row was pinned");
+
+    // The note no longer points at the pinned row.
+    let mut json = serde_json::to_value(&folded).unwrap();
+    for anchor in [
+        "/anchor",
+        "/reanchor_outcome/original_anchor",
+        "/reanchor_outcome/candidate/anchor",
+    ] {
+        json["notes"][0]
+            .pointer_mut(&format!("{anchor}/checkpoint/revision"))
+            .map(|revision| *revision = Value::from(2))
+            .unwrap();
+    }
+    let unpinned: Review = serde_json::from_value(json).unwrap();
+    assert_eq!(unpinned.pinned_checkpoints().len(), 1, "loading keeps the row");
+
+    let refreshed = unpinned
+        .reanchor(changeset(&[("a.txt", "newest"), ("b.txt", "two")]))
+        .unwrap();
+    assert!(refreshed.pinned_checkpoints().is_empty(), "a refresh removes it");
+    let compacted = unpinned.clone().compact_history(usize::MAX);
+    assert!(compacted.pinned_checkpoints().is_empty(), "a compaction removes it");
+    let kept = unpinned.keep_checkpoint_copies(|_| true);
+    assert!(kept.pinned_checkpoints().is_empty(), "keeping copies removes it");
+}
+
+#[test]
+fn pins_that_fill_the_budget_stop_new_copies_without_folding() {
+    // Eighteen pinned copies of about 920 KiB each pass 16 MiB.
+    let text = |file: usize, round: usize| format!("{file:02}{round}{}", "x".repeat(235_000));
+    let names = (0..18).map(|file| format!("f{file:02}.txt")).collect::<Vec<_>>();
+    let files = |round: usize| {
+        names
+            .iter()
+            .enumerate()
+            .map(|(file, name)| (name.clone(), text(file, round)))
+            .collect::<Vec<_>>()
+    };
+    let capture = |round: usize| {
+        let files = files(round);
+        changeset(
+            &files
+                .iter()
+                .map(|(name, text)| (name.as_str(), text.as_str()))
+                .collect::<Vec<_>>(),
+        )
+    };
+    let first = Review::new(revision(1), capture(0), Vec::new(), Vec::new()).unwrap();
+    let noted = first
+        .apply_notes(names.iter().map(|name| note_on(name)).collect())
+        .unwrap();
+    let mut json = serde_json::to_value(&noted).unwrap();
+    let mut rows = json["checkpoints"][0]["files"].clone();
+    for (row, file) in rows.as_array_mut().unwrap().iter_mut().zip(noted.changeset().files()) {
+        let mire_core::FileContent::Text { hunks } = file.content() else { unreachable!() };
+        row["copy"] = serde_json::json!({ "hunks": hunks });
+    }
+    json["pinned"] = serde_json::json!([{ "revision": 1, "files": rows }]);
+    let pinned: Review = serde_json::from_value(json).unwrap();
+    assert!(pinned.history_bytes() > MAX_HISTORY_BYTES);
+
+    let mut review = pinned;
+    for round in 1..3 {
+        review = review
+            .reanchor(capture(round))
+            .unwrap()
+            .keep_checkpoint_copies(|_| true);
+        assert_eq!(review.checkpoints().len(), round + 1, "history was not folded");
+        let newest = review.checkpoints().last().unwrap();
+        assert!(
+            newest.files().iter().all(|row| row.copy() == &PatchCopy::Skipped),
+            "no new copy is kept"
+        );
+        assert_eq!(review.pinned_checkpoints()[0].files().len(), 18);
+    }
+}
+
+#[test]
+fn folding_keeps_baseline_gap_and_extension_fields() {
+    let first = review(&[("a.txt", "new"), ("b.txt", "two")]);
+    let second = first
+        .reanchor(changeset(&[("a.txt", "newer"), ("b.txt", "two")]))
+        .unwrap();
+    let third = second
+        .reanchor(changeset(&[("a.txt", "newest"), ("b.txt", "two")]))
+        .unwrap();
+    let mut json = serde_json::to_value(&third).unwrap();
+    json["checkpoints"][0]["baseline"] = Value::Bool(true);
+    json["checkpoints"][0]["x-shared"] = Value::from("oldest");
+    json["checkpoints"][0]["x-oldest"] = Value::from(1);
+    json["checkpoints"][1]["gap"] = Value::Bool(true);
+    json["checkpoints"][1]["x-shared"] = Value::from("next");
+    let loaded: Review = serde_json::from_value(json).unwrap();
+
+    let once = loaded.clone().compact_history(loaded.history_bytes() - 1);
+    assert_eq!(once.checkpoints()[0].revision(), revision(2));
+    assert!(
+        once.checkpoints()[0].is_baseline(),
+        "history before it is still unknown"
+    );
+    assert!(once.checkpoints()[0].is_gap());
+    let saved = serde_json::to_value(&once).unwrap();
+    assert_eq!(saved["checkpoints"][0]["x-oldest"], Value::from(1));
+    assert_eq!(saved["checkpoints"][0]["x-shared"], Value::from("next"));
+
+    let twice = once.clone().compact_history(once.history_bytes() - 1);
+    assert_eq!(twice.checkpoints().len(), 1);
+    assert!(twice.checkpoints()[0].is_baseline() && twice.checkpoints()[0].is_gap());
 }
 
 #[test]

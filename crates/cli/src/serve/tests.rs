@@ -57,6 +57,7 @@ impl Fixture {
             events: broadcast::channel(16).0,
             watch_status: Arc::new(Mutex::new(WatchStatus::Unavailable)),
             announced_viewed: Arc::new(Mutex::new(ViewedMap::new())),
+            held_blobs: Arc::default(),
         };
         Self { directory, state }
     }
@@ -958,6 +959,32 @@ async fn refreshed_note_fixture() -> (Fixture, String) {
     let refreshed = review.reanchor(changed).expect("reanchored");
     crate::write_review_atomic(fixture.path(), &refreshed).expect("review is written");
     (fixture, raw)
+}
+
+#[test]
+fn held_blobs_are_checked_once_per_revision_and_a_failure_is_not_kept() {
+    let cache = history::HeldBlobCache::default();
+    let id = mire_core::ObjectId::new(&"a".repeat(40)).expect("object id");
+    let objects = BTreeSet::from([id.clone()]);
+    let revision = |value| ReviewRevision::new(value).expect("positive revision");
+    let checks = std::cell::Cell::new(0);
+    let check = |objects: &BTreeSet<mire_core::ObjectId>| {
+        checks.set(checks.get() + 1);
+        Some(objects.clone())
+    };
+
+    let first = cache.held_with(revision(2), objects.clone(), check);
+    assert_eq!(first.as_deref(), Some(&objects));
+    let again = cache.held_with(revision(2), objects.clone(), check);
+    assert_eq!(again.as_deref(), Some(&objects));
+    assert_eq!(checks.get(), 1, "the same revision reuses the result");
+    cache.held_with(revision(3), objects.clone(), check);
+    assert_eq!(checks.get(), 2, "a new revision checks again");
+
+    // A failed check reports unknown and leaves nothing to reuse.
+    assert!(cache.held_with(revision(4), objects.clone(), |_| None).is_none());
+    cache.held_with(revision(4), objects.clone(), check);
+    assert_eq!(checks.get(), 3, "a failed check is tried again");
 }
 
 #[tokio::test]

@@ -238,6 +238,27 @@ fn committed_checkpoints_read_the_blobs_from_git_without_copies() {
 }
 
 #[test]
+fn a_failed_git_check_reports_availability_as_unknown() {
+    let fixture = Fixture::new();
+    fixture.write("a.txt", "one\n");
+    fixture.commit("base");
+    fixture.write("a.txt", "two\n");
+    fixture.commit("change");
+    git(&fixture.root, ["tag", "base", "HEAD~1"]);
+    assert_success(&fixture.mire(&["review", "init", fixture.review(), "base", "HEAD"]));
+    fixture.write("a.txt", "three\n");
+    fixture.commit("again");
+    assert_success(&fixture.mire(&["review", "refresh", fixture.review()]));
+    assert_eq!(fixture.history("a.txt")["history"][1]["available"], true);
+
+    // Without the repository, Git cannot say whether it holds the blobs.
+    fs::remove_dir_all(fixture.root.join(".git")).unwrap();
+    let history = fixture.history("a.txt");
+    assert_eq!(history["history"][0]["available"], true, "the current capture");
+    assert_eq!(history["history"][1]["available"], Value::Null, "{history}");
+}
+
+#[test]
 fn staged_checkpoints_need_no_copy() {
     let fixture = Fixture::new();
     fixture.write("a.txt", "one\n");

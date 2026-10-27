@@ -53,12 +53,7 @@ pub fn reanchor_review(review: &Review, changeset: Changeset) -> Result<Review> 
         refreshed.revision,
     );
     let pins = refreshed.pins();
-    checkpoint::compact(
-        &mut refreshed.checkpoints,
-        &mut refreshed.pinned,
-        &pins,
-        checkpoint::MAX_HISTORY_BYTES,
-    );
+    checkpoint::fit_budget(&mut refreshed.checkpoints, &mut refreshed.pinned, &pins);
     refreshed.extensions = review.extensions.clone();
     refreshed.validate()?;
     Ok(refreshed)

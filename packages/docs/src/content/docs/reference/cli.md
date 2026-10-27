@@ -196,7 +196,8 @@ left out:
 
 `fingerprint` is `null` at a revision where the file left the changeset.
 `copy` says whether Mire kept a patch copy of the hunks, and `available`
-whether it can show them. `baseline` marks the checkpoint Mire recorded for a
+whether it can show them, or `null` when the Git check failed and only Git
+could rebuild them. `baseline` marks the checkpoint Mire recorded for a
 review file written before checkpoints, and `gap` one where an older release
 refreshed the review and the file changed at a revision Mire did not record.
 
@@ -368,7 +369,8 @@ file without changing its revision.
 Each file in `GET /api/v1/review` also has `history`: the entries
 `mire file history` prints, without `old_object` and `new_object`. Each entry
 has `revision`, `fingerprint`, `available`, `copy`, `baseline` and `gap`, the
-same fields `GET /api/v1/history?path=` returns. Each finding from `GET /api/v1/findings/{note_id}`
+same fields `GET /api/v1/history?path=` returns. The server checks the blobs
+once per review revision, and `available` is `null` when that check failed. Each finding from `GET /api/v1/findings/{note_id}`
 has `checkpoint`: the `revision` and `path` of the row it was written on, or
 `null`. The history and checkpoint routes return `source`,
 `checkpointRevision`, `fingerprint` and the hunks as `content`, or fail with

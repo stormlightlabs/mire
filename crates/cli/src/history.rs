@@ -96,38 +96,47 @@ pub fn keep_missing_copies(review: Review) -> Result<Review, git::GitError> {
     Ok(review.keep_checkpoint_copies(|file| needs_copy(file, &missing)))
 }
 
-/// Returns the blob ids in the review's history that the bound repository
-/// holds. A review without a source binding, or a failed Git check, holds
-/// none: this only decides which rows can be shown, and when the check fails,
-/// reading the blobs from Git would fail too.
-pub fn held_blobs(review: &Review) -> BTreeSet<ObjectId> {
-    let Some(binding) = review.source_binding() else {
-        return BTreeSet::new();
-    };
-    let objects = review
+/// Returns the blob ids the review's checkpoint rows and pinned rows name.
+pub fn history_objects(review: &Review) -> BTreeSet<ObjectId> {
+    review
         .checkpoints()
         .iter()
         .chain(review.pinned_checkpoints())
         .flat_map(|checkpoint| checkpoint.files())
         .flat_map(|row| row.old_object().into_iter().chain(row.new_object()))
         .cloned()
-        .collect::<BTreeSet<_>>();
-    match git::missing_blobs(binding, &objects) {
-        Ok(missing) => objects.difference(&missing).cloned().collect(),
-        Err(_) => BTreeSet::new(),
-    }
+        .collect()
+}
+
+/// Returns the ids among `objects` that the bound repository holds. A review
+/// without a source binding holds none.
+///
+/// A failed Git check returns the error: the caller reports availability as
+/// unknown rather than calling every row unavailable.
+pub fn held_blobs(review: &Review, objects: &BTreeSet<ObjectId>) -> Result<BTreeSet<ObjectId>, git::GitError> {
+    let Some(binding) = review.source_binding() else {
+        return Ok(BTreeSet::new());
+    };
+    let missing = git::missing_blobs(binding, objects)?;
+    Ok(objects.difference(&missing).cloned().collect())
 }
 
 /// Reports whether Mire can show a row's hunks: the review holds them, Git
-/// holds every blob the row names, or a copy was kept.
-pub fn is_available(review: &Review, row: &CheckpointRow, held: &BTreeSet<ObjectId>) -> bool {
+/// holds every blob the row names, or a copy was kept. `held` names the blobs
+/// the bound repository holds, or is `None` when the Git check failed; a row
+/// only Git could rebuild is then `None`, unknown.
+pub fn is_available(review: &Review, row: &CheckpointRow, held: Option<&BTreeSet<ObjectId>>) -> Option<bool> {
     if row.fingerprint().is_none() {
-        return false;
+        return Some(false);
+    }
+    if current_file(review, row).is_some() || row.copy().hunks().is_some() {
+        return Some(true);
     }
     let ids = row.old_object().into_iter().chain(row.new_object()).collect::<Vec<_>>();
-    current_file(review, row).is_some()
-        || row.copy().hunks().is_some()
-        || (!ids.is_empty() && ids.iter().all(|id| held.contains(*id)))
+    if ids.is_empty() {
+        return Some(false);
+    }
+    held.map(|held| ids.iter().all(|id| held.contains(*id)))
 }
 
 /// Returns a file's hunks at a revision, with the revision of the checkpoint

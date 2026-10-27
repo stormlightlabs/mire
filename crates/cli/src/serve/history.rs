@@ -2,6 +2,7 @@
 //! revision, and the code a finding was written on.
 
 use std::collections::BTreeSet;
+use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use axum::extract::{Path as AxumPath, State};
@@ -34,8 +35,9 @@ pub struct HistoryEntry {
     /// The file's fingerprint there, or `null` when the file left the
     /// changeset at that revision.
     fingerprint: Option<String>,
-    /// Whether Mire can show the file's hunks at this revision.
-    available: bool,
+    /// Whether Mire can show the file's hunks at this revision, or `null`
+    /// when the Git check failed and only Git could rebuild them.
+    available: Option<bool>,
     /// Whether Mire kept a patch copy of the hunks.
     copy: bool,
     /// Whether this is the baseline of a review file written before
@@ -81,8 +83,54 @@ pub struct CheckpointResponse {
     content: SemanticFileContent,
 }
 
+/// The blobs the bound repository held at the last check, kept per review
+/// revision so a page load does not run the repository identity check and
+/// `git cat-file` again. A failed check is not kept, so the next request
+/// tries again.
+#[derive(Default)]
+pub struct HeldBlobCache {
+    entry: Mutex<Option<HeldBlobs>>,
+}
+
+struct HeldBlobs {
+    revision: ReviewRevision,
+    objects: BTreeSet<ObjectId>,
+    held: Arc<BTreeSet<ObjectId>>,
+}
+
+impl HeldBlobCache {
+    /// Returns the blobs among the review's history that the bound repository
+    /// holds, or `None` when the Git check failed.
+    pub fn held(&self, review: &Review) -> Option<Arc<BTreeSet<ObjectId>>> {
+        let objects = history::history_objects(review);
+        self.held_with(review.revision(), objects, |objects| {
+            history::held_blobs(review, objects).ok()
+        })
+    }
+
+    /// Returns the kept result for `revision` and `objects`, or runs `check`
+    /// and keeps what it returns.
+    pub fn held_with(
+        &self, revision: ReviewRevision, objects: BTreeSet<ObjectId>,
+        check: impl FnOnce(&BTreeSet<ObjectId>) -> Option<BTreeSet<ObjectId>>,
+    ) -> Option<Arc<BTreeSet<ObjectId>>> {
+        if let Ok(entry) = self.entry.lock()
+            && let Some(kept) = entry
+                .as_ref()
+                .filter(|kept| kept.revision == revision && kept.objects == objects)
+        {
+            return Some(kept.held.clone());
+        }
+        let held = Arc::new(check(&objects)?);
+        if let Ok(mut entry) = self.entry.lock() {
+            *entry = Some(HeldBlobs { revision, objects, held: held.clone() });
+        }
+        Some(held)
+    }
+}
+
 impl HistoryEntry {
-    fn new(review: &Review, checkpoint: &Checkpoint, row: &CheckpointRow, held: &BTreeSet<ObjectId>) -> Self {
+    fn new(review: &Review, checkpoint: &Checkpoint, row: &CheckpointRow, held: Option<&BTreeSet<ObjectId>>) -> Self {
         Self {
             revision: checkpoint.revision().get(),
             fingerprint: row.fingerprint().map(|fingerprint| fingerprint.to_string()),
@@ -102,8 +150,9 @@ impl CheckpointLink {
 }
 
 /// Returns a file's history entries, newest first, with carried rows left
-/// out. `held` names the blobs the bound repository holds.
-pub fn file_history(review: &Review, path: &BytePath, held: &BTreeSet<ObjectId>) -> Vec<HistoryEntry> {
+/// out. `held` names the blobs the bound repository holds, or is `None` when
+/// the Git check failed.
+pub fn file_history(review: &Review, path: &BytePath, held: Option<&BTreeSet<ObjectId>>) -> Vec<HistoryEntry> {
     review
         .file_history(path)
         .into_iter()
@@ -144,13 +193,14 @@ pub async fn get_history(State(state): State<AppState>, uri: Uri) -> Response<Bo
         Ok(review) => review,
         Err(response) => return *response,
     };
+    let cache = state.held_blobs.clone();
     let result = tokio::task::spawn_blocking(move || match revision {
         None => {
-            let held = history::held_blobs(&review);
+            let held = cache.held(&review);
             Ok(Json(HistoryResult::History(HistoryResponse {
                 revision: review.revision().get(),
                 path: PathText::from_bytes(path.as_bytes()),
-                history: file_history(&review, &path, &held),
+                history: file_history(&review, &path, held.as_deref()),
             }))
             .into_response())
         }

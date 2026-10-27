@@ -124,8 +124,9 @@ R, Mire takes the latest checkpoint at or before R that names the path.
 When the bound repository does not hold a changed file's blobs, as for an
 unstaged worktree file, the row keeps a patch copy of the file's hunks. A copy
 may take 1 MiB and all history 16 MiB. Past that budget Mire folds the oldest
-checkpoint into the next one; rows a note points at move to `pinned` with their
-copies. Mire never writes objects into the repository.
+checkpoint into the next one to make room; rows a note points at move to
+`pinned` with their copies, and pinned rows no note points at are removed.
+Mire never writes objects into the repository.
 
 `mire file history` lists the revisions that changed a file and prints its
 hunks at one of them, from the current capture, from Git blobs, or from the

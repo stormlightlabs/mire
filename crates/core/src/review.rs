@@ -1379,9 +1379,12 @@ impl Review {
     /// blob Git does not hold.
     ///
     /// One copy may take [`MAX_PATCH_COPY_BYTES`] and history
-    /// [`MAX_HISTORY_BYTES`]. A copy over either bound is skipped; when the
-    /// budget skipped one, older checkpoints are compacted to make room for
-    /// later copies. Binary files get no copy.
+    /// [`MAX_HISTORY_BYTES`]. A copy over 1 MiB is skipped. When the budget
+    /// has no room for a copy, the oldest checkpoints are folded to make room,
+    /// and a copy that still does not fit is skipped; folds that made no room
+    /// are undone, and kept copies are never dropped. When the pinned rows
+    /// fill the budget, no copy is kept. Binary files get no copy. Pinned
+    /// rows no note references are removed.
     #[must_use]
     pub fn keep_checkpoint_copies<F>(mut self, needs_copy: F) -> Self
     where
@@ -1406,7 +1409,8 @@ impl Review {
 
     /// Compacts history until it takes at most `max_bytes`, or until only the
     /// newest checkpoint's rows, without copies, and the pinned rows remain.
-    /// The revision does not change.
+    /// Pinned rows no note references are removed first. The revision does
+    /// not change.
     #[must_use]
     pub fn compact_history(mut self, max_bytes: usize) -> Self {
         let pins = self.pins();

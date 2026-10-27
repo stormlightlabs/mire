@@ -120,10 +120,13 @@ limits count serialized JSON bytes:
 | One patch copy                              | 1 MiB  |
 | History: `checkpoints` and `pinned` (below) | 16 MiB |
 
-A file whose hunks exceed 1 MiB gets `"copy": "skipped"`. At the budget, a
-refresh still records its checkpoint, with `"copy": "skipped"` on each row
-whose copy does not fit, and compaction then folds old checkpoints until the
-skipped copies would have fit, freeing space for later copies.
+A file whose hunks exceed 1 MiB gets `"copy": "skipped"`. A refresh always
+records its checkpoint, and keeps copies, in path order, while they fit the
+budget. When a copy does not fit, Mire folds the oldest checkpoint to make room
+and tries the remaining copies again, until each fits or no older checkpoint
+is left. A copy that still does not fit gets `"copy": "skipped"`. Folds that
+made room for no copy are undone, and a copy the refresh kept is never dropped
+to fit another.
 
 A review file may not pass 128 MiB (`DEFAULT_MAX_REVIEW_FILE_BYTES`), and that
 write check is what bounds the changeset, notes and walkthrough today. The
@@ -141,15 +144,20 @@ the pinned rows remain, and fails the write only then.
 Compaction folds the oldest checkpoint into the next one. Each row of the
 oldest checkpoint whose path the next checkpoint does not name moves forward
 with `"carried": true`. The oldest checkpoint's copies are dropped, except
-pinned ones. Mire repeats this until history fits the budget.
+pinned ones. The next checkpoint keeps the folded one's meaning: it becomes the
+`baseline` when the folded one was, keeps a folded `gap`, and takes any field
+a newer Mire stored on the folded checkpoint that it does not set itself.
+Mire repeats this until history fits the budget.
 
 A note pins the row its `checkpoint` names. Before a fold, Mire copies the
 pinned rows of the oldest checkpoint, with their copies, into a `pinned` list
 kept under their own revision. The fold then carries those rows forward like
 any other row, so a file that has not changed since a pinned row still has a
-row for the lookup. Pinned copies are never dropped. When pinned
-rows alone fill the budget, refreshes stop keeping new copies, and writes still
-succeed.
+row for the lookup. Pinned copies are never dropped. Each refresh and each
+compaction removes the pinned rows no note's `checkpoint` names any more, as
+when a note was written again on newer code. When the pinned rows alone fill
+the budget, folding cannot bring history under it: refreshes keep no new
+copies and fold nothing, and writes still succeed.
 
 After compaction the lookup above stays correct for any revision from the
 oldest kept checkpoint on: a carried row holds the latest state at or before
@@ -289,7 +297,11 @@ is rejected with `invalid_path`.
 | `GET /api/v1/events`                        | Sends `viewed` events.                                                 |
 
 `history` lists the revisions that changed the file, newest first, each with
-`available` set when Mire can rebuild its text. Carried rows are left out. The
+`available` set when Mire can rebuild its text. `available` is `null` when the
+Git check failed and only Git could rebuild the text: Mire does not know
+whether the blobs are there. The server checks the blobs once per review
+revision and reuses the result; a failed check is tried again on the next
+request. Carried rows are left out. The
 browser builds the revision cells and the checkpoint strip from it. The
 server's reader is the local author; the browser cannot name another reader.
 

@@ -777,11 +777,11 @@ fn file_history(arguments: FileHistoryArgs) -> Result<(), AppError> {
     let path = BytePath::new(file.as_encoded_bytes())
         .map_err(|error| checkpoint_rejection("invalid_path", &error.to_string()))?;
     let Some(revision) = revision else {
-        let held = history::held_blobs(&review);
+        let held = history::held_blobs(&review, &history::history_objects(&review)).ok();
         let entries = review
             .file_history(&path)
             .into_iter()
-            .map(|(checkpoint, row)| (checkpoint, row, history::is_available(&review, row, &held)))
+            .map(|(checkpoint, row)| (checkpoint, row, history::is_available(&review, row, held.as_ref())))
             .collect::<Vec<_>>();
         return write_bytes(&file_history_json(&review, &path, &entries).map_err(AppError::Protocol)?);
     };

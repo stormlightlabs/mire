@@ -86,6 +86,20 @@ struct KeptCopy<'a> {
 #[derive(Default)]
 struct ByteCounter(usize);
 
+/// A copy waiting for room in the history budget.
+struct Candidate {
+    path: BytePath,
+    copy: PatchCopy,
+    added: usize,
+}
+
+/// Serialized sizes of each checkpoint and of the pinned list, kept up to
+/// date across folds so history is not serialized again for every step.
+struct History {
+    sizes: Vec<usize>,
+    pinned: usize,
+}
+
 impl Serialize for PatchCopy {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -215,6 +229,94 @@ impl io::Write for ByteCounter {
     }
 }
 
+impl History {
+    fn measure(checkpoints: &[Checkpoint], pinned: &[Checkpoint]) -> Self {
+        Self { sizes: checkpoints.iter().map(serialized_bytes).collect(), pinned: serialized_bytes(pinned) }
+    }
+
+    /// Serialized bytes of the checkpoints list and the pinned list.
+    fn total(&self) -> usize {
+        self.sizes.iter().sum::<usize>() + self.sizes.len().saturating_sub(1) + 2 + self.pinned
+    }
+
+    /// The least history can take after folding every older checkpoint: the
+    /// pinned rows and the newest checkpoint as it is now.
+    fn floor(&self) -> usize {
+        self.pinned + self.sizes.last().copied().unwrap_or(0) + 2
+    }
+
+    /// Keeps each candidate copy that fits the budget on the newest
+    /// checkpoint, in order, and leaves the rest. Reports whether any was
+    /// kept.
+    fn keep_fitting(&mut self, checkpoints: &mut [Checkpoint], candidates: &mut Vec<Candidate>) -> bool {
+        let Some(current) = checkpoints.last_mut() else {
+            return false;
+        };
+        let before = candidates.len();
+        let mut used = self.total();
+        let mut grown = 0;
+        candidates.retain_mut(|candidate| {
+            if used.saturating_add(candidate.added) > MAX_HISTORY_BYTES {
+                return true;
+            }
+            let Ok(index) = current.files.binary_search_by(|row| row.path.cmp(&candidate.path)) else {
+                return false;
+            };
+            current.files[index].copy = std::mem::take(&mut candidate.copy);
+            used += candidate.added;
+            grown += candidate.added;
+            false
+        });
+        if let Some(size) = self.sizes.last_mut() {
+            *size += grown;
+        }
+        candidates.len() < before
+    }
+
+    /// Folds the oldest checkpoint into the next one. Rows the next
+    /// checkpoint does not name move forward with `carried` set and without
+    /// their copies; rows a note pins are first copied, with their copies,
+    /// into `pinned`. The next checkpoint takes the oldest one's `baseline`
+    /// and `gap` flags and any extension field it does not set itself.
+    fn fold_oldest(
+        &mut self, checkpoints: &mut Vec<Checkpoint>, pinned: &mut Vec<Checkpoint>,
+        pins: &BTreeSet<(ReviewRevision, BytePath)>,
+    ) {
+        if checkpoints.len() < 2 {
+            return;
+        }
+        let oldest = checkpoints.remove(0);
+        self.sizes.remove(0);
+        let kept = oldest
+            .files
+            .iter()
+            .filter(|row| pins.contains(&(oldest.revision, row.path.clone())))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !kept.is_empty() {
+            pin_rows(pinned, oldest.revision, kept);
+            self.pinned = serialized_bytes(pinned);
+        }
+        let next = &mut checkpoints[0];
+        let named = next.files.iter().map(|row| row.path.clone()).collect::<BTreeSet<_>>();
+        for mut row in oldest.files {
+            if named.contains(&row.path) {
+                continue;
+            }
+            row.copy = PatchCopy::Skipped;
+            row.carried = true;
+            next.files.push(row);
+        }
+        sort_rows(&mut next.files);
+        next.baseline |= oldest.baseline;
+        next.gap |= oldest.gap;
+        for (key, value) in oldest.extensions {
+            next.extensions.entry(key).or_insert(value);
+        }
+        self.sizes[0] = serialized_bytes(&*next);
+    }
+}
+
 /// Builds a checkpoint naming every file in `changeset`, with no copies.
 pub fn full_checkpoint(changeset: &Changeset, revision: ReviewRevision, baseline: bool) -> Checkpoint {
     let files = changeset.files().iter().map(row_for).collect();
@@ -309,23 +411,28 @@ pub fn settle_loaded(checkpoints: &mut Vec<Checkpoint>, changeset: &Changeset, r
 
 /// Keeps patch copies on the rows of the checkpoint at `revision` that
 /// `needs_copy` selects, within [`MAX_PATCH_COPY_BYTES`] per copy and
-/// [`MAX_HISTORY_BYTES`] in all. A row whose copy does not fit stays
-/// `"skipped"`, and compaction then frees space for later copies.
+/// [`MAX_HISTORY_BYTES`] in all.
+///
+/// Copies are kept in path order while they fit. When one does not, the
+/// oldest checkpoint is folded to make room and the remaining copies are
+/// tried again, until every copy fits or no older checkpoint is left. Folds
+/// that made room for no copy are undone, and the copies this call keeps are
+/// never dropped. When the pinned rows and the current checkpoint alone leave
+/// no room, nothing is folded and the copies stay `"skipped"`.
+///
+/// Pinned rows that `pins` no longer names are removed first.
 pub fn keep_copies<F>(
     checkpoints: &mut Vec<Checkpoint>, pinned: &mut Vec<Checkpoint>, pins: &BTreeSet<(ReviewRevision, BytePath)>,
     changeset: &Changeset, revision: ReviewRevision, mut needs_copy: F,
 ) where
     F: FnMut(&FileDiff) -> bool,
 {
-    let mut used = history_bytes(checkpoints, pinned);
-    let mut short = 0_usize;
-    let Some(checkpoint) = checkpoints
-        .last_mut()
-        .filter(|checkpoint| checkpoint.revision == revision)
-    else {
+    prune_pinned(pinned, pins);
+    let Some(current) = checkpoints.last().filter(|checkpoint| checkpoint.revision == revision) else {
         return;
     };
-    for row in &mut checkpoint.files {
+    let mut candidates = Vec::new();
+    for row in &current.files {
         if row.fingerprint.is_none() || row.carried || row.copy != PatchCopy::Skipped {
             continue;
         }
@@ -343,16 +450,33 @@ pub fn keep_copies<F>(
         if size > MAX_PATCH_COPY_BYTES {
             continue;
         }
-        let added = size.saturating_sub(SKIPPED_COPY_BYTES);
-        if used.saturating_add(added) > MAX_HISTORY_BYTES {
-            short = short.saturating_add(added);
-            continue;
-        }
-        row.copy = copy;
-        used += added;
+        candidates.push(Candidate { path: row.path.clone(), copy, added: size.saturating_sub(SKIPPED_COPY_BYTES) });
     }
-    if short > 0 {
-        compact(checkpoints, pinned, pins, MAX_HISTORY_BYTES.saturating_sub(short));
+    if candidates.is_empty() {
+        return;
+    }
+    let mut history = History::measure(checkpoints, pinned);
+    let mut saved = None;
+    loop {
+        if history.keep_fitting(checkpoints, &mut candidates) {
+            saved = None;
+        }
+        let Some(smallest) = candidates.iter().map(|candidate| candidate.added).min() else {
+            return;
+        };
+        // Folding cannot shrink history below the pinned rows and the current
+        // checkpoint, so it cannot make room for a copy past that floor.
+        if checkpoints.len() == 1 || history.floor().saturating_add(smallest) > MAX_HISTORY_BYTES {
+            break;
+        }
+        if saved.is_none() {
+            saved = Some((checkpoints.clone(), pinned.clone()));
+        }
+        history.fold_oldest(checkpoints, pinned, pins);
+    }
+    if let Some((kept_checkpoints, kept_pinned)) = saved {
+        *checkpoints = kept_checkpoints;
+        *pinned = kept_pinned;
     }
 }
 
@@ -361,49 +485,45 @@ pub fn history_bytes(checkpoints: &[Checkpoint], pinned: &[Checkpoint]) -> usize
     serialized_bytes(checkpoints).saturating_add(serialized_bytes(pinned))
 }
 
+/// Keeps a refresh's history within [`MAX_HISTORY_BYTES`] by folding the
+/// oldest checkpoint into the next one until history fits or one checkpoint
+/// remains. No copy of the remaining checkpoint is dropped.
+///
+/// Pinned rows that `pins` no longer names are removed first. When the
+/// pinned rows alone reach the budget, nothing is folded: folding could not
+/// bring history under it.
+pub fn fit_budget(
+    checkpoints: &mut Vec<Checkpoint>, pinned: &mut Vec<Checkpoint>, pins: &BTreeSet<(ReviewRevision, BytePath)>,
+) {
+    prune_pinned(pinned, pins);
+    let mut history = History::measure(checkpoints, pinned);
+    if history.pinned.saturating_add(2) >= MAX_HISTORY_BYTES {
+        return;
+    }
+    while checkpoints.len() > 1 && history.total() > MAX_HISTORY_BYTES {
+        history.fold_oldest(checkpoints, pinned, pins);
+    }
+}
+
 /// Folds the oldest checkpoint into the next one until history fits in
 /// `target` bytes or one checkpoint remains, and then drops that
-/// checkpoint's copies if history still does not fit.
+/// checkpoint's copies if history still does not fit. A write uses this to
+/// fit a review file under its size limit.
 ///
 /// Rows the next checkpoint does not name move forward with `carried` set and
 /// without their copies. Rows a note pins are first copied, with their
-/// copies, into `pinned` under their own revision.
+/// copies, into `pinned` under their own revision. Pinned rows that `pins`
+/// no longer names are removed first.
 pub fn compact(
     checkpoints: &mut Vec<Checkpoint>, pinned: &mut Vec<Checkpoint>, pins: &BTreeSet<(ReviewRevision, BytePath)>,
     target: usize,
 ) {
-    let mut sizes = checkpoints.iter().map(serialized_bytes).collect::<Vec<_>>();
-    let mut pinned_bytes = serialized_bytes(pinned);
-    let total = |sizes: &[usize], pinned_bytes: usize| {
-        sizes.iter().sum::<usize>() + sizes.len().saturating_sub(1) + 2 + pinned_bytes
-    };
-    while checkpoints.len() > 1 && total(&sizes, pinned_bytes) > target {
-        let oldest = checkpoints.remove(0);
-        sizes.remove(0);
-        let kept = oldest
-            .files
-            .iter()
-            .filter(|row| pins.contains(&(oldest.revision, row.path.clone())))
-            .cloned()
-            .collect::<Vec<_>>();
-        if !kept.is_empty() {
-            pin_rows(pinned, oldest.revision, kept);
-            pinned_bytes = serialized_bytes(pinned);
-        }
-        let next = &mut checkpoints[0];
-        let named = next.files.iter().map(|row| row.path.clone()).collect::<BTreeSet<_>>();
-        for mut row in oldest.files {
-            if named.contains(&row.path) {
-                continue;
-            }
-            row.copy = PatchCopy::Skipped;
-            row.carried = true;
-            next.files.push(row);
-        }
-        sort_rows(&mut next.files);
-        sizes[0] = serialized_bytes(&*next);
+    prune_pinned(pinned, pins);
+    let mut history = History::measure(checkpoints, pinned);
+    while checkpoints.len() > 1 && history.total() > target {
+        history.fold_oldest(checkpoints, pinned, pins);
     }
-    if total(&sizes, pinned_bytes) > target {
+    if history.total() > target {
         for checkpoint in checkpoints.iter_mut() {
             for row in &mut checkpoint.files {
                 if pins.contains(&(checkpoint.revision, row.path.clone())) && row.copy != PatchCopy::Skipped {
@@ -524,6 +644,18 @@ fn pin_rows(pinned: &mut Vec<Checkpoint>, revision: ReviewRevision, rows: Vec<Ch
             );
         }
     }
+}
+
+/// Removes pinned rows that no note references any more, and the pinned
+/// checkpoints left empty.
+fn prune_pinned(pinned: &mut Vec<Checkpoint>, pins: &BTreeSet<(ReviewRevision, BytePath)>) {
+    for checkpoint in pinned.iter_mut() {
+        let revision = checkpoint.revision;
+        checkpoint
+            .files
+            .retain(|row| pins.contains(&(revision, row.path.clone())));
+    }
+    pinned.retain(|checkpoint| !checkpoint.files.is_empty());
 }
 
 fn sort_rows(rows: &mut [CheckpointRow]) {

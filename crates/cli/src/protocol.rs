@@ -686,9 +686,10 @@ pub fn viewed_rejection_json(code: &str, error: &str) -> Result<Vec<u8>> {
 
 /// Serializes the checkpoints that changed one file, newest first. Each
 /// entry pairs a checkpoint and the file's row with whether Mire can show
-/// the file's hunks there.
+/// the file's hunks there, or `None` when the Git check failed and only Git
+/// could rebuild them.
 pub fn file_history_json(
-    review: &Review, path: &BytePath, entries: &[(&Checkpoint, &CheckpointRow, bool)],
+    review: &Review, path: &BytePath, entries: &[(&Checkpoint, &CheckpointRow, Option<bool>)],
 ) -> Result<Vec<u8>> {
     let history = entries
         .iter()

@@ -79,6 +79,8 @@ struct AppState {
     /// watcher and the viewed routes both compare against it, so one change
     /// sends one event.
     announced_viewed: Arc<Mutex<ViewedMap>>,
+    /// The blobs the bound repository held at the last check, per revision.
+    held_blobs: Arc<history::HeldBlobCache>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -441,6 +443,7 @@ pub async fn run(arguments: ServeArgs) -> Result<(), ServeError> {
         events,
         watch_status: Arc::new(Mutex::new(initial_watch_status)),
         announced_viewed: Arc::new(Mutex::new(initial_review.viewed().clone())),
+        held_blobs: Arc::default(),
     };
     let (shutdown, shutdown_receiver) = watch::channel(false);
     let watcher = start_watcher(state.clone(), initial_revision, shutdown_receiver);
@@ -771,9 +774,10 @@ async fn get_review(State(state): State<AppState>) -> Response<Body> {
     match load_current_review(&state).await {
         Ok(review) => {
             let identity = state.review_identity.clone();
+            let cache = state.held_blobs.clone();
             let overview = tokio::task::spawn_blocking(move || {
-                let held = crate::history::held_blobs(&review);
-                review_overview(&identity, &review, local_author().id(), &held)
+                let held = cache.held(&review);
+                review_overview(&identity, &review, local_author().id(), held.as_deref())
             })
             .await;
             match overview {
@@ -1222,7 +1226,7 @@ async fn static_asset(uri: Uri) -> Response<Body> {
 }
 
 fn review_overview(
-    identity: &str, review: &Review, reader: &str, held: &BTreeSet<mire_core::ObjectId>,
+    identity: &str, review: &Review, reader: &str, held: Option<&BTreeSet<mire_core::ObjectId>>,
 ) -> ReviewOverview {
     let findings = review.notes().iter().map(FindingSummary::from_note).collect::<Vec<_>>();
     let files = review
@@ -1305,7 +1309,7 @@ fn reanchor_totals(review: &Review) -> ReanchorTotals {
 }
 
 impl FileSummary {
-    fn from_file(file: &FileDiff, review: &Review, reader: &str, held: &BTreeSet<mire_core::ObjectId>) -> Self {
+    fn from_file(file: &FileDiff, review: &Review, reader: &str, held: Option<&BTreeSet<mire_core::ObjectId>>) -> Self {
         let path = file_path(file);
         let open_findings = review
             .notes()

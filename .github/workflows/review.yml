@@ -2,11 +2,12 @@
 # that opened a pull request reviews it in its own session with the `storm`
 # skill and ends with `Review finished at <sha>`, posted as the bot through the
 # Bot comment workflow (or by the owner, a member or a collaborator). It runs
-# no model: .github/storm/gate.sh marks each new head pending, turns the check
-# green on that comment or on `/storm:ready <sha>`, and answers `/storm:stop`.
-# An edit to the title or body posts the squash message again.
+# no model: `fab gate` marks each new head pending, turns the check green on
+# that comment or on `/storm:ready <sha>`, and answers `/storm:stop`. An edit
+# to the title or body sets the squash message again, in the status comment.
 #
-# pull_request_target runs this file and the script from main, so a change
+# pull_request_target runs this file from main, and `fab` is the release
+# .github/fabrial.toml names (in fabrial itself, built from main), so a change
 # cannot alter its own gate. The head is checked out only for git to read.
 name: Review gate
 
@@ -71,6 +72,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # fabrial builds its own gate from main; a repository that installs
+      # fabrial runs the release that wrote its files.
+      - uses: ./.github/actions/fab
+        with:
+          command: gate
+
       - name: Set the check
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
@@ -83,4 +90,4 @@ jobs:
           BODY: ${{ github.event.comment.body }}
           AUTHOR: ${{ github.event.comment.user.login }}
           SENDER: ${{ github.event.sender.login }}
-        run: .github/storm/gate.sh
+        run: fab gate

@@ -2,7 +2,7 @@
 id = "arcl-t-01M5SXD50PB0DXVVAFPTC24B9R"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
 title = "Decide the workspace layout for publishing"
-status = "pending"
+status = "cancelled"
 priority = "normal"
 position = 3
 +++

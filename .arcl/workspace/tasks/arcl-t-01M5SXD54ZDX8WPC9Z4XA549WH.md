@@ -1,23 +1,22 @@
 +++
 id = "arcl-t-01M5SXD54ZDX8WPC9Z4XA549WH"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
-title = "Release workflow and first crates.io publish"
+title = "Release workflow and GitHub releases"
 status = "pending"
 priority = "normal"
 position = 12
-blocked-by = ["arcl-t-01M5SXD50PB0DXVVAFPTC24B9R"]
 +++
 
-Automate releases and make the first crates.io publish.
+Release Mire the way fabrial releases: prebuilt binaries on GitHub releases and a Homebrew formula. Mire is not published to crates.io.
 
-Adapt fabrial's `release.yml` and `release-tag.yml`: a release pull request bumps the version and writes the changelog section, and merging it tags `v<version>`, creates the GitHub release, and publishes to crates.io. Use git-cliff (`cliff.toml`) in place of fabrial's `changelog.sh`.
+Mirror fabrial's Release PR, Release tag and dist Release workflows and its Homebrew publish job. Use git-cliff (`cliff.toml`) for the changelog section.
 
 Acceptance criteria:
-- [ ] A release workflow opens the release pull request with the version bump and the git-cliff section prepended to CHANGELOG.md.
-- [ ] Merging it tags the release, creates the GitHub release, and runs `cargo publish` in dependency order with `CARGO_REGISTRY_TOKEN`.
-- [ ] The existing hand-written Unreleased entries are kept, either as the first release's notes or above the generated section.
-- [ ] Installation docs cover `cargo install mire`.
+- [ ] A Release PR workflow, run with a version, sets the workspace version, writes the release's CHANGELOG.md section with git-cliff, and pushes `storm/release-<version>` for Branch PR to open.
+- [ ] Merging that pull request tags `v<version>` on the merge commit with the bot's token.
+- [ ] The tag runs a dist-generated Release workflow that builds the web app before `cargo build`, publishes the GitHub release with the archives, the shell installer and the changelog section, and commits the `mire` formula to stormlightlabs/homebrew-tap.
+- [ ] README and the installation docs cover the shell installer and `brew install stormlightlabs/tap/mire`.
 
 Verification:
-- A dry run of the workflow on a branch.
-- The first release is installable with `cargo install mire`.
+- `dist plan` passes in the Release PR workflow.
+- The first release installs with the shell installer and with Homebrew.

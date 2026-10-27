@@ -29,6 +29,8 @@ Out of scope:
 - Repository mapping and codebase indexing. That belongs to
   [dalil](https://github.com/stormlightlabs/dalil); Mire uses only the
   context an agent supplies.
+- Publishing to crates.io. Releases ship prebuilt binaries on GitHub and a
+  Homebrew formula, as fabrial's do.
 
 The rest of this file records the web review effort, which `mire serve`
 delivered.
@@ -217,9 +219,9 @@ changes fail without leaving partial stdout or output files.
   disable SSR at the root layout, and emit `200.html` as the SPA fallback for
   Axum.
 - Generate the production web bundle into `crates/cli/assets/web/` and embed it
-  in the binary. Keep the generated directory out of version control. Build it
-  before packaging and include it explicitly in the published crate so
-  `cargo install` never requires Node.
+  in the binary. Keep the generated directory out of version control. The
+  release build generates it first, so installing a release never requires
+  Node.
 - Build a Tokio runtime only for `mire serve`. Existing synchronous commands do
   not need to become async.
 - Run Git and review-file blocking work through an owned blocking boundary. Every

@@ -248,7 +248,7 @@ where
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
         let _ = handle_terminal_event(&mut app, poll_event()?, control, false);
-        finish_requested_save(&mut app, save);
+        let _ = finish_requested_save(&mut app, save);
     }
     Ok(())
 }
@@ -279,13 +279,18 @@ where
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
         let requested_reload = handle_terminal_event(&mut app, next_event()?, control, true);
-        finish_requested_save(&mut app, save);
+        // A reload held from before a write is stale, so it is dropped and
+        // the file read again as written.
+        let reread = finish_requested_save(&mut app, save);
+        if reread {
+            pending = WatchUpdate::Unchanged;
+        }
         if app.should_quit() {
             break;
         }
         if requested_reload || matches!(pending, WatchUpdate::Unchanged) {
-            pending = reload(requested_reload);
             pending_forced |= requested_reload;
+            pending = reload(pending_forced || reread);
         }
         if !app.can_reload() {
             continue;
@@ -295,7 +300,7 @@ where
             WatchUpdate::Unchanged => {}
             // The app holds the review as last saved, which can be newer than
             // the one it was built from.
-            WatchUpdate::Loaded(updated) if app.review().unwrap_or(&review) == &updated => {
+            WatchUpdate::Loaded(updated) if !is_newer(&updated, app.review().unwrap_or(&review)) => {
                 mark_current(&mut app, forced);
             }
             WatchUpdate::Loaded(updated) => {
@@ -315,6 +320,15 @@ where
         }
     }
     Ok(())
+}
+
+/// Reports whether a reloaded review should replace the one the app holds.
+/// Equal content is not newer, and neither is a review at an earlier
+/// revision, which was read before a save the app has since made. A review at
+/// the same revision can differ by viewed marks, which keep the revision, so
+/// it replaces the app's.
+fn is_newer(updated: &Review, current: &Review) -> bool {
+    updated != current && updated.revision() >= current.revision()
 }
 
 /// Keeps the app when a reload returns the content it already shows, so
@@ -392,23 +406,29 @@ fn handle_live_requests(app: &mut App<'_>, control: Option<&LiveControl>, reload
     reload_requested
 }
 
-fn finish_requested_save<F, E>(app: &mut App<'_>, save: &mut F)
+/// Writes a requested viewed mark change and review save, and reports
+/// whether either write changed the file.
+fn finish_requested_save<F, E>(app: &mut App<'_>, save: &mut F) -> bool
 where
     F: FnMut(ReviewWrite<'_>) -> Result<(), E>,
     E: std::fmt::Display,
 {
+    let mut wrote = false;
     if let Some(change) = app.viewed_change().cloned() {
         let result = save(ReviewWrite::Viewed(&change)).map_err(|error| error.to_string());
+        wrote |= result.is_ok();
         app.finish_viewed(result);
     }
     if !app.save_requested() {
-        return;
+        return wrote;
     }
     let result = app
         .review()
         .ok_or_else(|| "editable session lost its review state".to_owned())
         .and_then(|review| save(ReviewWrite::Revision(review)).map_err(|error| error.to_string()));
+    wrote |= result.is_ok();
     app.finish_save(result);
+    wrote
 }
 
 #[cfg(test)]
@@ -637,6 +657,102 @@ mod tests {
             0,
             "the rebuild closed the filter and `q` quit"
         );
+    }
+
+    #[test]
+    fn a_reload_held_while_the_editor_is_open_does_not_undo_the_save() {
+        let original = review(PATCH, 1);
+        let mut terminal = Terminal::new(IoBackend(TestBackend::new(160, 24))).unwrap();
+        let ctrl_enter = Some(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL)));
+        // The reload lands while the editor is open, so the loop holds it
+        // until the save closes the editor.
+        let down = Some(Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)));
+        let (mut events, remaining) = script(vec![
+            down.clone(),
+            down,
+            key('c'),
+            key('x'),
+            None,
+            ctrl_enter,
+            None,
+            None,
+            key('q'),
+        ]);
+        let saved = RefCell::new(Vec::new());
+        let mut save = |write: ReviewWrite<'_>| {
+            if let ReviewWrite::Revision(review) = write {
+                saved.borrow_mut().push(review.clone());
+            }
+            Ok::<(), String>(())
+        };
+        let mut reloads = 0;
+        let mut reload = |_| {
+            reloads += 1;
+            // The fourth pass is the one after `x`, with the editor open.
+            if reloads == 4 { WatchUpdate::Loaded(original.clone()) } else { WatchUpdate::Unchanged }
+        };
+
+        run_review_watch_loop(
+            &mut terminal,
+            original.clone(),
+            AppOptions::default(),
+            &Theme::plain(),
+            &mut events,
+            &mut save,
+            &mut reload,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(remaining.borrow().len(), 0);
+        assert!(reloads >= 4, "the reload never landed with the editor open");
+        let saved = saved.borrow();
+        assert_eq!(saved.len(), 1, "the note was not saved");
+        assert_eq!(saved[0].notes().len(), 1);
+        assert!(
+            screen(&terminal).contains("1 open"),
+            "the held reload rebuilt the app from the stale review: {}",
+            screen(&terminal)
+        );
+    }
+
+    #[test]
+    fn a_review_watch_reload_at_an_earlier_revision_is_ignored() {
+        assert!(!review_watch_shows(
+            review(PATCH, 2),
+            review(CHANGED_PATCH, 1),
+            "+newer"
+        ));
+    }
+
+    #[test]
+    fn a_review_watch_reload_at_the_same_revision_replaces_the_review() {
+        // Viewed marks change the file without advancing the revision.
+        assert!(review_watch_shows(review(PATCH, 1), review(CHANGED_PATCH, 1), "+newer"));
+    }
+
+    /// Runs a review watch session on `initial` that reloads `reloaded` once,
+    /// and reports whether the last frame contains `text`.
+    fn review_watch_shows(initial: Review, reloaded: Review, text: &str) -> bool {
+        let mut terminal = Terminal::new(IoBackend(TestBackend::new(80, 24))).unwrap();
+        let (mut events, _) = script(vec![None, None, key('q')]);
+        let mut save = |_: ReviewWrite<'_>| Ok::<(), String>(());
+        let mut reloaded = Some(reloaded);
+        let mut reload = |_| reloaded.take().map_or(WatchUpdate::Unchanged, WatchUpdate::Loaded);
+
+        run_review_watch_loop(
+            &mut terminal,
+            initial,
+            AppOptions::default(),
+            &Theme::plain(),
+            &mut events,
+            &mut save,
+            &mut reload,
+            None,
+        )
+        .unwrap();
+
+        screen(&terminal).contains(text)
     }
 
     fn changeset(patch: &[u8]) -> Changeset {

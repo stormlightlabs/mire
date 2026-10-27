@@ -232,9 +232,10 @@ fn a_source_change_refreshes_the_review_and_streams_an_event() {
     assert_eq!(response.status, 200, "{}", response.body);
     let refresh: serde_json::Value = serde_json::from_str(&response.body).unwrap();
     // The watcher and the request race to refresh, so either may write the
-    // new revision; the other finds the capture current.
+    // new revision; the other finds the capture current. The source changes
+    // in one step, so there is exactly one new revision.
     let revision = refresh["revision"].as_u64().unwrap();
-    assert!(revision > 1, "{refresh}");
+    assert_eq!(revision, 2, "{refresh}");
 
     read_until(&mut events, &mut received, |text| {
         mire_events(text).any(|event| event["kind"] == "refresh" && event["revision"] == revision)

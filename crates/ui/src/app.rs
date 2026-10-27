@@ -91,7 +91,8 @@ pub struct AppPosition {
     context_lines: usize,
     description_scroll: usize,
     description_visible: bool,
-    file_picker_query: Option<String>,
+    file_picker: Option<FilePicker>,
+    file_picker_path: Option<String>,
     filter_visible: bool,
     focus: Focus,
     help_visible: bool,
@@ -906,13 +907,20 @@ impl<'a> App<'a> {
             (AppState::Ready(stream), Some(file)) => stream.changeset().files().get(file).and_then(file_path_bytes),
             _ => None,
         };
+        let file_picker_path = self.file_picker.as_ref().and_then(|picker| {
+            self.file_picker_entries()
+                .into_iter()
+                .nth(picker.selected)
+                .map(|entry| entry.path)
+        });
         AppPosition {
             collapsed_files: self.collapsed_files.clone(),
             collapsed_hunks: self.collapsed_hunks.clone(),
             context_lines: self.context_lines,
             description_scroll: self.description_scroll,
             description_visible: self.description_visible,
-            file_picker_query: self.file_picker.as_ref().map(|picker| picker.query.clone()),
+            file_picker: self.file_picker.clone(),
+            file_picker_path,
             filter_visible: self.filter_visible,
             focus: self.focus,
             help_visible: self.help_visible,
@@ -941,10 +949,13 @@ impl<'a> App<'a> {
         self.description_scroll = position.description_scroll;
         self.description_visible = position.description_visible;
         self.file_picker = position
-            .file_picker_query
+            .file_picker
             .as_ref()
             .filter(|_| matches!(self.state, AppState::Ready(_)))
-            .map(|query| FilePicker { query: query.clone(), ..FilePicker::default() });
+            .map(|picker| FilePicker { query: picker.query.clone(), ..FilePicker::default() });
+        if let Some(picker) = &position.file_picker {
+            self.restore_file_picker_selection(picker, position.file_picker_path.as_deref());
+        }
         self.filter_visible = position.filter_visible;
         self.focus = position.focus;
         self.help_visible = position.help_visible;
@@ -1418,6 +1429,23 @@ impl<'a> App<'a> {
         } else if picker.selected >= picker.offset.saturating_add(height) {
             picker.offset = picker.selected.saturating_add(1).saturating_sub(height);
         }
+    }
+
+    /// Highlights the entry the picker highlighted before a reload, by path,
+    /// or the nearest remaining row, with the rows above it kept in view.
+    fn restore_file_picker_selection(&mut self, previous: &FilePicker, path: Option<&str>) {
+        let entries = self.file_picker_entries();
+        let Some(picker) = &mut self.file_picker else {
+            return;
+        };
+        let selected = path
+            .and_then(|path| entries.iter().position(|entry| entry.path == path))
+            .unwrap_or(previous.selected)
+            .min(entries.len().saturating_sub(1));
+        picker.selected = selected;
+        picker.offset = selected.saturating_sub(previous.selected.saturating_sub(previous.offset));
+        // Clamps the offset so the selected row stays within the visible rows.
+        self.move_file_picker_selection(0);
     }
 
     fn select_file_picker_entry(&mut self) {
@@ -2617,6 +2645,41 @@ mod tests {
             reloaded.review_cursor.saturating_sub(stream.file_position(2).unwrap()),
             position.row_offset
         );
+    }
+
+    #[test]
+    fn reload_keeps_the_file_picker_entry_by_path() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let mut app = App::ready_with_options(&changeset, AppOptions::default());
+        app.resize(100, 12);
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.file_picker_entries()[1].path, "second.txt");
+        let position = app.position();
+
+        let reordered = parse_patch(
+            REORDERED_PATCH,
+            ChangesetSource::Patch { label: None },
+            PatchLimits::default(),
+        )
+        .unwrap();
+        let mut reloaded = App::ready_with_options(&reordered, AppOptions::default());
+        reloaded.resize(100, 12);
+        reloaded.restore_position(&position);
+        let selected = reloaded.file_picker_selected().unwrap();
+        assert_eq!(reloaded.file_picker_entries()[selected].path, "second.txt");
+
+        let shorter = parse_patch(
+            b"--- a/first.txt\n+++ b/first.txt\n@@ -1 +1 @@\n-old\n+new\n",
+            ChangesetSource::Patch { label: None },
+            PatchLimits::default(),
+        )
+        .unwrap();
+        let mut reloaded = App::ready_with_options(&shorter, AppOptions::default());
+        reloaded.resize(100, 12);
+        reloaded.restore_position(&position);
+        assert_eq!(reloaded.file_picker_selected(), Some(0));
+        assert_eq!(reloaded.file_picker_offset(), Some(0));
     }
 
     #[test]

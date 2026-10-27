@@ -43,6 +43,17 @@ impl TempDirectory {
         fs::create_dir(&path).expect("watch fixture directory can be created");
         Self(path)
     }
+
+    /// Replaces a file in the directory in one step, as an editor's atomic
+    /// save does. `fs::write` truncates the file before writing it, and a
+    /// watcher refresh that lands between the two records the empty file as
+    /// a revision of its own. The new contents are staged beside the
+    /// directory so the watcher never sees the staged file.
+    fn replace(&self, name: &str, contents: &[u8]) {
+        let staged = self.0.with_extension("next");
+        fs::write(&staged, contents).expect("staged contents can be written");
+        fs::rename(&staged, self.0.join(name)).expect("staged contents can replace the file");
+    }
 }
 
 impl Drop for TempDirectory {
@@ -178,7 +189,7 @@ fn source_backed_review_watch_refreshes_the_review_file() {
 
     let mut process = WatchProcess::spawn(&directory.0, &["review", "review.json", "--watch"]);
     process.wait_for(b"initial-review-value");
-    fs::write(directory.0.join("tracked.txt"), b"refreshed-review-value\n").expect("source can be edited");
+    directory.replace("tracked.txt", b"refreshed-review-value\n");
     process.wait_for(b"refreshed-review-value");
     let review = mire::read_review(directory.0.join("review.json")).expect("watched review remains valid");
     let (success, output) = process.finish();
@@ -204,7 +215,7 @@ fn git_watch_reloads_a_changed_worktree() {
 
     let mut process = WatchProcess::spawn(&directory.0, &["watch"]);
     process.wait_for(b"initial-git-watch");
-    fs::write(directory.0.join("tracked.txt"), b"reloaded-git-watch\n").expect("worktree can be edited");
+    directory.replace("tracked.txt", b"reloaded-git-watch\n");
     process.wait_for(b"reloaded-git-watch");
     let (success, output) = process.finish();
 

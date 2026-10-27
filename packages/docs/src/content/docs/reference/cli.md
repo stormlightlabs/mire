@@ -112,7 +112,9 @@ mire context REVIEW.json [--file PATH | --hunk FINGERPRINT | --patch] [--max-byt
 
 The compact manifest does not require `--max-bytes`. File, hunk, and patch
 expansion does. The manifest includes the review's title and description when
-it has them, and they count toward `--max-bytes`.
+it has them, and they count toward `--max-bytes`. Its `has_walkthrough` field
+says whether the review holds a walkthrough. Every context document carries
+`review_revision`, the revision a write must name.
 
 ## Note commands
 
@@ -131,6 +133,101 @@ requires the revision returned by `mire context` or `mire notes list`; stale
 writes fail with `revision_conflict`. Full-note import remains available for
 compatible clients. List returns deterministic JSON. Export can produce JSON
 or standalone Markdown.
+
+## Walkthrough commands
+
+```text
+mire walkthrough apply REVIEW.json --stdin
+mire walkthrough show REVIEW.json [--format json]
+mire walkthrough clear REVIEW.json --revision REVISION
+```
+
+`walkthrough apply` reads one JSON batch from standard input and replaces the
+whole walkthrough. Mire checks every step, resolves each location to an anchor
+with the note rules, and assigns step ids and fingerprints. It writes the file
+only if every step is valid and the review is still at `review_revision`. The
+[review model](/docs/concepts/review-model/#walkthroughs) lists the step rules
+and limits.
+
+```json
+{
+	"schema_version": { "major": 1, "minor": 4 },
+	"review_revision": 3,
+	"overview": "Move parsing behind one entry point.",
+	"author": { "id": "review-agent", "display_name": null },
+	"provenance": { "kind": "agent", "producer": "codex" },
+	"steps": [
+		{
+			"id": "parser",
+			"title": "New parser entry point",
+			"narrative": "Callers now go through `parse`.",
+			"locations": [{ "file": "src/parse.rs", "new_line": 10, "end": 24 }]
+		},
+		{
+			"title": "Callers",
+			"narrative": "Each caller drops its own parsing.",
+			"locations": [{ "file": "src/main.rs", "side": "old", "start": 5 }],
+			"depends_on": ["parser"],
+			"diagram": "flowchart LR\n  main --> parse"
+		}
+	]
+}
+```
+
+| Field                  | Required | Value                                                        |
+| ---------------------- | -------- | ------------------------------------------------------------ |
+| `schema_version`       | yes      | Protocol version. Major `1` is accepted.                     |
+| `review_revision`      | yes      | The revision read from `mire context` or `walkthrough show`. |
+| `overview`             | no       | Markdown read before the first step.                         |
+| `author`, `provenance` | yes      | As on notes. `human` provenance is rejected.                 |
+| `steps`                | yes      | One or more steps, in reading order.                         |
+
+Each step has a one-line `title`, a Markdown `narrative`, and one or more
+`locations`. `id`, `depends_on`, and a Mermaid `diagram` are optional. A step
+without an `id` gets `step-<n>`. A location takes `file` (or `path`) and either
+`new_line`, `old_line`, or `side` with `start`. `end` (or `end_line`) is the
+inclusive last line and defaults to the first. Any other field in the batch, a
+step, or a location is an error.
+
+On success, `apply` prints `status: "applied"`, the new `review_revision`, and
+the step ids in order. A rejected batch exits with status `8`. Input that is
+not a batch, such as empty input, invalid UTF-8, malformed JSON, or an unknown
+or missing field, prints one `mire: invalid walkthrough batch JSON` line on
+standard error. Any other rejection prints a report on standard error. Each
+failure has a `code`, an `error` message, and, for a step failure, the
+zero-based `step_index`:
+
+```json
+{
+	"schema_version": { "major": 1, "minor": 4 },
+	"status": "rejected",
+	"failures": [
+		{ "step_index": 1, "code": "location_not_found", "error": "source location is not present on one changed hunk" }
+	]
+}
+```
+
+Codes include `location_not_found`, `context_only_location`,
+`ambiguous_location`, `step_without_anchors`, `duplicate_step_id`,
+`forward_step_dependency`, `human_provenance_forbidden`, and
+`revision_conflict`, which also reports `expected` and `actual`. A batch with a
+`schema_version` major other than `1` fails with `unsupported_schema_major`,
+whatever its other fields. A location
+with conflicting or missing line fields is a step failure with the code
+`invalid_input`.
+
+`walkthrough show` prints the overview, each step with its anchors and their
+re-anchor states, and what the walkthrough leaves out: hunks no anchor covers,
+and files with no hunks. Control characters other than newline and tab print
+as escapes such as `\u{1b}`, so stored text cannot rewrite the terminal. Stale and ambiguous anchors cover nothing.
+`--format json` prints the same as one document with `review_revision`,
+`walkthrough`, and `coverage`. Without a walkthrough, the last two are `null`. Each anchor has a `state` of `original`,
+`exact`, `moved`, `stale`, or `ambiguous`, the recorded `anchor`, the
+`current_anchor` (`null` when stale or ambiguous), and the `reanchor_outcome`.
+
+`walkthrough clear` removes the walkthrough if the review is still at
+`--revision`, and prints `status: "cleared"` with the new revision. A review
+without a walkthrough is left as it is, with `status: "unchanged"`.
 
 ## Browser review server
 

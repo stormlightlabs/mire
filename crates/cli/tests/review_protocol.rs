@@ -247,6 +247,31 @@ fn rejected_batches_report_every_invalid_anchor_without_rewriting_the_review() {
     assert_eq!(read_review(&fixture.review_path).unwrap().revision().get(), 1);
 }
 
+#[test]
+fn an_unsupported_schema_major_is_reported_before_the_note_shape_is_checked() {
+    let fixture = Fixture::new();
+    let before = fs::read(&fixture.review_path).unwrap();
+    let input = serde_json::to_vec(&json!({ "schema_version": { "major": 2, "minor": 0 }, "findings": [] })).unwrap();
+    fs::write(&fixture.batch_path, &input).unwrap();
+    let outputs = [
+        mire_with_stdin(&["notes", "apply", fixture.review_str(), "--stdin"], &input),
+        mire(&[
+            "notes",
+            "import",
+            fixture.review_str(),
+            fixture.batch_str(),
+            "--revision",
+            "1",
+        ]),
+    ];
+    for output in outputs {
+        assert_eq!(output.status.code(), Some(8));
+        let report: Value = serde_json::from_slice(&output.stderr).expect("rejection is structured JSON");
+        assert_eq!(report["failures"][0]["code"], "unsupported_schema_major");
+        assert_eq!(fs::read(&fixture.review_path).unwrap(), before);
+    }
+}
+
 struct Fixture {
     directory: PathBuf,
     review_path: PathBuf,

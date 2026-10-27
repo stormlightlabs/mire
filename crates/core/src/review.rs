@@ -1178,6 +1178,24 @@ impl Review {
         Ok(review)
     }
 
+    /// Removes the walkthrough and advances the review revision.
+    ///
+    /// `expected` is the revision the caller read. A different current
+    /// revision returns [`ReviewError::RevisionConflict`] and changes nothing.
+    /// A review without a walkthrough is returned unchanged.
+    pub fn clear_walkthrough(&self, expected: ReviewRevision) -> Result<Self> {
+        if self.revision != expected {
+            return Err(ReviewError::RevisionConflict { expected: expected.get(), actual: self.revision.get() });
+        }
+        if self.walkthrough.is_none() {
+            return Ok(self.clone());
+        }
+        let mut review = self.rebuild(self.next_revision()?, self.notes.clone(), self.events.clone())?;
+        review.walkthrough = None;
+        review.validate()?;
+        Ok(review)
+    }
+
     /// Reports the hunks and files no walkthrough step covers, or `None`
     /// without a walkthrough.
     ///

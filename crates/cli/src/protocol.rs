@@ -11,7 +11,13 @@ use serde_json::json;
 use thiserror::Error;
 
 /// Protocol schema emitted by non-interactive review commands.
-pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 3 };
+pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 4 };
+
+/// The keys [`LocationFields`] reads, aliases included. Keep it in step with
+/// the struct: walkthrough steps reject any other key.
+pub const LOCATION_FIELDS: [&str; 8] = [
+    "file", "path", "side", "start", "old_line", "new_line", "end", "end_line",
+];
 
 type Result<T> = std::result::Result<T, ProtocolError>;
 
@@ -79,6 +85,7 @@ enum ContextPayload<'a> {
         description: Option<&'a str>,
         files: Vec<FileManifest<'a>>,
         notes: Vec<NoteSummary<'a>>,
+        has_walkthrough: bool,
     },
     Patch {
         changeset: &'a Changeset,
@@ -137,8 +144,12 @@ impl LocationBatch {
     }
 }
 
+/// The file, side, and lines that locate a finding or a walkthrough step.
+///
+/// Supply `side` and `start`, `old_line`, or `new_line`. `end` defaults to
+/// the start line.
 #[derive(Debug, Deserialize)]
-struct LocationRequest {
+pub struct LocationFields {
     #[serde(alias = "path")]
     file: PathInput,
     #[serde(default)]
@@ -151,16 +162,11 @@ struct LocationRequest {
     new_line: Option<u64>,
     #[serde(default, alias = "end_line")]
     end: Option<u64>,
-    author: Author,
-    provenance: Provenance,
-    severity: NoteSeverity,
-    #[serde(alias = "kind")]
-    annotation_kind: AnnotationKind,
-    body: String,
 }
 
-impl LocationRequest {
-    fn into_input(self) -> Result<NoteInput> {
+impl LocationFields {
+    /// Validates the fields and returns the path, side, and line range.
+    pub fn into_parts(self) -> Result<(BytePath, AnchorSide, LineRange)> {
         let path = match self.file {
             PathInput::Text(path) => BytePath::new(path.into_bytes()),
             PathInput::Bytes(path) => BytePath::new(path),
@@ -182,6 +188,30 @@ impl LocationRequest {
         let end = LineNumber::new(end_value)
             .ok_or_else(|| ProtocolError::InvalidInput("line number must be greater than zero".to_owned()))?;
         let range = LineRange::new(start, end).map_err(|error| ProtocolError::InvalidInput(error.to_string()))?;
+        Ok((path, side, range))
+    }
+}
+
+#[derive(Deserialize)]
+struct SchemaProbe {
+    schema_version: SchemaVersion,
+}
+
+#[derive(Debug, Deserialize)]
+struct LocationRequest {
+    #[serde(flatten)]
+    location: LocationFields,
+    author: Author,
+    provenance: Provenance,
+    severity: NoteSeverity,
+    #[serde(alias = "kind")]
+    annotation_kind: AnnotationKind,
+    body: String,
+}
+
+impl LocationRequest {
+    fn into_input(self) -> Result<NoteInput> {
+        let (path, side, range) = self.location.into_parts()?;
         NoteInput::new(
             path,
             side,
@@ -358,6 +388,7 @@ pub fn context_json(review: &Review, selection: ContextSelection<'_>, limit: Opt
             description: review.description(),
             files: review.changeset().files().iter().map(FileManifest::from).collect(),
             notes: review.notes().iter().map(NoteSummary::from).collect(),
+            has_walkthrough: review.walkthrough().is_some(),
         },
         ContextSelection::Patch => ContextPayload::Patch { changeset: review.changeset() },
         ContextSelection::File(path) => {
@@ -538,6 +569,24 @@ pub fn import_result_json(review: &Review, imported: usize) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+/// Rejects a protocol input whose `schema_version` has an unsupported major.
+///
+/// It reads only `schema_version`, so a batch from another major fails with
+/// `unsupported_schema_major` even when the rest of its shape differs. Input
+/// without a readable `schema_version` passes, and the full parse reports it.
+pub fn check_schema_major(input: &[u8]) -> Result<()> {
+    let Ok(SchemaProbe { schema_version }) = serde_json::from_slice(input) else {
+        return Ok(());
+    };
+    if schema_version.major != CURRENT_PROTOCOL_SCHEMA_VERSION.major {
+        return Err(ProtocolError::UnsupportedSchemaMajor {
+            found: schema_version.major,
+            supported: CURRENT_PROTOCOL_SCHEMA_VERSION.major,
+        });
+    }
+    Ok(())
+}
+
 /// Serializes every rejected note from an atomic import.
 pub fn protocol_error_json(error: &ProtocolError) -> Result<Vec<u8>> {
     let value = json!({
@@ -583,6 +632,17 @@ pub fn import_error_json(error: &NoteImportError) -> Result<Vec<u8>> {
         })
         .collect::<Vec<_>>();
     rejection_json(failures)
+}
+
+/// Serializes a write rejected because the review file moved past the
+/// revision the caller read.
+pub fn revision_conflict_json(expected: u64, actual: u64) -> Result<Vec<u8>> {
+    rejection_json(vec![json!({
+        "code": "revision_conflict",
+        "error": format!("review revision conflict: expected {expected}, found {actual}"),
+        "expected": expected,
+        "actual": actual,
+    })])
 }
 
 fn rejection_json(failures: Vec<serde_json::Value>) -> Result<Vec<u8>> {

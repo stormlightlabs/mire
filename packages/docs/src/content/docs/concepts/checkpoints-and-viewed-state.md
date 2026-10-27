@@ -47,7 +47,8 @@ one row per file whose fingerprint changed at that revision:
 ```
 
 - `path` is the file's canonical path: the new path, or the old path for a
-  deleted file.
+  deleted file. Like every `BytePath`, it is stored as a JSON array of its
+  bytes. The examples on this page write paths as strings to keep them short.
 - `fingerprint` is the file's new fingerprint, or `null` when the file left the
   changeset at that revision.
 - `old_object` and `new_object` are the Git blob ids of the file's two sides,
@@ -118,7 +119,8 @@ write check is what bounds the changeset, notes and walkthrough today. The
 stores bytes as JSON number arrays, so a captured changeset serializes to about
 five times its patch size. The note and walkthrough limits (10,000 notes of up
 to 1 MiB each, and 1 MiB per walkthrough text) are per item and do not add up to
-a total. History takes a fixed 16 MiB, which leaves 112 MiB for the rest. When
+a total. History takes a fixed 16 MiB, which leaves 112 MiB for the rest,
+viewed marks included. When
 a write would pass 128 MiB, Mire compacts history until the file fits or only
 pinned rows remain, and fails the write only then.
 
@@ -129,9 +131,11 @@ oldest checkpoint whose path the next checkpoint does not name moves forward
 with `"carried": true`. The oldest checkpoint's copies are dropped, except
 pinned ones. Mire repeats this until history fits the budget.
 
-A note pins the row its `checkpoint` names. Before a fold, Mire moves the
+A note pins the row its `checkpoint` names. Before a fold, Mire copies the
 pinned rows of the oldest checkpoint, with their copies, into a `pinned` list
-kept under their own revision. Pinned copies are never dropped. When pinned
+kept under their own revision. The fold then carries those rows forward like
+any other row, so a file that has not changed since a pinned row still has a
+row for the lookup. Pinned copies are never dropped. When pinned
 rows alone fill the budget, refreshes stop keeping new copies, and writes still
 succeed.
 
@@ -159,14 +163,24 @@ viewed it, and the checkpoints after the mark's revision say which revisions
 changed it. A mark for a path that left the changeset stays until the reader
 clears it, so the file shows as viewed again if it comes back unchanged.
 
-The reader is the local author Mire already uses for notes written from the
-terminal and the browser: `USER`, then `USERNAME`, with `local-human` as the
-fallback. The CLI takes `--reader` to name another reader, so an agent can keep
-its own progress without touching a person's.
+The reader defaults to the local author Mire already uses for notes written
+from the terminal and the browser: `USER`, then `USERNAME`, with `local-human`
+as the fallback. The CLI takes `--reader` to name another reader. A person and
+an agent in the same shell share `USER`, so an agent should always pass
+`--reader` to keep its progress apart from the person's. A reader id follows
+the `Author` id rule (`Author::new` in `crates/core/src/review.rs`): 1 to 256
+bytes.
 
-Marking a file viewed names the fingerprint the reader saw, not the revision
-they read. A mark therefore needs no revision check: if the file changed in the
-meantime, the mark records the older fingerprint and the file shows as changed.
+Marking a file viewed names the fingerprint the reader saw and the review
+revision it was read at. Mire looks up the file at that revision with the
+checkpoint lookup and rejects the mark with `viewed_mismatch` when the
+fingerprints differ or the revision has no answer. A tab that loaded revision 4
+can then mark the file it showed, even after a refresh, but a tab cannot mark a
+fingerprint the file never had at that revision. The stored mark keeps the
+revision. If the file changed since, the mark holds the older fingerprint and
+the file shows as changed. Mire does not derive the revision from the
+fingerprint, because a file that is reverted has the same fingerprint at more
+than one revision.
 
 A mark does not advance the review revision. The revision tracks the changeset,
 notes and walkthrough, and a reader's progress should not turn another writer's
@@ -183,9 +197,14 @@ The implementing task changes the write path:
 - Only mark operations change `viewed`. They read, change and write the file
   under the same lock, and replace it atomically.
 
-`mire serve` sends a `viewed` event so other browser tabs update.
+Marks from the CLI or the terminal reach open browser tabs through the
+`mire serve` watcher. Today it announces only a new revision. It will also keep
+the `viewed` map it last loaded, compare it with the map on each reload of the
+review file, and send a `viewed` event when they differ and the revision does
+not.
 
-A reader may hold at most one mark per path, and a review at most 10,000 marks.
+A reader may hold at most one mark per path and 10,000 marks in all, and a
+review may hold marks for at most 100 readers.
 
 ## Notes and checkpoints
 
@@ -215,9 +234,10 @@ The next write saves the baseline. A review without `viewed` has no marks.
 
 A Mire release from before this change keeps both fields when it rewrites the
 file, because the review keeps unknown fields, but it does not update them on
-refresh. When a newer Mire loads a file whose current fingerprints differ from
-its latest checkpoint, it records a checkpoint at the current revision with
-`"gap": true`. The UI shows that the file changed somewhere between the two
+refresh. On load, a newer Mire compares each current file's fingerprint with
+the checkpoint lookup at the latest checkpoint's revision. When any differ, it
+records a checkpoint at the current revision with `"gap": true`, holding the
+files that differ. The UI shows that the file changed somewhere between the two
 revisions without naming one.
 
 The review schema moves to minor version 6. The major version stays at 1, so a
@@ -228,18 +248,22 @@ release that reads 1.5 still reads the file.
 `mire serve` extends its responses. `{file_id}` is the file's current
 fingerprint, so it cannot name a file that left the changeset or an older
 fingerprint. History and viewed routes therefore take the file's path in a
-`path` query parameter, percent-encoded from its raw bytes.
+`path` query parameter. Today a response gives a path only as `display` and
+`lossy`, and axum's `Query` decodes `%FF` to U+FFFD, so neither round-trips raw
+bytes. Each path in a response gains `raw`, the path's bytes as lowercase hex,
+and `path=` takes that form. A value that is not hex or not a valid `BytePath`
+is rejected with `invalid_path`.
 
-| Route                                       | Change                                                                |
-| ------------------------------------------- | --------------------------------------------------------------------- |
-| `GET /api/v1/review`                        | Each file gains `viewed` (the reader's mark or `null`) and `history`. |
-| `PUT /api/v1/viewed?path=`                  | Marks the path viewed at the `fingerprint` in the body.               |
-| `DELETE /api/v1/viewed?path=`               | Clears the reader's mark for the path.                                |
-| `GET /api/v1/history?path=`                 | The path's checkpoint rows, newest first.                             |
-| `GET /api/v1/history?path=&revision=`       | The path's hunks at that revision, or `checkpoint_unavailable`.       |
-| `GET /api/v1/findings/{note_id}`            | The anchor gains `checkpoint`.                                        |
-| `GET /api/v1/findings/{note_id}/checkpoint` | The code the note was written on, or `checkpoint_unavailable`.        |
-| `GET /api/v1/events`                        | Sends `viewed` events.                                                |
+| Route                                       | Change                                                                 |
+| ------------------------------------------- | ---------------------------------------------------------------------- |
+| `GET /api/v1/review`                        | Each file gains `viewed` (the reader's mark or `null`) and `history`.  |
+| `PUT /api/v1/viewed?path=`                  | Marks the path viewed at the `fingerprint` and `revision` in the body. |
+| `DELETE /api/v1/viewed?path=`               | Clears the reader's mark for the path.                                 |
+| `GET /api/v1/history?path=`                 | The path's checkpoint rows, newest first.                              |
+| `GET /api/v1/history?path=&revision=`       | The path's hunks at that revision, or `checkpoint_unavailable`.        |
+| `GET /api/v1/findings/{note_id}`            | The anchor gains `checkpoint`.                                         |
+| `GET /api/v1/findings/{note_id}/checkpoint` | The code the note was written on, or `checkpoint_unavailable`.         |
+| `GET /api/v1/events`                        | Sends `viewed` events.                                                 |
 
 `history` lists the revisions that changed the file, newest first, each with
 `available` set when Mire can rebuild its text. Carried rows are left out. The
@@ -250,6 +274,7 @@ The CLI gains `mire file viewed`, `mire file unviewed` and `mire file
 history`, and the JSON protocol gains matching operations. `mire context`
 includes the reader's viewed marks when asked with `--reader`.
 
-The browser drops its local viewed list. On first load after the change it
-offers to move the marks it holds into the review file, once, for the files
-whose fingerprint still matches.
+The browser drops its local viewed list and does not carry its marks over.
+`mire serve` binds a new port on each run unless given `--port`, and
+`localStorage` is kept per origin, so a new session almost never sees the marks
+an earlier one stored.

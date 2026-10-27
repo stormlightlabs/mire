@@ -277,6 +277,61 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    #[test]
+    fn walkthrough_writes_need_the_stored_revision() {
+        use mire_core::{
+            AnchorSide, Author, BytePath, LineNumber, LineRange, PatchLimits, Provenance, StepInput, StepLocation,
+            WalkthroughInput, parse_patch,
+        };
+
+        let directory = test_directory();
+        let path = directory.join("review.json");
+        let changeset = parse_patch(
+            b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n",
+            ChangesetSource::Patch { label: None },
+            PatchLimits::default(),
+        )
+        .unwrap();
+        let original = Review::new(ReviewRevision::new(1).unwrap(), changeset, Vec::new(), Vec::new()).unwrap();
+        create_review_atomic(&path, &original).unwrap();
+
+        let line = LineNumber::new(1).unwrap();
+        let write = |review: &Review, title: &str| {
+            let step = StepInput::new(
+                None,
+                title.to_owned(),
+                "Why".to_owned(),
+                vec![StepLocation::new(
+                    BytePath::new(b"file.txt".to_vec()).unwrap(),
+                    AnchorSide::New,
+                    LineRange::new(line, line).unwrap(),
+                )],
+                Vec::new(),
+                None,
+            );
+            let input = WalkthroughInput::new(
+                None,
+                vec![step],
+                Author::new("agent", None).unwrap(),
+                Provenance::Agent { producer: "test".to_owned() },
+            );
+            review.write_walkthrough(review.revision(), input).unwrap()
+        };
+
+        let first = write(&original, "First");
+        write_review_atomic_if_revision(&path, original.revision(), &first).unwrap();
+        assert_eq!(read_review(&path).unwrap(), first);
+
+        let stale = write(&original, "Stale");
+        let error = write_review_atomic_if_revision(&path, original.revision(), &stale).unwrap_err();
+        assert!(matches!(
+            error,
+            ReviewFileError::RevisionConflict { expected: 1, actual: 2 }
+        ));
+        assert_eq!(read_review(&path).unwrap(), first);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
     fn review(revision: u64) -> Review {
         Review::new(
             ReviewRevision::new(revision).unwrap(),

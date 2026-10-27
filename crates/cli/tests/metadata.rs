@@ -94,7 +94,7 @@ fn review_init_stores_title_and_description_and_context_reports_them() {
     assert_success(&output);
 
     let review: Value = serde_json::from_slice(&fs::read(fixture.path("review.json")).unwrap()).unwrap();
-    assert_eq!(review["schema_version"]["minor"], 4);
+    assert_eq!(review["schema_version"]["minor"], 5);
     assert_eq!(review["title"], "Fix the parser");
     assert_eq!(review["description"], "Fixes the parser.\n\nIt also trims spaces.");
 

@@ -2,7 +2,7 @@ use crate::{BytePath, FileDiff};
 
 use super::{
     Anchor, AnchorSide, Changeset, DiffLine, FileContent, LineNumber, LineRange, ReanchorCandidate, ReanchorEvidence,
-    ReanchorOutcome, Result, Review, ReviewNote,
+    ReanchorOutcome, Result, Review, walkthrough,
 };
 
 const NEARBY_CONTEXT_LINES: usize = 3;
@@ -27,20 +27,33 @@ pub fn reanchor_review(review: &Review, changeset: Changeset) -> Result<Review> 
 
     let mut notes = review.notes.clone();
     for note in &mut notes {
-        note.reanchor_outcome = Some(classify_note(note, &review.changeset, &changeset));
+        note.reanchor_outcome = Some(classify_anchor(
+            &note.anchor,
+            note.reanchor_outcome.as_ref(),
+            &review.changeset,
+            &changeset,
+        ));
     }
+    let walkthrough = review
+        .walkthrough
+        .as_ref()
+        .map(|walkthrough| walkthrough::reanchor_walkthrough(walkthrough, &review.changeset, &changeset));
     let mut refreshed = Review::new(review.next_revision()?, changeset, notes, review.events.clone())?;
     refreshed.source_binding = review.source_binding.clone();
     refreshed.title = review.title.clone();
     refreshed.description = review.description.clone();
+    refreshed.walkthrough = walkthrough;
     refreshed.extensions = review.extensions.clone();
     refreshed.validate()?;
     Ok(refreshed)
 }
 
-fn classify_note(note: &ReviewNote, previous: &Changeset, current: &Changeset) -> ReanchorOutcome {
-    let original_anchor = note.anchor.clone();
-    let source_anchors = source_anchors(note);
+/// Classifies one recorded anchor, and its latest outcome, against a later capture.
+pub fn classify_anchor(
+    anchor: &Anchor, outcome: Option<&ReanchorOutcome>, previous: &Changeset, current: &Changeset,
+) -> ReanchorOutcome {
+    let original_anchor = anchor.clone();
+    let source_anchors = source_anchors(anchor, outcome);
 
     for anchor in &source_anchors {
         if anchor.validate(current).is_ok() {
@@ -78,6 +91,15 @@ fn classify_note(note: &ReviewNote, previous: &Changeset, current: &Changeset) -
     }
 }
 
+/// Marks one recorded anchor stale against `current` without searching for a
+/// new location, for an anchor whose previous capture is no longer known.
+pub fn stale_outcome(anchor: &Anchor, outcome: Option<&ReanchorOutcome>, current: &Changeset) -> ReanchorOutcome {
+    ReanchorOutcome::Stale {
+        original_anchor: anchor.clone(),
+        evidence: stale_evidence(current, &source_anchors(anchor, outcome)),
+    }
+}
+
 fn stale_evidence(changeset: &Changeset, source_anchors: &[Anchor]) -> ReanchorEvidence {
     let path_match = source_anchors.iter().any(|anchor| {
         changeset
@@ -88,9 +110,9 @@ fn stale_evidence(changeset: &Changeset, source_anchors: &[Anchor]) -> ReanchorE
     ReanchorEvidence { path_match, ..ReanchorEvidence::default() }
 }
 
-fn source_anchors(note: &ReviewNote) -> Vec<Anchor> {
-    match &note.reanchor_outcome {
-        None => vec![note.anchor.clone()],
+fn source_anchors(anchor: &Anchor, outcome: Option<&ReanchorOutcome>) -> Vec<Anchor> {
+    match outcome {
+        None => vec![anchor.clone()],
         Some(ReanchorOutcome::Exact { candidate, .. } | ReanchorOutcome::Moved { candidate, .. }) => {
             vec![candidate.anchor.clone()]
         }

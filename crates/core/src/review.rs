@@ -14,9 +14,15 @@ use crate::{
 };
 
 mod reanchor;
+mod walkthrough;
+
+pub use walkthrough::{
+    HunkLocation, MAX_STEP_TITLE_BYTES, MAX_WALKTHROUGH_ANCHORS, MAX_WALKTHROUGH_STEPS, MAX_WALKTHROUGH_TEXT_BYTES,
+    StepAnchor, StepId, StepInput, StepLocation, Walkthrough, WalkthroughCoverage, WalkthroughInput, WalkthroughStep,
+};
 
 /// The review-file JSON schema emitted by this version of Mire.
-pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 4 };
+pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 5 };
 /// Maximum number of notes accepted in one review file.
 pub const MAX_REVIEW_NOTES: usize = 10_000;
 /// Maximum UTF-8 byte length of one note body.
@@ -70,7 +76,7 @@ pub enum ReviewError {
     #[error("source location contains only unchanged context")]
     ContextOnlyLocation,
     /// Location-based agent and tool input cannot claim human provenance.
-    #[error("location-based note input cannot claim human provenance")]
+    #[error("location-based input cannot claim human provenance")]
     HumanProvenanceForbidden,
     /// A required identifier or author field is empty or too large.
     #[error("{field} must contain between 1 and {max} UTF-8 bytes")]
@@ -137,9 +143,61 @@ pub enum ReviewError {
     /// Review initialization binds comparisons, not single-commit shows.
     #[error("a reloadable review source must be a Git comparison")]
     UnsupportedBindingOperation,
+    /// The review changed after the caller read the revision it expected.
+    #[error("review revision conflict: expected {expected}, found {actual}")]
+    RevisionConflict { expected: u64, actual: u64 },
+    /// A required text field is empty or holds only whitespace.
+    #[error("{field} must contain a non-whitespace character")]
+    BlankField { field: &'static str },
+    /// A walkthrough text field exceeds its byte limit.
+    #[error("{field} is {actual} bytes; limit is {limit} bytes")]
+    TextTooLarge {
+        field: &'static str,
+        actual: usize,
+        limit: usize,
+    },
+    /// A one-line walkthrough field, such as a step title or identifier, spans more than one line.
+    #[error("{field} must be a single line")]
+    MultilineField { field: &'static str },
+    /// A walkthrough has no steps.
+    #[error("walkthrough must contain at least one step")]
+    EmptyWalkthrough,
+    /// A walkthrough has more steps than the limit.
+    #[error("walkthrough contains {actual} steps; limit is {limit} steps")]
+    TooManySteps { actual: usize, limit: usize },
+    /// A walkthrough has more anchors, across all steps, than the limit.
+    #[error("walkthrough contains {actual} anchors; limit is {limit} anchors")]
+    TooManyStepAnchors { actual: usize, limit: usize },
+    /// A walkthrough step has no anchor.
+    #[error("step must have at least one anchor")]
+    StepWithoutAnchors,
+    /// Two walkthrough steps use the same identifier.
+    #[error("duplicate step identifier {0:?}")]
+    DuplicateStepId(String),
+    /// A step depends on a step that does not come before it.
+    #[error("step depends on {0:?}, which is not an earlier step with a supplied identifier")]
+    ForwardStepDependency(String),
+    /// A step lists the same dependency more than once.
+    #[error("step lists dependency {0:?} more than once")]
+    DuplicateStepDependency(String),
+    /// One walkthrough step failed validation.
+    #[error("walkthrough step {index}: {reason}")]
+    InvalidStep { index: usize, reason: Box<ReviewError> },
 }
 
 impl ReviewError {
+    /// Returns the code of the error that caused this one.
+    ///
+    /// [`ReviewError::InvalidStep`] reports the code of the step's own error,
+    /// such as `location_not_found`. Every other error reports
+    /// [`ReviewError::error_code`].
+    pub fn cause_code(&self) -> &'static str {
+        match self {
+            ReviewError::InvalidStep { reason, .. } => reason.cause_code(),
+            other => other.error_code(),
+        }
+    }
+
     pub const fn error_code(&self) -> &'static str {
         match self {
             ReviewError::UnsupportedSchemaMajor { .. } => "unsupported_schema_major",
@@ -174,6 +232,18 @@ impl ReviewError {
             ReviewError::EventSequenceOverflow(_) => "event_sequence_overflow",
             ReviewError::SourceBindingMismatch => "source_binding_mismatch",
             ReviewError::UnsupportedBindingOperation => "unsupported_binding_operation",
+            ReviewError::RevisionConflict { .. } => "revision_conflict",
+            ReviewError::BlankField { .. } => "blank_field",
+            ReviewError::TextTooLarge { .. } => "text_too_large",
+            ReviewError::MultilineField { .. } => "multiline_field",
+            ReviewError::EmptyWalkthrough => "empty_walkthrough",
+            ReviewError::TooManySteps { .. } => "too_many_steps",
+            ReviewError::TooManyStepAnchors { .. } => "too_many_step_anchors",
+            ReviewError::StepWithoutAnchors => "step_without_anchors",
+            ReviewError::DuplicateStepId(_) => "duplicate_step_id",
+            ReviewError::ForwardStepDependency(_) => "forward_step_dependency",
+            ReviewError::DuplicateStepDependency(_) => "duplicate_step_dependency",
+            ReviewError::InvalidStep { .. } => "invalid_walkthrough_step",
         }
     }
 }
@@ -995,6 +1065,8 @@ pub struct Review {
     description: Option<String>,
     notes: Vec<ReviewNote>,
     events: Vec<NoteEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    walkthrough: Option<Walkthrough>,
     #[serde(default, flatten)]
     extensions: BTreeMap<String, Value>,
 }
@@ -1013,6 +1085,7 @@ impl Review {
             description: None,
             notes,
             events,
+            walkthrough: None,
             extensions: BTreeMap::new(),
         };
         review.canonicalize();
@@ -1079,6 +1152,43 @@ impl Review {
         &self.events
     }
 
+    /// Returns the walkthrough, or `None` when the review has none.
+    pub const fn walkthrough(&self) -> Option<&Walkthrough> {
+        self.walkthrough.as_ref()
+    }
+
+    /// Replaces the whole walkthrough and advances the review revision.
+    ///
+    /// `expected` is the revision the caller read. A different current
+    /// revision returns [`ReviewError::RevisionConflict`] and changes nothing.
+    /// Step locations resolve against the current capture, and steps without
+    /// an identifier get a generated one. Writing the stored walkthrough again
+    /// returns the review unchanged.
+    pub fn write_walkthrough(&self, expected: ReviewRevision, input: WalkthroughInput) -> Result<Self> {
+        if self.revision != expected {
+            return Err(ReviewError::RevisionConflict { expected: expected.get(), actual: self.revision.get() });
+        }
+        let walkthrough = walkthrough::build_walkthrough(&self.changeset, input)?;
+        if self.walkthrough.as_ref() == Some(&walkthrough) {
+            return Ok(self.clone());
+        }
+        let mut review = self.rebuild(self.next_revision()?, self.notes.clone(), self.events.clone())?;
+        review.walkthrough = Some(walkthrough);
+        review.validate()?;
+        Ok(review)
+    }
+
+    /// Reports the hunks and files no walkthrough step covers, or `None`
+    /// without a walkthrough.
+    ///
+    /// A hunk is covered when an exact or moved step anchor overlaps it.
+    /// Stale and ambiguous anchors cover nothing.
+    pub fn walkthrough_coverage(&self) -> Option<WalkthroughCoverage> {
+        self.walkthrough
+            .as_ref()
+            .map(|walkthrough| walkthrough::coverage(&self.changeset, walkthrough))
+    }
+
     /// Validates and appends a batch of notes without partially applying it.
     pub fn import_notes(&self, imported: Vec<ReviewNote>) -> std::result::Result<Self, NoteImportError> {
         if imported.is_empty() {
@@ -1131,6 +1241,7 @@ impl Review {
         review.source_binding = self.source_binding.clone();
         review.title = self.title.clone();
         review.description = self.description.clone();
+        review.walkthrough = self.walkthrough.clone();
         review.extensions = self.extensions.clone();
         Ok(review)
     }
@@ -1279,7 +1390,11 @@ impl Review {
             }
         }
         validate_notes(&self.changeset, &self.notes)?;
-        validate_events(&self.notes, &self.events)
+        validate_events(&self.notes, &self.events)?;
+        if let Some(walkthrough) = &self.walkthrough {
+            walkthrough::validate_walkthrough(&self.changeset, walkthrough)?;
+        }
+        Ok(())
     }
 
     fn canonicalize(&mut self) {
@@ -1301,6 +1416,7 @@ impl Review {
         review.source_binding = self.source_binding.clone();
         review.title = self.title.clone();
         review.description = self.description.clone();
+        review.walkthrough = self.walkthrough.clone();
         review.extensions = self.extensions.clone();
         Ok(review)
     }
@@ -1327,8 +1443,12 @@ impl<'de> Deserialize<'de> for Review {
             description: wire.description,
             notes: wire.notes,
             events: wire.events,
+            walkthrough: wire.walkthrough,
             extensions: wire.extensions,
         };
+        if let Some(walkthrough) = &mut review.walkthrough {
+            walkthrough::settle_unmatched_anchors(&review.changeset, walkthrough);
+        }
         review.canonicalize();
         review.validate().map_err(de::Error::custom)?;
         Ok(review)
@@ -1348,6 +1468,8 @@ struct ReviewWire {
     description: Option<String>,
     notes: Vec<ReviewNote>,
     events: Vec<NoteEvent>,
+    #[serde(default)]
+    walkthrough: Option<Walkthrough>,
     #[serde(default, flatten)]
     extensions: BTreeMap<String, Value>,
 }
@@ -1392,12 +1514,17 @@ fn resolve_location(changeset: &Changeset, input: &NoteInput) -> Result<Anchor> 
     if matches!(input.provenance, Provenance::Human) {
         return Err(ReviewError::HumanProvenanceForbidden);
     }
+    resolve_range(changeset, &input.path, input.side, input.range)
+}
+
+/// Resolves a path, side, and line range to one anchor on a changed hunk.
+fn resolve_range(changeset: &Changeset, path: &BytePath, side: AnchorSide, range: LineRange) -> Result<Anchor> {
     let files = changeset
         .files()
         .iter()
-        .filter(|file| match input.side {
-            AnchorSide::Old => file.old_side().is_some_and(|side| side.path == input.path),
-            AnchorSide::New => file.new_side().is_some_and(|side| side.path == input.path),
+        .filter(|file| match side {
+            AnchorSide::Old => file.old_side().is_some_and(|side| side.path == *path),
+            AnchorSide::New => file.new_side().is_some_and(|side| side.path == *path),
         })
         .collect::<Vec<_>>();
     let file = match files.as_slice() {
@@ -1408,25 +1535,20 @@ fn resolve_location(changeset: &Changeset, input: &NoteInput) -> Result<Anchor> 
     let FileContent::Text { hunks } = file.content() else {
         return Err(ReviewError::LocationNotFound);
     };
-    let expected_count = input
-        .range
+    let expected_count = range
         .end
         .get()
-        .checked_sub(input.range.start.get())
+        .checked_sub(range.start.get())
         .and_then(|count| count.checked_add(1))
-        .ok_or(ReviewError::LineRangeNotFound {
-            side: input.side,
-            start: input.range.start.get(),
-            end: input.range.end.get(),
-        })?;
+        .ok_or(ReviewError::LineRangeNotFound { side, start: range.start.get(), end: range.end.get() })?;
     let matching = hunks
         .iter()
         .filter(|hunk| {
             let selected = hunk
                 .lines()
                 .iter()
-                .filter_map(|line| line_on_side(line, input.side).map(|number| (number, line)))
-                .filter(|(number, _)| *number >= input.range.start && *number <= input.range.end)
+                .filter_map(|line| line_on_side(line, side).map(|number| (number, line)))
+                .filter(|(number, _)| *number >= range.start && *number <= range.end)
                 .collect::<Vec<_>>();
             selected.len() as u64 == expected_count
         })
@@ -1437,20 +1559,14 @@ fn resolve_location(changeset: &Changeset, input: &NoteInput) -> Result<Anchor> 
         _ => return Err(ReviewError::AmbiguousLocation),
     };
     let changed = hunk.lines().iter().any(|line| {
-        line_on_side(line, input.side).is_some_and(|number| {
-            number >= input.range.start && number <= input.range.end && line.kind() != crate::LineKind::Context
+        line_on_side(line, side).is_some_and(|number| {
+            number >= range.start && number <= range.end && line.kind() != crate::LineKind::Context
         })
     });
     if !changed {
         return Err(ReviewError::ContextOnlyLocation);
     }
-    Anchor::new(
-        changeset,
-        input.path.clone(),
-        input.side,
-        input.range,
-        hunk.fingerprint(),
-    )
+    Anchor::new(changeset, path.clone(), side, range, hunk.fingerprint())
 }
 
 fn anchor_content_fingerprint(
@@ -1573,10 +1689,43 @@ fn validate_imported_notes(review: &Review, imported: &[ReviewNote]) -> Vec<Note
 }
 
 fn validate_note(changeset: &Changeset, note: &ReviewNote) -> Result<()> {
-    match &note.reanchor_outcome {
-        None => note.anchor.validate(changeset)?,
+    validate_anchor_state(changeset, &note.anchor, note.reanchor_outcome.as_ref())?;
+    validate_author(&note.author)?;
+    validate_note_body(note.body())?;
+    validate_provenance(note.provenance())
+}
+
+/// Reports whether `anchor` no longer resolves to a location in `changeset`:
+/// its path, hunk, or line range is missing, or its hunk is no longer unique.
+///
+/// An anchor that resolves to content with a different fingerprint is an
+/// error, because the same location always yields the same fingerprint.
+fn anchor_is_unmatched(changeset: &Changeset, anchor: &Anchor) -> Result<bool> {
+    match anchor_content_fingerprint(
+        changeset,
+        &anchor.path,
+        anchor.side,
+        anchor.range,
+        anchor.hunk_fingerprint,
+    ) {
+        Ok(actual) if actual == anchor.content_fingerprint => Ok(false),
+        Ok(_) => Err(ReviewError::ContentFingerprintMismatch),
+        Err(
+            ReviewError::FileSideNotFound { .. }
+            | ReviewError::HunkNotFound
+            | ReviewError::AmbiguousAnchor
+            | ReviewError::LineRangeNotFound { .. },
+        ) => Ok(true),
+        Err(error) => Err(error),
+    }
+}
+
+/// Checks a recorded anchor, and its latest re-anchor outcome, against the current capture.
+fn validate_anchor_state(changeset: &Changeset, anchor: &Anchor, outcome: Option<&ReanchorOutcome>) -> Result<()> {
+    match outcome {
+        None => anchor.validate(changeset)?,
         Some(outcome) => {
-            if outcome.original_anchor() != &note.anchor {
+            if outcome.original_anchor() != anchor {
                 return Err(ReviewError::ContentFingerprintMismatch);
             }
             match outcome {
@@ -1595,12 +1744,15 @@ fn validate_note(changeset: &Changeset, note: &ReviewNote) -> Result<()> {
             }
         }
     }
-    validate_text("author identifier", note.author.id(), 256)?;
-    if let Some(name) = note.author.display_name() {
+    Ok(())
+}
+
+fn validate_author(author: &Author) -> Result<()> {
+    validate_text("author identifier", author.id(), 256)?;
+    if let Some(name) = author.display_name() {
         validate_text("author display name", name, 256)?;
     }
-    validate_note_body(note.body())?;
-    validate_provenance(note.provenance())
+    Ok(())
 }
 
 fn validate_events(notes: &[ReviewNote], events: &[NoteEvent]) -> Result<()> {
@@ -1841,9 +1993,12 @@ mod tests {
 
     #[test]
     fn review_files_without_title_or_description_still_load() {
-        let json = serde_json::to_string(&empty_review())
-            .unwrap()
-            .replacen("\"minor\":4", "\"minor\":3", 1);
+        let json = serde_json::to_string(&empty_review()).unwrap().replacen(
+            &format!("\"minor\":{}", CURRENT_REVIEW_SCHEMA_VERSION.minor),
+            "\"minor\":3",
+            1,
+        );
+        assert!(json.contains("\"minor\":3"));
         assert!(!json.contains("\"title\"") && !json.contains("\"description\""));
         let decoded: Review = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.title(), None);

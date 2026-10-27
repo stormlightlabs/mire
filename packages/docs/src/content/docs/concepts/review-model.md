@@ -11,14 +11,15 @@ describes code. A review stores findings and decisions about that code.
 
 ## Core objects
 
-Mire's durable review model has four primary objects:
+Mire's durable review model has five primary objects:
 
 ```text
-Changeset   source, files, hunks, fingerprint
-Anchor      side, path, line range, hunk and content fingerprints
-ReviewNote  anchor, author, severity, kind, status, body, provenance
-Review      captured changeset, source binding, optional title and description,
-            revision, notes, and note events
+Changeset    source, files, hunks, fingerprint
+Anchor       side, path, line range, hunk and content fingerprints
+ReviewNote   anchor, author, severity, kind, status, body, provenance
+Walkthrough  optional overview, ordered steps, author, provenance
+Review       captured changeset, source binding, optional title and
+             description, revision, notes, note events, optional walkthrough
 ```
 
 The TUI and CLI use the same validation rules. Tools can therefore add findings
@@ -53,6 +54,52 @@ Mire never chooses an ambiguous candidate. The note retains its initial anchor,
 each candidate anchor, and the evidence used for the result, keeping the data
 available in review JSON and note exports.
 
+## Walkthroughs
+
+A walkthrough explains a change in the order a reader should take it. A review
+holds at most one. It has an optional Markdown overview, one or more steps, and
+an author and provenance, as a note does. Each step has an `id`, a one-line
+`title`, a Markdown `narrative`, one or more anchors, optional `depends_on`
+step ids, and an optional Mermaid `diagram`.
+
+Mire keeps the steps in the order the agent wrote them. A write names the review
+revision it read, gives each step a path, side, and line range, and replaces the
+whole walkthrough. Mire resolves each location to an anchor with the note rules.
+A write against an older revision fails with `revision_conflict`. Supplied step
+ids are kept. A step id, like a title, is one line with no control characters. A
+step without one gets `step-<n>`, where `n` is its position, counting up past
+ids already taken. `depends_on` may name only an earlier step whose id the agent
+supplied, and may name each step once, so the steps have no cycles. A repeated
+id fails with `duplicate_step_dependency`. Walkthrough writes cannot claim human
+provenance.
+
+A refresh re-anchors every step anchor with the note rules and records the
+same `exact`, `moved`, `stale`, or `ambiguous` result on that anchor. A hunk is
+covered when an exact or moved step anchor overlaps it. Stale and ambiguous
+anchors cover nothing. Files with no hunks, such as binary, rename-only, and
+mode-only files, are never covered.
+
+A step anchor whose path, hunk, or line range is missing from the stored
+capture when the review loads is marked `stale`. An ambiguous anchor drops only
+the candidates that are missing, and stays ambiguous while two remain. This
+happens when a Mire release without walkthroughs refreshes the review, because
+it keeps the walkthrough without re-anchoring it. The change is made in memory;
+the next write saves it, as a refresh would, and keeps the original anchor. Any
+other mismatch, such as a changed content fingerprint, fails the load as it does
+for a note. A file whose anchors all match loads unchanged.
+
+A walkthrough has these limits:
+
+| Bound                                    | Limit  |
+| ---------------------------------------- | ------ |
+| Steps                                    | 10,000 |
+| Anchors across all steps                 | 10,000 |
+| Overview, and each narrative and diagram | 1 MiB  |
+| Step title, one line                     | 1 KiB  |
+
+[Walkthrough design](/docs/concepts/walkthrough-design/) records where these
+fields come from.
+
 ## Authorship and provenance
 
 Every note records its author and producer provenance. Human, agent, analyzer,
@@ -70,7 +117,7 @@ Mire bounds review size, note count, imported payloads, and expanded context.
 A review's title is one line of at most 1 KiB with no control characters.
 Its description is at most 65,536 characters, GitHub's limit for a pull
 request body, and carries no control characters other than newline and tab.
-Review files written before titles existed still load.
+Review files written before titles or walkthroughs existed still load.
 
 A location batch and a source refresh validate the entire transaction before
 Mire atomically replaces the review file.

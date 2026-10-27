@@ -5,6 +5,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
+use std::time::Duration;
 
 use mire_core::{
     BytePath, BytePathError, ByteString, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, FileContent,
@@ -13,6 +14,12 @@ use mire_core::{
 };
 use thiserror::Error;
 
+mod consistency;
+
+/// Worktree captures taken before a torn capture fails the comparison.
+const MAX_CAPTURE_ATTEMPTS: u32 = 5;
+/// The wait after the first torn capture. It doubles after each later one.
+const CAPTURE_RETRY_DELAY: Duration = Duration::from_millis(10);
 const MAX_GIT_METADATA_BYTES: usize = 1024 * 1024;
 const MAX_GIT_STDERR_BYTES: usize = 1024 * 1024;
 /// Object ids sent to one `git cat-file --batch-check` run.
@@ -92,6 +99,10 @@ pub enum GitError {
     /// The captured source binding violated a core review invariant.
     #[error("cannot create source binding: {0}")]
     SourceBinding(mire_core::ReviewError),
+    /// A worktree file kept changing while Git read it, so the hunks of
+    /// every capture disagreed with the file's new blob id.
+    #[error("{path} changed while Git read it; its hunks did not match its blob id in {attempts} captures")]
+    TornCapture { path: String, attempts: u32 },
 }
 
 /// A Git-backed diff request from the command line.
@@ -323,7 +334,41 @@ fn load_diff_in_repository(repository: &GitRepository, request: &DiffRequest) ->
     load_diff_in_repository_with_source(repository, request, source, true)
 }
 
+/// Captures a comparison. A comparison that reads the worktree is captured
+/// again while a text file's hunks disagree with its new blob id, which
+/// happens when the file changes while Git reads it.
 fn load_diff_in_repository_with_source(
+    repository: &GitRepository, request: &DiffRequest, source: ChangesetSource, literal_pathspecs: bool,
+) -> Result<Changeset> {
+    let capture = || capture_diff(repository, request, source.clone(), literal_pathspecs);
+    if !matches!(&source, ChangesetSource::Git { operation } if consistency::reads_worktree(operation)) {
+        return capture();
+    }
+    capture_untorn(capture, |changeset| consistency::torn_file(&repository.root, changeset))
+}
+
+/// Runs `capture` until `torn` finds no torn file in its result, at most
+/// [`MAX_CAPTURE_ATTEMPTS`] times, waiting longer after each torn capture.
+fn capture_untorn(
+    mut capture: impl FnMut() -> Result<Changeset>, mut torn: impl FnMut(&Changeset) -> Result<Option<BytePath>>,
+) -> Result<Changeset> {
+    let mut delay = CAPTURE_RETRY_DELAY;
+    for attempt in 1..=MAX_CAPTURE_ATTEMPTS {
+        let changeset = capture()?;
+        let Some(path) = torn(&changeset)? else {
+            return Ok(changeset);
+        };
+        if attempt == MAX_CAPTURE_ATTEMPTS {
+            let path = String::from_utf8_lossy(path.as_bytes()).into_owned();
+            return Err(GitError::TornCapture { path, attempts: MAX_CAPTURE_ATTEMPTS });
+        }
+        thread::sleep(delay);
+        delay *= 2;
+    }
+    unreachable!("the last capture attempt returns")
+}
+
+fn capture_diff(
     repository: &GitRepository, request: &DiffRequest, source: ChangesetSource, literal_pathspecs: bool,
 ) -> Result<Changeset> {
     let mut arguments = diff_options();
@@ -768,6 +813,41 @@ mod tests {
         let capture = read_stream(&b"abcdef"[..], 3).unwrap();
         assert_eq!(capture.bytes, b"abc");
         assert!(capture.exceeded_limit);
+    }
+
+    #[test]
+    fn torn_captures_are_retried_then_rejected() {
+        let changeset = || {
+            Ok(Changeset::new(
+                ChangesetSource::DirectFiles,
+                Vec::new(),
+                mire_core::Fingerprint::new([0; 32]),
+            ))
+        };
+        let path = BytePath::new(b"file.txt".to_vec()).unwrap();
+
+        let mut captures = 0;
+        let error = capture_untorn(
+            || {
+                captures += 1;
+                changeset()
+            },
+            |_| Ok(Some(path.clone())),
+        )
+        .unwrap_err();
+        assert_eq!(captures, MAX_CAPTURE_ATTEMPTS);
+        assert!(matches!(
+            &error,
+            GitError::TornCapture { path, attempts: MAX_CAPTURE_ATTEMPTS } if path == "file.txt"
+        ));
+
+        let mut checks = 0;
+        capture_untorn(changeset, |_| {
+            checks += 1;
+            Ok((checks == 1).then(|| path.clone()))
+        })
+        .unwrap();
+        assert_eq!(checks, 2);
     }
 
     #[test]

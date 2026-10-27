@@ -2,6 +2,7 @@ use thiserror::Error;
 
 use crate::{Changeset, ChangesetSource};
 
+mod blob;
 mod fold;
 mod mbox;
 mod parser;
@@ -84,6 +85,7 @@ impl<'a> PatchInput<'a> {
     }
 }
 
+pub use blob::{blob_matches, rebuild_new_side};
 pub use writer::{PatchWriteError, write_patch};
 
 /// Parses bounded UTF-8 patch bytes into Mire's normalized changeset model.

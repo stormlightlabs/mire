@@ -5,7 +5,7 @@ title = "Show the code a stale note was written on"
 status = "pending"
 priority = "normal"
 position = 5
-blocked-by = ["arcl-t-01M5YRVM0JS5TYST55RJRWQTGS"]
+blocked-by = ["arcl-t-01M5YRTZ6VQRE61JGTJK0TNGC3", "arcl-t-01M5YRVM0JS5TYST55RJRWQTGS"]
 +++
 
 For a note whose anchor went stale, show the code it was written on beside the closest current code. See `notes-and-anchoring.png`.

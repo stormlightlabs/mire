@@ -5,9 +5,10 @@ title = "Narrow web layout"
 status = "pending"
 priority = "normal"
 position = 7
+blocked-by = ["arcl-t-01M5SXDG7QJM6Y67FCJ8ZPNASW"]
 +++
 
 The diff and notes work at 390 pixels wide with wrapped lines and no horizontal page scroll. See `narrow.png`.
 
 Verification:
-- Playwright covers the new states, and `just check` passes.
+- The Playwright review flow covers the new states, and `just check` passes.

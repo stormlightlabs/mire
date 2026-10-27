@@ -5,9 +5,10 @@ title = "Focus mode in the web review"
 status = "pending"
 priority = "normal"
 position = 4
+blocked-by = ["arcl-t-01M5SXDG7QJM6Y67FCJ8ZPNASW"]
 +++
 
 One file at full width with the key bar, entered and left from the keyboard. See `focus-mode.png`.
 
 Verification:
-- Playwright covers the new states, and `just check` passes.
+- The Playwright review flow covers the new states, and `just check` passes.

@@ -8,3 +8,7 @@ position = 0
 +++
 
 `mire notes export --format markdown` writes note bodies and other agent-supplied text without escaping control characters, so ESC, OSC or CR sequences reach a terminal or file as stored. `walkthrough show` now escapes them with `escape_controls` in `crates/cli/src/terminal_text.rs`; the Markdown export could reuse it. Found while reviewing the walkthrough CLI.
+
+Verification:
+- A CLI test exports a note whose body and author hold ESC, an OSC sequence and CR, and finds each escaped in the Markdown.
+- `just check` passes.

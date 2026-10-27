@@ -8,3 +8,7 @@ position = 0
 +++
 
 The walkthrough design says walkthrough mode lists covered files first, in the order of the first step that touches each, then the hunks and files no step covers. The TUI walkthrough mode keeps changeset order and does not list uncovered hunks. `Review::walkthrough_coverage()` already computes them.
+
+Verification:
+- A terminal snapshot test shows covered files in step order, then the files and hunks no step covers.
+- `just check` passes.

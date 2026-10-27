@@ -5,9 +5,10 @@ title = "Finish-review panel"
 status = "pending"
 priority = "normal"
 position = 6
+blocked-by = ["arcl-t-01M5SXDG7QJM6Y67FCJ8ZPNASW"]
 +++
 
 Show what is left before handoff (open findings, unsafe anchors, unviewed files) and the export choices. It writes no status and implies no approval. See `finish-review.png`.
 
 Verification:
-- Playwright covers the new states, and `just check` passes.
+- The Playwright review flow covers the new states, and `just check` passes.

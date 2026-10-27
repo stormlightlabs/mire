@@ -7,4 +7,8 @@ priority = "normal"
 position = 0
 +++
 
-Layout now counts pane lines only up to the pane height, but drawing still wraps every step title to count the '… N more lines' marker. On an overview with 5,000 steps a frame takes about 35 ms in release. Wrap only the rows the pane shows, or cache the wrapped lines per walkthrough, position and width. This fits with scrolling the pane (arcl-c-01M5XZ0JB3RDTPAQETZB7R7QGW).
+Layout now counts pane lines only up to the pane height, but drawing still wraps every step title to count the '… N more lines' marker. On an overview with 5,000 steps a frame takes about 35 ms in release. Wrap only the rows the pane shows, or cache the wrapped lines per walkthrough, position and width. This fits with scrolling the pane (arcl-t-01M5YRTHW8PCVH2CWBF1MXB278).
+
+Verification:
+- The pull request gives release frame times for a 5,000-step overview before and after, and a frame no longer wraps steps the pane does not show.
+- Terminal snapshots do not change, and `just check` passes.

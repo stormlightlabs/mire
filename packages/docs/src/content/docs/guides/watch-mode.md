@@ -35,6 +35,9 @@ finding, layout, and review filters when the new capture still contains their
 identities. If a row no longer exists, Mire chooses the nearest useful location
 rather than resetting the session to the top.
 
+An open search, file picker, or filter panel stays open with its typed text. A
+reload that finds no change leaves the session as it is.
+
 ## Watch a review file
 
 Use `--watch` when another local process may import notes or when code may

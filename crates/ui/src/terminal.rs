@@ -211,6 +211,9 @@ where
         }
         match reload(requested_reload) {
             WatchUpdate::Unchanged => {}
+            WatchUpdate::Loaded(updated) if updated == changeset => {
+                mark_current(&mut app, requested_reload);
+            }
             WatchUpdate::Loaded(updated) => {
                 if matches!(app.state(), crate::AppState::Ready(_)) {
                     position = app.position();
@@ -271,6 +274,7 @@ where
     app.resize(size.width, size.height);
     let mut position = app.position();
     let mut pending = WatchUpdate::Unchanged;
+    let mut pending_forced = false;
     app.set_watch_state(crate::WatchState::Watching, None);
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
@@ -281,12 +285,19 @@ where
         }
         if requested_reload || matches!(pending, WatchUpdate::Unchanged) {
             pending = reload(requested_reload);
+            pending_forced |= requested_reload;
         }
         if !app.can_reload() {
             continue;
         }
+        let forced = std::mem::take(&mut pending_forced);
         match std::mem::replace(&mut pending, WatchUpdate::Unchanged) {
             WatchUpdate::Unchanged => {}
+            // The app holds the review as last saved, which can be newer than
+            // the one it was built from.
+            WatchUpdate::Loaded(updated) if app.review().unwrap_or(&review) == &updated => {
+                mark_current(&mut app, forced);
+            }
             WatchUpdate::Loaded(updated) => {
                 if matches!(app.state(), crate::AppState::Ready(_)) {
                     position = app.position();
@@ -304,6 +315,15 @@ where
         }
     }
     Ok(())
+}
+
+/// Keeps the app when a reload returns the content it already shows, so
+/// recovery reloads do not rebuild it and close open text entry. A requested
+/// reload, or one after a failed refresh, still reports the refresh.
+fn mark_current(app: &mut App<'_>, requested: bool) {
+    if requested || app.watch_state() == Some(crate::WatchState::Failed) {
+        app.set_watch_state(crate::WatchState::Refreshed, None);
+    }
 }
 
 /// Waits up to [`EVENT_POLL_INTERVAL`] for one terminal event.
@@ -393,6 +413,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::rc::Rc;
+
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use mire_core::{ChangesetSource, PatchLimits, ReviewRevision, parse_patch};
     use ratatui::backend::{ClearType, TestBackend, WindowSize};
@@ -402,6 +426,10 @@ mod tests {
     use super::*;
 
     const PATCH: &[u8] = b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n";
+    const CHANGED_PATCH: &[u8] = b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+newer\n";
+
+    /// Scripted terminal events not yet taken by a session.
+    type Remaining = Rc<RefCell<VecDeque<Option<Event>>>>;
 
     /// A [`TestBackend`] with the I/O error type the session loops expect.
     struct IoBackend(TestBackend);
@@ -506,6 +534,161 @@ mod tests {
         .unwrap();
 
         assert_eq!(reloads, 0);
+    }
+
+    #[test]
+    fn open_search_survives_a_watch_reload_with_no_change() {
+        let changeset = changeset(PATCH);
+        let mut terminal = Terminal::new(IoBackend(TestBackend::new(80, 24))).unwrap();
+        // With the search still open, the first `q` is typed into the query.
+        let (mut events, remaining) = script(vec![key('/'), key('n'), None, None, key('q'), esc(), key('q')]);
+        let mut reload = |_| WatchUpdate::Loaded(changeset.clone());
+
+        run_watch_loop(
+            &mut terminal,
+            changeset.clone(),
+            AppOptions::default(),
+            &Theme::plain(),
+            &mut events,
+            &mut reload,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(remaining.borrow().len(), 0, "a reload closed the search and `q` quit");
+    }
+
+    #[test]
+    fn typed_search_survives_a_watch_reload_with_a_change() {
+        let mut terminal = Terminal::new(IoBackend(TestBackend::new(80, 24))).unwrap();
+        let (mut events, remaining) = script(vec![key('/'), key('n'), key('e'), None, key('w'), enter(), key('q')]);
+        let changed = changeset(CHANGED_PATCH);
+        let mut reloads = 0;
+        let mut reload = |_| {
+            reloads += 1;
+            WatchUpdate::Loaded(changed.clone())
+        };
+
+        run_watch_loop(
+            &mut terminal,
+            changeset(PATCH),
+            AppOptions::default(),
+            &Theme::plain(),
+            &mut events,
+            &mut reload,
+            None,
+        )
+        .unwrap();
+
+        assert!(reloads > 1);
+        assert_eq!(remaining.borrow().len(), 0);
+        assert!(
+            screen(&terminal).contains("/new 1/1"),
+            "the search typed before the reload ran on the reloaded changeset"
+        );
+    }
+
+    #[test]
+    fn open_filter_survives_a_review_watch_reload_with_no_change() {
+        let review = review(PATCH, 1);
+        let mut terminal = Terminal::new(IoBackend(TestBackend::new(80, 24))).unwrap();
+        // The filter ignores `q`, so only Esc then `q` ends the session.
+        let (mut events, remaining) = script(vec![key('f'), None, None, key('q'), esc(), key('q')]);
+        let mut save = |_: ReviewWrite<'_>| Ok::<(), String>(());
+        let mut reload = |_| WatchUpdate::Loaded(review.clone());
+
+        run_review_watch_loop(
+            &mut terminal,
+            review.clone(),
+            AppOptions::default(),
+            &Theme::plain(),
+            &mut events,
+            &mut save,
+            &mut reload,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(remaining.borrow().len(), 0, "a reload closed the filter and `q` quit");
+    }
+
+    #[test]
+    fn open_filter_survives_a_review_watch_reload_with_a_change() {
+        let mut terminal = Terminal::new(IoBackend(TestBackend::new(80, 24))).unwrap();
+        let (mut events, remaining) = script(vec![key('f'), None, None, key('q'), esc(), key('q')]);
+        let mut save = |_: ReviewWrite<'_>| Ok::<(), String>(());
+        let changed = review(CHANGED_PATCH, 2);
+        let mut reload = |_| WatchUpdate::Loaded(changed.clone());
+
+        run_review_watch_loop(
+            &mut terminal,
+            review(PATCH, 1),
+            AppOptions::default(),
+            &Theme::plain(),
+            &mut events,
+            &mut save,
+            &mut reload,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            remaining.borrow().len(),
+            0,
+            "the rebuild closed the filter and `q` quit"
+        );
+    }
+
+    fn changeset(patch: &[u8]) -> Changeset {
+        parse_patch(patch, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap()
+    }
+
+    fn review(patch: &[u8], revision: u64) -> Review {
+        Review::new(
+            ReviewRevision::new(revision).unwrap(),
+            changeset(patch),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap()
+    }
+
+    fn key(character: char) -> Option<Event> {
+        Some(Event::Key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE)))
+    }
+
+    fn esc() -> Option<Event> {
+        Some(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)))
+    }
+
+    fn enter() -> Option<Event> {
+        Some(Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)))
+    }
+
+    /// Yields the scripted events in order, failing the session once they
+    /// run out, and shares the events not yet taken.
+    fn script(events: Vec<Option<Event>>) -> (impl FnMut() -> io::Result<Option<Event>>, Remaining) {
+        let remaining = Rc::new(RefCell::new(VecDeque::from(events)));
+        let source = Rc::clone(&remaining);
+        let next = move || {
+            source
+                .borrow_mut()
+                .pop_front()
+                .ok_or_else(|| io::Error::other("the session outlived its scripted events"))
+        };
+        (next, remaining)
+    }
+
+    /// Returns the last drawn frame as text.
+    fn screen(terminal: &Terminal<IoBackend>) -> String {
+        terminal
+            .backend()
+            .0
+            .buffer()
+            .content()
+            .iter()
+            .map(Cell::symbol)
+            .collect()
     }
 
     /// Yields the quit key once, then no further events.

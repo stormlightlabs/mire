@@ -303,11 +303,14 @@ fn an_external_review_write_streams_a_review_invalidated_event() {
     assert_eq!(event["revision"], refreshed + 1, "{received}");
 }
 
-/// Parses each complete `data:` line of an event stream.
+/// Parses each complete `data:` line of an event stream, skipping a final
+/// line whose newline has not arrived yet, and fails on a complete line that
+/// is not JSON.
 fn mire_events(text: &str) -> impl Iterator<Item = serde_json::Value> + '_ {
-    text.lines()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .filter_map(|data| serde_json::from_str(data).ok())
+    text.split_inclusive('\n')
+        .filter_map(|line| line.strip_suffix('\n'))
+        .filter_map(|line| line.trim_end_matches('\r').strip_prefix("data: "))
+        .map(|data| serde_json::from_str(data).unwrap_or_else(|error| panic!("malformed event data {data:?}: {error}")))
 }
 
 /// Reads from `stream` into `text` until `done` holds, failing after ten seconds.

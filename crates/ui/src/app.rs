@@ -91,6 +91,8 @@ pub struct AppPosition {
     context_lines: usize,
     description_scroll: usize,
     description_visible: bool,
+    file_picker_query: Option<String>,
+    filter_visible: bool,
     focus: Focus,
     help_visible: bool,
     layout_mode: LayoutMode,
@@ -98,6 +100,8 @@ pub struct AppPosition {
     note_filter: NoteFilter,
     row_offset: usize,
     row_path: Option<Vec<u8>>,
+    search_input: bool,
+    search_query: String,
     selected_note_id: Option<String>,
     selected_path: Option<Vec<u8>>,
     sidebar_visible: bool,
@@ -871,7 +875,8 @@ impl<'a> App<'a> {
         Ok(())
     }
 
-    /// Captures navigation, layout, and filter state for a watched reload.
+    /// Captures navigation, layout, filter, and open text-entry state for a
+    /// watched reload.
     pub fn position(&self) -> AppPosition {
         let (row_path, row_offset) = match &self.state {
             AppState::Ready(stream) => {
@@ -907,6 +912,8 @@ impl<'a> App<'a> {
             context_lines: self.context_lines,
             description_scroll: self.description_scroll,
             description_visible: self.description_visible,
+            file_picker_query: self.file_picker.as_ref().map(|picker| picker.query.clone()),
+            filter_visible: self.filter_visible,
             focus: self.focus,
             help_visible: self.help_visible,
             layout_mode: self.layout_mode,
@@ -914,6 +921,8 @@ impl<'a> App<'a> {
             note_filter: self.note_filter,
             row_offset,
             row_path,
+            search_input: self.search_input,
+            search_query: self.search_query.clone(),
             selected_note_id,
             selected_path,
             sidebar_visible: self.sidebar_visible,
@@ -931,10 +940,18 @@ impl<'a> App<'a> {
         self.context_lines = position.context_lines;
         self.description_scroll = position.description_scroll;
         self.description_visible = position.description_visible;
+        self.file_picker = position
+            .file_picker_query
+            .as_ref()
+            .filter(|_| matches!(self.state, AppState::Ready(_)))
+            .map(|query| FilePicker { query: query.clone(), ..FilePicker::default() });
+        self.filter_visible = position.filter_visible;
         self.focus = position.focus;
         self.help_visible = position.help_visible;
         self.layout_mode = position.layout_mode;
         self.note_filter = position.note_filter;
+        self.search_input = position.search_input;
+        self.search_query = position.search_query.clone();
         self.sidebar_visible = position.sidebar_visible;
         let authored = self.walkthrough().is_some();
         let steps = self.walkthrough().map_or(0, |walkthrough| walkthrough.steps().len());
@@ -967,6 +984,9 @@ impl<'a> App<'a> {
         self.selected_file = selected_file;
         self.rebuild_stream(None);
         self.prune_collapsed_state();
+        if !self.search_input {
+            self.rebuild_search_matches();
+        }
 
         let AppState::Ready(stream) = &self.state else {
             return;
@@ -2597,6 +2617,33 @@ mod tests {
             reloaded.review_cursor.saturating_sub(stream.file_position(2).unwrap()),
             position.row_offset
         );
+    }
+
+    #[test]
+    fn reload_position_keeps_open_text_entry() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let mut app = App::ready_with_options(&changeset, AppOptions::default());
+        app.resize(100, 12);
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE));
+        let picker = app.position();
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        let search = app.position();
+
+        let mut reloaded = App::ready_with_options(&changeset, AppOptions::default());
+        reloaded.resize(100, 12);
+        reloaded.restore_position(&picker);
+        assert_eq!(reloaded.file_picker_query(), Some("b"));
+        assert!(!reloaded.search_input());
+
+        let mut reloaded = App::ready_with_options(&changeset, AppOptions::default());
+        reloaded.resize(100, 12);
+        reloaded.restore_position(&search);
+        assert!(reloaded.search_input());
+        assert_eq!(reloaded.search_query(), "n");
+        assert!(!reloaded.file_picker_visible());
     }
 
     #[test]

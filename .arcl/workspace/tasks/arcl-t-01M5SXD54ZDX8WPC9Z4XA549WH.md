@@ -9,7 +9,7 @@ position = 12
 
 Release Mire the way fabrial releases: prebuilt binaries on GitHub releases and a Homebrew formula. Mire is not published to crates.io.
 
-Mirror fabrial's Release PR, Release tag and dist Release workflows and its Homebrew publish job. Use git-cliff (`cliff.toml`) for the changelog section.
+Mirror fabrial's Release PR, Release tag and dist Release workflows and its Homebrew publish job. `fab release` stays in fabrial, so a script in this repository writes the changelog section with git-cliff (`cliff.toml`) and checks the tag. Build for fabrial's two targets, `aarch64-apple-darwin` and `x86_64-unknown-linux-gnu`; adding a target later is one line in the dist config.
 
 Acceptance criteria:
 - [ ] A Release PR workflow, run with a version, sets the workspace version, writes the release's CHANGELOG.md section with git-cliff, and pushes `storm/release-<version>` for Branch PR to open.

@@ -13,6 +13,7 @@ mod syntax;
 mod terminal;
 mod theme;
 mod view;
+mod viewed;
 mod walkthrough;
 
 use std::io;
@@ -30,6 +31,7 @@ pub use notes::{EditorField, EditorTarget, LineSelection, NoteEditor};
 pub use stream::{CollapseState, LayoutMode, ReviewStream, RowKind};
 pub use theme::{ColorMode, ParseThemeFamilyError, Theme, ThemeFamily, ThemeVariant};
 pub use view::render;
+pub use viewed::{FileViewed, ReviewWrite, ViewedChange};
 pub use walkthrough::WalkthroughPosition;
 
 /// A filesystem-backed review update produced by the CLI watch boundary.
@@ -78,10 +80,11 @@ where
     terminal::run_watch(changeset, options, reload, Some(control))
 }
 
-/// Opens an editable durable review and saves every accepted note action through the supplied boundary.
+/// Opens an editable durable review and saves every accepted note action and
+/// viewed mark through the supplied boundary.
 pub fn run_review_with_options<F, E>(review: &Review, options: AppOptions, save: F) -> io::Result<()>
 where
-    F: FnMut(&Review) -> Result<(), E>,
+    F: FnMut(ReviewWrite<'_>) -> Result<(), E>,
     E: std::fmt::Display,
 {
     terminal::run_review(review, options, save, None)
@@ -92,7 +95,7 @@ pub fn run_review_with_live_control<F, E>(
     review: &Review, options: AppOptions, save: F, control: LiveControl,
 ) -> io::Result<()>
 where
-    F: FnMut(&Review) -> Result<(), E>,
+    F: FnMut(ReviewWrite<'_>) -> Result<(), E>,
     E: std::fmt::Display,
 {
     terminal::run_review(review, options, save, Some(control))
@@ -103,7 +106,7 @@ pub fn run_review_watch_with_options<F, E, R>(
     review: Review, options: AppOptions, save: F, mut reload: R,
 ) -> io::Result<()>
 where
-    F: FnMut(&Review) -> Result<(), E>,
+    F: FnMut(ReviewWrite<'_>) -> Result<(), E>,
     E: std::fmt::Display,
     R: FnMut() -> WatchUpdate<Review>,
 {
@@ -115,7 +118,7 @@ pub fn run_review_watch_with_live_control<F, E, R>(
     review: Review, options: AppOptions, save: F, reload: R, control: LiveControl,
 ) -> io::Result<()>
 where
-    F: FnMut(&Review) -> Result<(), E>,
+    F: FnMut(ReviewWrite<'_>) -> Result<(), E>,
     E: std::fmt::Display,
     R: FnMut(bool) -> WatchUpdate<Review>,
 {

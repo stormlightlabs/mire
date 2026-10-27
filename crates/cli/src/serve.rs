@@ -16,13 +16,13 @@ use axum::http::{HeaderMap, HeaderValue, Method, Response, StatusCode, Uri};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Router, extract::MatchedPath};
 use base64::Engine;
 use include_dir::{Dir, include_dir};
 use mire_core::{
     AnnotationKind, Author, ChangesetSource, FileContent, FileDiff, Hunk, NoteId, NoteSeverity, NoteStatus, Review,
-    ReviewNote, ReviewRevision,
+    ReviewNote, ReviewRevision, ViewedMap,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -40,6 +40,8 @@ use crate::protocol::{ContextSelection, ProtocolError, context_json, notes_json,
 use crate::refresh::{RefreshError, refresh_review};
 use crate::review_file::{ReviewFileError, read_review};
 use crate::watch::WatchSet;
+
+mod viewed;
 
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/web");
 
@@ -71,6 +73,10 @@ struct AppState {
     request_ids: Arc<AtomicU64>,
     events: broadcast::Sender<ServerEvent>,
     watch_status: Arc<Mutex<WatchStatus>>,
+    /// Viewed marks as of the last `Viewed` event or revision change. The
+    /// watcher and the viewed routes both compare against it, so one change
+    /// sends one event.
+    announced_viewed: Arc<Mutex<ViewedMap>>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -96,18 +102,21 @@ struct ReviewOverview {
 #[serde(rename_all = "camelCase")]
 struct FileSummary {
     id: String,
-    path: DisplayText,
+    path: PathText,
     status: String,
     content_kind: String,
     open_findings: usize,
+    /// The local reader's viewed mark for this path, or `null`. The file is
+    /// viewed while the mark's fingerprint equals `id`.
+    viewed: Option<viewed::ViewedState>,
 }
 
 #[derive(Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct FileDetail {
     id: String,
-    path: DisplayText,
-    old_path: Option<DisplayText>,
+    path: PathText,
+    old_path: Option<PathText>,
     status: String,
     content: SemanticFileContent,
     findings: Vec<FindingSummary>,
@@ -145,7 +154,7 @@ struct SemanticLine {
 #[serde(rename_all = "camelCase")]
 struct FindingSummary {
     id: String,
-    path: DisplayText,
+    path: PathText,
     side: String,
     start_line: u64,
     end_line: u64,
@@ -161,7 +170,7 @@ struct FindingSummary {
 #[serde(rename_all = "camelCase")]
 struct FindingDetail {
     id: String,
-    path: DisplayText,
+    path: PathText,
     side: String,
     start_line: u64,
     end_line: u64,
@@ -187,6 +196,16 @@ struct FindingAuthor {
 struct DisplayText {
     display: String,
     lossy: bool,
+}
+
+/// A repository path: display text, and its raw bytes as lowercase hex for
+/// routes that take a `path` query parameter.
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct PathText {
+    display: String,
+    lossy: bool,
+    raw: String,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -246,6 +265,7 @@ struct ServerEvent {
 enum ServerEventKind {
     ReviewInvalidated,
     Refresh,
+    Viewed,
     WatchStatus,
     Shutdown,
 }
@@ -340,7 +360,9 @@ enum FindingMutationError {
         export_notes_json,
         export_notes_markdown,
         export_context,
-        get_openapi
+        get_openapi,
+        viewed::put_viewed,
+        viewed::delete_viewed
     ),
     components(schemas(
         ReviewOverview,
@@ -365,6 +387,10 @@ enum FindingMutationError {
         WebSeverity,
         WebAnnotationKind,
         FindingDecision,
+        PathText,
+        viewed::ViewedState,
+        viewed::MarkViewedRequest,
+        viewed::ViewedResponse,
         Problem
     ))
 )]
@@ -400,6 +426,7 @@ pub async fn run(arguments: ServeArgs) -> Result<(), ServeError> {
         request_ids: Arc::new(AtomicU64::new(1)),
         events,
         watch_status: Arc::new(Mutex::new(initial_watch_status)),
+        announced_viewed: Arc::new(Mutex::new(initial_review.viewed().clone())),
     };
     let (shutdown, shutdown_receiver) = watch::channel(false);
     let watcher = start_watcher(state.clone(), initial_revision, shutdown_receiver);
@@ -430,6 +457,7 @@ fn app(state: AppState) -> Router {
         .route("/api/v1/findings/{note_id}", get(get_finding).patch(edit_finding))
         .route("/api/v1/findings/{note_id}/decision", post(decide_finding))
         .route("/api/v1/refresh", post(refresh))
+        .route("/api/v1/viewed", put(viewed::put_viewed).delete(viewed::delete_viewed))
         .route("/api/v1/events", get(get_events))
         .route("/api/v1/exports/notes.json", get(export_notes_json))
         .route("/api/v1/exports/notes.md", get(export_notes_markdown))
@@ -529,8 +557,10 @@ fn watch_review(state: AppState, initial_revision: u64, shutdown: watch::Receive
             match read_review(&state.review_path) {
                 Ok(review) if revision != Some(review.revision().get()) => {
                     announce_revision(&state, &mut revision, review.revision().get(), false);
+                    remember_viewed(&state, review.viewed());
                 }
-                Ok(_) => {
+                Ok(review) => {
+                    announce_viewed(&state, &review);
                     if !source_degraded {
                         set_watch_status(
                             &state,
@@ -553,6 +583,7 @@ fn watch_review(state: AppState, initial_revision: u64, shutdown: watch::Receive
                         result.review().revision().get(),
                         result.changed(),
                     );
+                    remember_viewed(&state, result.review().viewed());
                     if source_watcher.is_some() {
                         source_degraded = false;
                         set_watch_status(&state, WatchStatus::Watching);
@@ -583,6 +614,32 @@ fn announce_revision(state: &AppState, announced: &mut Option<u64>, current: u64
     };
     *announced = Some(current);
     publish(state, kind, Some(current));
+}
+
+/// Publishes `Viewed` when the review's marks differ from the ones last
+/// announced. Marks never advance the revision, so a mark written by the CLI
+/// or the terminal reaches open tabs only this way. A viewed route calls it
+/// after its write, and the watcher then finds nothing new.
+fn announce_viewed(state: &AppState, review: &Review) {
+    let changed = state.announced_viewed.lock().is_ok_and(|mut known| {
+        if *known == *review.viewed() {
+            false
+        } else {
+            *known = review.viewed().clone();
+            true
+        }
+    });
+    if changed {
+        publish(state, ServerEventKind::Viewed, Some(review.revision().get()));
+    }
+}
+
+/// Records marks that arrived with a new revision. The revision's own event
+/// already tells tabs to reload them.
+fn remember_viewed(state: &AppState, viewed: &ViewedMap) {
+    if let Ok(mut known) = state.announced_viewed.lock() {
+        known.clone_from(viewed);
+    }
 }
 
 fn create_source_watcher(state: &AppState) -> Result<Option<WatchSet>, crate::watch::WatchError> {
@@ -694,7 +751,7 @@ async fn secure_request(State(state): State<AppState>, request: Request, next: N
 async fn get_review(State(state): State<AppState>) -> Response<Body> {
     match load_current_review(&state).await {
         Ok(review) => {
-            let mut overview = review_overview(&state.review_identity, &review);
+            let mut overview = review_overview(&state.review_identity, &review, local_author().id());
             overview.watch = watch_status(&state);
             Json(overview).into_response()
         }
@@ -1015,7 +1072,11 @@ async fn export_notes_markdown(State(state): State<AppState>) -> Response<Body> 
 )]
 async fn export_context(State(state): State<AppState>) -> Response<Body> {
     match load_current_review(&state).await {
-        Ok(review) => match context_json(&review, ContextSelection::Manifest, Some(MAX_CONTEXT_EXPORT_BYTES)) {
+        Ok(review) => match context_json(
+            &review,
+            ContextSelection::Manifest { reader: None },
+            Some(MAX_CONTEXT_EXPORT_BYTES),
+        ) {
             Ok(bytes) => download(bytes, "application/json; charset=utf-8", "mire-context.json"),
             Err(error) => protocol_problem(error),
         },
@@ -1127,13 +1188,13 @@ async fn static_asset(uri: Uri) -> Response<Body> {
     response
 }
 
-fn review_overview(identity: &str, review: &Review) -> ReviewOverview {
+fn review_overview(identity: &str, review: &Review, reader: &str) -> ReviewOverview {
     let findings = review.notes().iter().map(FindingSummary::from_note).collect::<Vec<_>>();
     let files = review
         .changeset()
         .files()
         .iter()
-        .map(|file| FileSummary::from_file(file, review))
+        .map(|file| FileSummary::from_file(file, review, reader))
         .collect::<Vec<_>>();
     let mut totals = ReviewTotals {
         files: files.len(),
@@ -1209,7 +1270,7 @@ fn reanchor_totals(review: &Review) -> ReanchorTotals {
 }
 
 impl FileSummary {
-    fn from_file(file: &FileDiff, review: &Review) -> Self {
+    fn from_file(file: &FileDiff, review: &Review, reader: &str) -> Self {
         let path = file_path(file);
         let open_findings = review
             .notes()
@@ -1218,13 +1279,16 @@ impl FileSummary {
             .count();
         Self {
             id: file.fingerprint().to_string(),
-            path: DisplayText::from_bytes(path),
+            path: PathText::from_bytes(path),
             status: format!("{:?}", file.status()).to_lowercase(),
             content_kind: match file.content() {
                 FileContent::Text { .. } => "text".to_owned(),
                 FileContent::Binary => "binary".to_owned(),
             },
             open_findings,
+            viewed: review
+                .viewed_mark(reader, file.canonical_path())
+                .map(viewed::ViewedState::from_mark),
         }
     }
 }
@@ -1239,10 +1303,8 @@ impl FileDetail {
         };
         Self {
             id: file.fingerprint().to_string(),
-            path: DisplayText::from_bytes(file_path(file)),
-            old_path: file
-                .old_side()
-                .map(|side| DisplayText::from_bytes(side.path.as_bytes())),
+            path: PathText::from_bytes(file_path(file)),
+            old_path: file.old_side().map(|side| PathText::from_bytes(side.path.as_bytes())),
             status: format!("{:?}", file.status()).to_lowercase(),
             content,
             findings: review
@@ -1285,7 +1347,7 @@ impl FindingSummary {
         let (anchor, anchor_state, navigable) = finding_location(note);
         Self {
             id: note.id().as_str().to_owned(),
-            path: DisplayText::from_bytes(anchor.path().as_bytes()),
+            path: PathText::from_bytes(anchor.path().as_bytes()),
             side: match anchor.side() {
                 mire_core::AnchorSide::Old => "old".to_owned(),
                 mire_core::AnchorSide::New => "new".to_owned(),
@@ -1307,7 +1369,7 @@ impl FindingDetail {
         let (anchor, anchor_state, navigable) = finding_location(note);
         Self {
             id: note.id().as_str().to_owned(),
-            path: DisplayText::from_bytes(anchor.path().as_bytes()),
+            path: PathText::from_bytes(anchor.path().as_bytes()),
             side: match anchor.side() {
                 mire_core::AnchorSide::Old => "old".to_owned(),
                 mire_core::AnchorSide::New => "new".to_owned(),
@@ -1333,6 +1395,13 @@ impl DisplayText {
     fn from_bytes(bytes: &[u8]) -> Self {
         let display = String::from_utf8_lossy(bytes);
         Self { lossy: matches!(display, std::borrow::Cow::Owned(_)), display: display.into_owned() }
+    }
+}
+
+impl PathText {
+    fn from_bytes(bytes: &[u8]) -> Self {
+        let DisplayText { display, lossy } = DisplayText::from_bytes(bytes);
+        Self { display, lossy, raw: viewed::encode_hex(bytes) }
     }
 }
 

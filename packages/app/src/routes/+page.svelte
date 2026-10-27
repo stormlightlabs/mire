@@ -9,10 +9,12 @@
 	import {
 		completionSummary,
 		defaultFindingFilters,
+		fileViewState,
 		filterFindings,
 		hasReviewMetadata,
 		reviewDescription,
-		reviewTitle
+		reviewTitle,
+		viewedRoute
 	} from '$lib/review';
 	import type {
 		FileDetail,
@@ -23,6 +25,7 @@
 		Problem,
 		RefreshResponse,
 		ReviewOverview,
+		ViewedResponse,
 		WatchStatus
 	} from '$lib/review';
 
@@ -36,7 +39,7 @@
 	let fileError = $state<string | null>(null);
 	let findingError = $state<string | null>(null);
 	let filters = $state({ ...defaultFindingFilters });
-	let viewedFileIds = $state<string[]>([]);
+	let viewedError = $state<string | null>(null);
 	let conflictRevision = $state<number | null>(null);
 	let refreshState = $state<RefreshState>('idle');
 	let finishReviewOpen = $state(false);
@@ -50,7 +53,9 @@
 	let streamAbort: AbortController | null = null;
 	let secret = '';
 
-	const completion = $derived(review ? completionSummary(review, viewedFileIds) : null);
+	const completion = $derived(review ? completionSummary(review) : null);
+	const activeSummary = $derived(review?.files.find((summary) => summary.id === activeFile) ?? null);
+	const activeViewState = $derived(activeSummary ? fileViewState(activeSummary) : 'unviewed');
 	const visibleFindings = $derived(review ? filterFindings(review.findings, filters) : []);
 	const title = $derived(reviewTitle(review));
 	const description = $derived(reviewDescription(review));
@@ -116,7 +121,6 @@
 	async function loadReview(): Promise<boolean> {
 		try {
 			review = await request<ReviewOverview>('/api/v1/review');
-			loadViewedFiles();
 			if (review.files[0]) await selectFile(review.files[0].id);
 			error = null;
 			return true;
@@ -148,7 +152,6 @@
 		if (!review) return;
 		try {
 			review = await request<ReviewOverview>('/api/v1/review');
-			loadViewedFiles();
 			conflictRevision = null;
 			if (activeFile) await selectFile(activeFile);
 		} catch (cause) {
@@ -222,7 +225,41 @@
 	async function handleEvent(data: string) {
 		const event = JSON.parse(data) as { kind?: string; watch?: WatchStatus };
 		if (event.kind === 'shutdown') return;
+		if (event.kind === 'viewed') {
+			await reloadOverview();
+			return;
+		}
 		await reloadReview();
+	}
+
+	/** Reloads the overview only. Viewed marks change it without changing any file's diff. */
+	async function reloadOverview() {
+		if (!review) return;
+		try {
+			review = await request<ReviewOverview>('/api/v1/review');
+		} catch (cause) {
+			error = handleErr(cause, 'The review could not be reloaded.');
+		}
+	}
+
+	async function toggleViewed() {
+		if (!review || !activeSummary) return;
+		viewedError = null;
+		const route = viewedRoute(activeSummary.path);
+		try {
+			if (activeViewState === 'viewed') {
+				await request<ViewedResponse>(route, { method: 'DELETE' });
+			} else {
+				await request<ViewedResponse>(route, {
+					method: 'PUT',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ fingerprint: activeSummary.id, revision: review.revision })
+				});
+			}
+		} catch (cause) {
+			viewedError = handleErr(cause, 'The viewed mark could not be saved.');
+		}
+		await reloadOverview();
 	}
 
 	async function selectFile(id: string, finding?: FindingSummary) {
@@ -231,7 +268,7 @@
 		fileError = null;
 		try {
 			file = await request<FileDetail>(`/api/v1/files/${encodeURIComponent(id)}`);
-			markViewed(id);
+			viewedError = null;
 			if (finding) window.setTimeout(() => scrollToFinding(finding.id));
 		} catch (cause) {
 			fileError = handleErr(cause, 'The file diff could not be loaded.');
@@ -286,32 +323,6 @@
 	async function applyFindingMutation(result: FindingMutation) {
 		activeFinding = result.finding;
 		await reloadReview();
-	}
-
-	function loadViewedFiles() {
-		if (!review) return;
-		try {
-			const stored = JSON.parse(localStorage.getItem(viewedStorageKey()) ?? '[]');
-			viewedFileIds = Array.isArray(stored)
-				? stored.filter((id): id is string => typeof id === 'string' && !!review?.files.some((file) => file.id === id))
-				: [];
-		} catch {
-			viewedFileIds = [];
-		}
-	}
-
-	function markViewed(fileId: string) {
-		if (!review || viewedFileIds.includes(fileId)) return;
-		viewedFileIds = [...viewedFileIds, fileId];
-		try {
-			localStorage.setItem(viewedStorageKey(), JSON.stringify(viewedFileIds));
-		} catch {
-			/**  Browser privacy settings can disable local storage; the review remains usable. */
-		}
-	}
-
-	function viewedStorageKey() {
-		return `mire:viewed-files:${review?.reviewIdentity ?? ''}`;
 	}
 
 	function navigateQueue(direction: 1 | -1) {
@@ -470,17 +481,23 @@
 				{activeFinding}
 				{findingError}
 				{theme}
+				viewState={activeViewState}
+				{viewedError}
+				onToggleViewed={toggleViewed}
 				onFindingClick={selectFinding}
 				onEditFinding={editFinding}
 				onDecideFinding={decideFinding} />
 		{:else}
-			<FileNavigator files={review.files} {activeFile} {viewedFileIds} onSelect={selectFile} />
+			<FileNavigator files={review.files} {activeFile} onSelect={selectFile} />
 			<DiffPane
 				{file}
 				{fileError}
 				{activeFinding}
 				{findingError}
 				{theme}
+				viewState={activeViewState}
+				{viewedError}
+				onToggleViewed={toggleViewed}
 				onFindingClick={selectFinding}
 				onEditFinding={editFinding}
 				onDecideFinding={decideFinding} />
@@ -499,7 +516,7 @@
 					<h2 id="files-drawer-heading">Changed files</h2>
 					<button onclick={() => (mobilePane = null)}>Close files</button>
 				</header>
-				<FileNavigator files={review.files} {activeFile} {viewedFileIds} drawer onSelect={selectFileFromDrawer} />
+				<FileNavigator files={review.files} {activeFile} drawer onSelect={selectFileFromDrawer} />
 			</section>
 		</Overlay>
 	{:else if review && isNarrow && mobilePane === 'findings'}

@@ -20,11 +20,12 @@ use crate::output_file::{OutputFileError, write_output_atomic};
 use crate::protocol::{
     ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, check_schema_major, context_json,
     import_error_json, import_result_json, notes_json, notes_markdown, protocol_error_json, review_status_json,
-    review_status_text, revision_conflict_json,
+    review_status_text, revision_conflict_json, viewed_cleared_json, viewed_rejection_json, viewed_result_json,
 };
 use crate::refresh::{RefreshError, refresh_review as refresh_review_file};
 use crate::review_file::{
-    DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, write_review_atomic_if_revision,
+    DEFAULT_MAX_REVIEW_FILE_BYTES, ReviewFileError, create_review_atomic, read_review, update_review_viewed,
+    write_review_atomic_if_revision,
 };
 use crate::serve::{self, ServeError};
 use crate::skill::{self, SkillError};
@@ -203,7 +204,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
         watch: false,
     }));
     match command {
-        Command::Context(ContextArgs { review, patch, file, hunk, max_bytes, format }) => {
+        Command::Context(ContextArgs { review, patch, file, hunk, max_bytes, reader, format }) => {
             let _ = format;
             let review = read_review(Path::new(&review)).map_err(AppError::ReviewFile)?;
             let selection = if patch {
@@ -213,7 +214,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
             } else if let Some(fingerprint) = hunk {
                 ContextSelection::Hunk(fingerprint)
             } else {
-                ContextSelection::Manifest
+                ContextSelection::Manifest { reader: reader.as_deref() }
             };
             write_bytes(&context_json(&review, selection, max_bytes).map_err(AppError::Protocol)?)
         }
@@ -271,6 +272,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
         }
         Command::Session(arguments) => execute_session(arguments),
         Command::Walkthrough(WalkthroughArgs { command }) => execute_walkthrough(command),
+        Command::File(FileArgs { command }) => execute_file(command),
         Command::Watch(WatchArgs { staged, revisions, paths, language }) => {
             let request = DiffRequest { staged, revisions, paths };
             let changeset = git::load_diff(request.clone()).map_err(AppError::Git)?;
@@ -417,12 +419,7 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
                 human_author: Some(local_author()),
                 ..mire_tui::AppOptions::default()
             },
-            |updated| {
-                let expected = ReviewRevision::new(updated.revision().get().saturating_sub(1))
-                    .map_err(|error| io::Error::other(error.to_string()))?;
-                write_review_atomic_if_revision(&review_path, expected, updated)
-                    .map_err(|error| io::Error::other(error.to_string()))
-            },
+            |write| save_terminal_write(&review_path, write),
             |force| {
                 let review_due = review_watcher.reload_due();
                 if let Some(error) = review_watcher.take_error() {
@@ -481,16 +478,27 @@ fn open_review(input: OsString, format: Option<OutputFormat>, watch: bool, theme
                 human_author: Some(local_author()),
                 ..mire_tui::AppOptions::default()
             },
-            |updated| {
-                let expected = ReviewRevision::new(updated.revision().get().saturating_sub(1))
-                    .map_err(|error| io::Error::other(error.to_string()))?;
-                write_review_atomic_if_revision(&review_path, expected, updated)
-                    .map_err(|error| io::Error::other(error.to_string()))
-            },
+            |write| save_terminal_write(&review_path, write),
             session.take_control(),
         )
         .map_err(AppError::Terminal)
     }
+}
+
+/// Writes one terminal change: a new revision through the revision check, or
+/// a viewed mark applied to the review file as stored.
+fn save_terminal_write(review_path: &Path, write: mire_tui::ReviewWrite<'_>) -> io::Result<()> {
+    match write {
+        mire_tui::ReviewWrite::Revision(updated) => {
+            let expected = ReviewRevision::new(updated.revision().get().saturating_sub(1))
+                .map_err(|error| io::Error::other(error.to_string()))?;
+            write_review_atomic_if_revision(review_path, expected, updated)
+        }
+        mire_tui::ReviewWrite::Viewed(change) => {
+            update_review_viewed(review_path, |review| change.apply(review)).map(|_| ())
+        }
+    }
+    .map_err(|error| io::Error::other(error.to_string()))
 }
 
 #[derive(Debug)]
@@ -738,6 +746,54 @@ fn import_notes(review_path: &OsStr, input: &OsStr, expected_revision: u64) -> R
     };
     write_mutation(Path::new(review_path), expected_revision, &updated)?;
     write_bytes(&import_result_json(&updated, imported).map_err(AppError::Protocol)?)
+}
+
+fn execute_file(command: FileCommand) -> Result<(), AppError> {
+    let (review_path, file, reader, mark) = match command {
+        FileCommand::Viewed(FileViewedArgs { review, file, fingerprint, revision, reader }) => {
+            (review, Some(file), reader, Some((fingerprint, revision)))
+        }
+        FileCommand::Unviewed(FileUnviewedArgs { review, file, all: _, reader }) => (review, file, reader, None),
+    };
+    let reader = reader.unwrap_or_else(|| local_author().id().to_owned());
+    let Some(file) = file else {
+        return clear_all_viewed(Path::new(&review_path), &reader);
+    };
+    let path = BytePath::new(file.as_encoded_bytes()).map_err(|error| viewed_rejection("invalid_path", &error))?;
+    let result = update_review_viewed(Path::new(&review_path), |review| match mark {
+        Some((fingerprint, revision)) => {
+            review.mark_viewed(&reader, path.clone(), fingerprint, ReviewRevision::new(revision)?)
+        }
+        None => review.unmark_viewed(&reader, &path),
+    });
+    let updated = viewed_update(result)?;
+    let status = if mark.is_some() { "viewed" } else { "unviewed" };
+    write_bytes(&viewed_result_json(&updated, &reader, &path, status).map_err(AppError::Protocol)?)
+}
+
+fn clear_all_viewed(review_path: &Path, reader: &str) -> Result<(), AppError> {
+    let mut cleared = 0;
+    let result = update_review_viewed(review_path, |review| {
+        let (updated, count) = review.unmark_all_viewed(reader)?;
+        cleared = count;
+        Ok(updated)
+    });
+    let updated = viewed_update(result)?;
+    write_bytes(&viewed_cleared_json(&updated, reader, cleared).map_err(AppError::Protocol)?)
+}
+
+fn viewed_update(result: Result<Review, ReviewFileError>) -> Result<Review, AppError> {
+    match result {
+        Ok(updated) => Ok(updated),
+        Err(ReviewFileError::MarkRejected(error)) => Err(viewed_rejection(error.error_code(), &error)),
+        Err(error) => Err(AppError::WriteReviewFile(error)),
+    }
+}
+
+fn viewed_rejection(code: &str, error: &dyn std::fmt::Display) -> AppError {
+    viewed_rejection_json(code, &error.to_string())
+        .map(|report| AppError::MutationRejected { report })
+        .unwrap_or_else(AppError::Protocol)
 }
 
 fn execute_walkthrough(command: WalkthroughCommand) -> Result<(), AppError> {

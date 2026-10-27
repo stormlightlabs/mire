@@ -24,7 +24,7 @@ expression: "fixture.json(&[\"review\", \"status\", \"review.json\", \"--format\
   "review_revision": 2,
   "schema_version": {
     "major": 1,
-    "minor": 4
+    "minor": 5
   },
   "source": {
     "kind": "git",

@@ -225,6 +225,7 @@ pub fn help_entries() -> impl Iterator<Item = (&'static str, &'static str)> {
             ("v / c", "select a range / create note"),
             ("p / P", "next / previous note"),
             ("e", "edit selected note"),
+            ("m", "mark selected file viewed / not viewed"),
             ("r / d / o / a", "resolve / dismiss / reopen / accept risk"),
             ("f", "filter notes"),
             ("left disclosure", "collapse or expand a file or hunk"),

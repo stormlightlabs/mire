@@ -106,6 +106,7 @@ These controls are available when you open a durable review with
 | `d`       | Dismiss the selected note                                  |
 | `o`       | Reopen the selected note                                   |
 | `a`       | Accept the risk recorded by the selected note              |
+| `m`       | Mark the selected file viewed, or clear its mark           |
 | `f`       | Open note filters                                          |
 | `Ctrl-S`  | Save pending review changes or retry a failed save         |
 

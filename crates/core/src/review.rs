@@ -9,20 +9,22 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
-    BytePath, ByteString, Changeset, ChangesetSource, DiffLine, FileContent, Fingerprint, GitOperation, LineNumber,
-    SchemaVersion,
+    BytePath, ByteString, Changeset, ChangesetSource, DiffLine, FileContent, FileDiff, Fingerprint, GitOperation,
+    LineNumber, SchemaVersion,
 };
 
 mod reanchor;
+mod viewed;
 mod walkthrough;
 
+pub use viewed::{MAX_VIEWED_MARKS, MAX_VIEWED_READERS, ViewedMap, ViewedMark};
 pub use walkthrough::{
     HunkLocation, MAX_STEP_TITLE_BYTES, MAX_WALKTHROUGH_ANCHORS, MAX_WALKTHROUGH_STEPS, MAX_WALKTHROUGH_TEXT_BYTES,
     StepAnchor, StepId, StepInput, StepLocation, Walkthrough, WalkthroughCoverage, WalkthroughInput, WalkthroughStep,
 };
 
 /// The review-file JSON schema emitted by this version of Mire.
-pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 5 };
+pub const CURRENT_REVIEW_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 6 };
 /// Maximum number of notes accepted in one review file.
 pub const MAX_REVIEW_NOTES: usize = 10_000;
 /// Maximum UTF-8 byte length of one note body.
@@ -183,6 +185,19 @@ pub enum ReviewError {
     /// One walkthrough step failed validation.
     #[error("walkthrough step {index}: {reason}")]
     InvalidStep { index: usize, reason: Box<ReviewError> },
+    /// A viewed mark names a fingerprint the file did not have at that
+    /// revision, or a revision Mire cannot check.
+    #[error("the file did not have this fingerprint at this review revision")]
+    ViewedMismatch,
+    /// One reader holds more viewed marks than the limit.
+    #[error("reader holds {actual} viewed marks; limit is {limit} marks")]
+    TooManyViewedMarks { actual: usize, limit: usize },
+    /// The review holds viewed marks for more readers than the limit.
+    #[error("review holds viewed marks for {actual} readers; limit is {limit} readers")]
+    TooManyViewedReaders { actual: usize, limit: usize },
+    /// One reader holds two viewed marks for the same path.
+    #[error("reader {reader:?} holds more than one viewed mark for {path:?}")]
+    DuplicateViewedPath { reader: String, path: String },
 }
 
 impl ReviewError {
@@ -244,6 +259,10 @@ impl ReviewError {
             ReviewError::ForwardStepDependency(_) => "forward_step_dependency",
             ReviewError::DuplicateStepDependency(_) => "duplicate_step_dependency",
             ReviewError::InvalidStep { .. } => "invalid_walkthrough_step",
+            ReviewError::ViewedMismatch => "viewed_mismatch",
+            ReviewError::TooManyViewedMarks { .. } => "too_many_viewed_marks",
+            ReviewError::TooManyViewedReaders { .. } => "too_many_viewed_readers",
+            ReviewError::DuplicateViewedPath { .. } => "duplicate_viewed_path",
         }
     }
 }
@@ -1067,6 +1086,8 @@ pub struct Review {
     events: Vec<NoteEvent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     walkthrough: Option<Walkthrough>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    viewed: ViewedMap,
     #[serde(default, flatten)]
     extensions: BTreeMap<String, Value>,
 }
@@ -1086,6 +1107,7 @@ impl Review {
             notes,
             events,
             walkthrough: None,
+            viewed: BTreeMap::new(),
             extensions: BTreeMap::new(),
         };
         review.canonicalize();
@@ -1207,6 +1229,74 @@ impl Review {
             .map(|walkthrough| walkthrough::coverage(&self.changeset, walkthrough))
     }
 
+    /// Returns every reader's viewed marks, keyed by reader id.
+    pub const fn viewed(&self) -> &ViewedMap {
+        &self.viewed
+    }
+
+    /// Returns one reader's viewed marks, sorted by path.
+    pub fn viewed_marks(&self, reader: &str) -> &[ViewedMark] {
+        self.viewed.get(reader).map_or(&[], Vec::as_slice)
+    }
+
+    /// Returns a reader's viewed mark for a path, whether or not the file has
+    /// changed since.
+    pub fn viewed_mark(&self, reader: &str, path: &BytePath) -> Option<&ViewedMark> {
+        let marks = self.viewed_marks(reader);
+        marks
+            .binary_search_by(|mark| mark.path().cmp(path))
+            .ok()
+            .map(|index| &marks[index])
+    }
+
+    /// Reports whether a reader has viewed a file as it is now: the reader's
+    /// mark for its path holds its current fingerprint.
+    pub fn is_viewed(&self, reader: &str, file: &FileDiff) -> bool {
+        self.viewed_mark(reader, file.canonical_path())
+            .is_some_and(|mark| mark.fingerprint() == file.fingerprint())
+    }
+
+    /// Marks a file viewed for a reader, without advancing the revision.
+    ///
+    /// `fingerprint` and `revision` name the file the reader saw. A file that
+    /// did not have that fingerprint at that revision fails with
+    /// [`ReviewError::ViewedMismatch`]. A reader may hold
+    /// [`MAX_VIEWED_MARKS`] marks, and a review may hold marks for
+    /// [`MAX_VIEWED_READERS`] readers; the limits apply only when a mark adds
+    /// a path or a reader, so a review past them still re-marks and clears.
+    /// The reader id follows the [`Author`] id rule.
+    pub fn mark_viewed(
+        &self, reader: &str, path: BytePath, fingerprint: Fingerprint, revision: ReviewRevision,
+    ) -> Result<Self> {
+        viewed::mark(self, reader, path, fingerprint, revision)
+    }
+
+    /// Clears a reader's viewed mark for a path, without advancing the
+    /// revision. The path need not be in the changeset. A path without a mark
+    /// leaves the review unchanged. Clearing a reader's last mark drops the
+    /// reader, freeing its slot.
+    pub fn unmark_viewed(&self, reader: &str, path: &BytePath) -> Result<Self> {
+        viewed::unmark(self, reader, path)
+    }
+
+    /// Clears every viewed mark a reader holds, without advancing the
+    /// revision, and drops the reader. Returns the review and the number of
+    /// marks cleared.
+    pub fn unmark_all_viewed(&self, reader: &str) -> Result<(Self, usize)> {
+        viewed::unmark_all(self, reader)
+    }
+
+    /// Replaces this review's viewed marks with those of `stored`.
+    ///
+    /// Marks do not advance the revision, so a write prepared from an older
+    /// read takes the marks of the file it replaces. Only mark operations
+    /// change them.
+    #[must_use]
+    pub fn with_viewed_from(mut self, stored: &Review) -> Self {
+        self.viewed = stored.viewed.clone();
+        self
+    }
+
     /// Validates and appends a batch of notes without partially applying it.
     pub fn import_notes(&self, imported: Vec<ReviewNote>) -> std::result::Result<Self, NoteImportError> {
         if imported.is_empty() {
@@ -1260,6 +1350,7 @@ impl Review {
         review.title = self.title.clone();
         review.description = self.description.clone();
         review.walkthrough = self.walkthrough.clone();
+        review.viewed = self.viewed.clone();
         review.extensions = self.extensions.clone();
         Ok(review)
     }
@@ -1412,12 +1503,14 @@ impl Review {
         if let Some(walkthrough) = &self.walkthrough {
             walkthrough::validate_walkthrough(&self.changeset, walkthrough)?;
         }
+        viewed::validate(&self.viewed)?;
         Ok(())
     }
 
     fn canonicalize(&mut self) {
         self.notes.sort_by(|left, right| left.id.cmp(&right.id));
         self.events.sort_by_key(NoteEvent::sequence);
+        viewed::canonicalize(&mut self.viewed);
     }
 
     fn next_revision(&self) -> Result<ReviewRevision> {
@@ -1435,6 +1528,7 @@ impl Review {
         review.title = self.title.clone();
         review.description = self.description.clone();
         review.walkthrough = self.walkthrough.clone();
+        review.viewed = self.viewed.clone();
         review.extensions = self.extensions.clone();
         Ok(review)
     }
@@ -1462,6 +1556,7 @@ impl<'de> Deserialize<'de> for Review {
             notes: wire.notes,
             events: wire.events,
             walkthrough: wire.walkthrough,
+            viewed: wire.viewed,
             extensions: wire.extensions,
         };
         if let Some(walkthrough) = &mut review.walkthrough {
@@ -1488,6 +1583,8 @@ struct ReviewWire {
     events: Vec<NoteEvent>,
     #[serde(default)]
     walkthrough: Option<Walkthrough>,
+    #[serde(default)]
+    viewed: ViewedMap,
     #[serde(default, flatten)]
     extensions: BTreeMap<String, Value>,
 }

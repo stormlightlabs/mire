@@ -5,13 +5,14 @@ use mire_core::{
     AnchorSide, AnnotationKind, Author, BytePath, Changeset, ChangesetSource, FileContent, FileDiff, Fingerprint, Hunk,
     LineKind, LineNumber, LineRange, NoteApplyError, NoteEvent, NoteEventKind, NoteImportError, NoteInput,
     NoteSeverity, NoteStatus, Provenance, ReanchorEvidence, ReanchorOutcome, Review, ReviewNote, SchemaVersion,
+    ViewedMark,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
 
 /// Protocol schema emitted by non-interactive review commands.
-pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 4 };
+pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 5 };
 
 /// The keys [`LocationFields`] reads, aliases included. Keep it in step with
 /// the struct: walkthrough steps reject any other key.
@@ -24,8 +25,12 @@ type Result<T> = std::result::Result<T, ProtocolError>;
 /// A bounded context selection.
 #[derive(Clone, Copy, Debug)]
 pub enum ContextSelection<'a> {
-    /// File and hunk identities without source lines.
-    Manifest,
+    /// File and hunk identities without source lines, with one reader's
+    /// viewed marks when a reader is named.
+    Manifest {
+        /// Reader whose viewed marks the manifest includes.
+        reader: Option<&'a str>,
+    },
     /// The complete normalized patch capture.
     Patch,
     /// One complete normalized file diff.
@@ -86,6 +91,8 @@ enum ContextPayload<'a> {
         files: Vec<FileManifest<'a>>,
         notes: Vec<NoteSummary<'a>>,
         has_walkthrough: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        viewed: Option<ReaderMarks<'a>>,
     },
     Patch {
         changeset: &'a Changeset,
@@ -316,6 +323,12 @@ impl<'a> From<&'a ReviewNote> for NoteSummary<'a> {
 }
 
 #[derive(Serialize)]
+struct ReaderMarks<'a> {
+    reader: &'a str,
+    marks: &'a [ViewedMark],
+}
+
+#[derive(Serialize)]
 struct NoteDocument<'a> {
     schema_version: SchemaVersion,
     review_revision: u64,
@@ -383,12 +396,13 @@ impl Write for BoundedBuffer {
 /// Serializes compact or explicitly requested review context.
 pub fn context_json(review: &Review, selection: ContextSelection<'_>, limit: Option<usize>) -> Result<Vec<u8>> {
     let payload = match selection {
-        ContextSelection::Manifest => ContextPayload::Manifest {
+        ContextSelection::Manifest { reader } => ContextPayload::Manifest {
             title: review.title(),
             description: review.description(),
             files: review.changeset().files().iter().map(FileManifest::from).collect(),
             notes: review.notes().iter().map(NoteSummary::from).collect(),
             has_walkthrough: review.walkthrough().is_some(),
+            viewed: reader.map(|reader| ReaderMarks { reader, marks: review.viewed_marks(reader) }),
         },
         ContextSelection::Patch => ContextPayload::Patch { changeset: review.changeset() },
         ContextSelection::File(path) => {
@@ -632,6 +646,42 @@ pub fn import_error_json(error: &NoteImportError) -> Result<Vec<u8>> {
         })
         .collect::<Vec<_>>();
     rejection_json(failures)
+}
+
+/// Serializes the result of a viewed mark change: the reader's mark for the
+/// path after the change, or `null` once it is cleared.
+pub fn viewed_result_json(review: &Review, reader: &str, path: &BytePath, status: &str) -> Result<Vec<u8>> {
+    let value = json!({
+        "schema_version": CURRENT_PROTOCOL_SCHEMA_VERSION,
+        "status": status,
+        "review_revision": review.revision().get(),
+        "reader": reader,
+        "path": path,
+        "mark": review.viewed_mark(reader, path),
+    });
+    let mut bytes = serde_json::to_vec(&value).map_err(ProtocolError::Serialize)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+/// Serializes the result of clearing every viewed mark a reader held.
+pub fn viewed_cleared_json(review: &Review, reader: &str, cleared: usize) -> Result<Vec<u8>> {
+    let value = json!({
+        "schema_version": CURRENT_PROTOCOL_SCHEMA_VERSION,
+        "status": "unviewed",
+        "review_revision": review.revision().get(),
+        "reader": reader,
+        "cleared": cleared,
+    });
+    let mut bytes = serde_json::to_vec(&value).map_err(ProtocolError::Serialize)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+/// Serializes a rejected viewed mark change with its failure code, such as
+/// `viewed_mismatch` or `invalid_path`.
+pub fn viewed_rejection_json(code: &str, error: &str) -> Result<Vec<u8>> {
+    rejection_json(vec![json!({ "code": code, "error": error })])
 }
 
 /// Serializes a write rejected because the review file moved past the

@@ -13,7 +13,9 @@ use mire_core::{Changeset, Review};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use crate::{App, AppOptions, LiveAction, LiveControl, LiveResponse, Theme, WalkthroughAction, WatchUpdate, render};
+use crate::{
+    App, AppOptions, LiveAction, LiveControl, LiveResponse, ReviewWrite, Theme, WalkthroughAction, WatchUpdate, render,
+};
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -88,7 +90,7 @@ pub fn run_review<F, E>(
     review: &Review, options: AppOptions, mut save: F, control: Option<LiveControl>,
 ) -> io::Result<()>
 where
-    F: FnMut(&Review) -> Result<(), E>,
+    F: FnMut(ReviewWrite<'_>) -> Result<(), E>,
     E: std::fmt::Display,
 {
     let theme = Theme::detect(options.theme);
@@ -139,7 +141,7 @@ pub fn run_review_watch<F, E, R>(
     review: Review, options: AppOptions, mut save: F, mut reload: R, control: Option<LiveControl>,
 ) -> io::Result<()>
 where
-    F: FnMut(&Review) -> Result<(), E>,
+    F: FnMut(ReviewWrite<'_>) -> Result<(), E>,
     E: std::fmt::Display,
     R: FnMut(bool) -> WatchUpdate<Review>,
 {
@@ -220,7 +222,7 @@ fn run_review_loop<F, E>(
     save: &mut F, control: Option<&LiveControl>,
 ) -> io::Result<()>
 where
-    F: FnMut(&Review) -> Result<(), E>,
+    F: FnMut(ReviewWrite<'_>) -> Result<(), E>,
     E: std::fmt::Display,
 {
     terminal.draw(|frame| render(frame, &App::loading(), theme))?;
@@ -240,7 +242,7 @@ fn run_review_watch_loop<F, E, R>(
     save: &mut F, reload: &mut R, control: Option<&LiveControl>,
 ) -> io::Result<()>
 where
-    F: FnMut(&Review) -> Result<(), E>,
+    F: FnMut(ReviewWrite<'_>) -> Result<(), E>,
     E: std::fmt::Display,
     R: FnMut(bool) -> WatchUpdate<Review>,
 {
@@ -343,15 +345,19 @@ fn handle_live_requests(app: &mut App<'_>, control: Option<&LiveControl>, reload
 
 fn finish_requested_save<F, E>(app: &mut App<'_>, save: &mut F)
 where
-    F: FnMut(&Review) -> Result<(), E>,
+    F: FnMut(ReviewWrite<'_>) -> Result<(), E>,
     E: std::fmt::Display,
 {
+    if let Some(change) = app.viewed_change().cloned() {
+        let result = save(ReviewWrite::Viewed(&change)).map_err(|error| error.to_string());
+        app.finish_viewed(result);
+    }
     if !app.save_requested() {
         return;
     }
     let result = app
         .review()
         .ok_or_else(|| "editable session lost its review state".to_owned())
-        .and_then(|review| save(review).map_err(|error| error.to_string()));
+        .and_then(|review| save(ReviewWrite::Revision(review)).map_err(|error| error.to_string()));
     app.finish_save(result);
 }

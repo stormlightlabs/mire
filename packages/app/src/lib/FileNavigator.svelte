@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
-	import { formatPath, type FileSummary } from './review';
+	import { fileViewState, formatPath, type FileSummary } from './review';
 
 	type TreeRow =
 		| { kind: 'directory'; path: string; name: string; depth: number; ancestors: string[] }
@@ -9,16 +9,16 @@
 	let {
 		files,
 		activeFile,
-		viewedFileIds,
 		drawer = false,
 		onSelect
 	}: {
 		files: FileSummary[];
 		activeFile: string | null;
-		viewedFileIds: string[];
 		drawer?: boolean;
 		onSelect: (id: string) => void;
 	} = $props();
+
+	const viewedLabels = { viewed: ' · viewed', changed: ' · changed since viewed', unviewed: '' };
 
 	let query = $state('');
 	const visibleFiles = $derived(
@@ -111,9 +111,7 @@
 					<span class="i-lucide-file-code-2 tree-icon"></span>
 					<span class="path" title={formatPath(row.file.path)}>{row.name}</span>
 					<span class="file-meta"
-						>{row.file.status} · {row.file.openFindings} open{viewedFileIds.includes(row.file.id)
-							? ' · viewed'
-							: ''}</span>
+						>{row.file.status} · {row.file.openFindings} open{viewedLabels[fileViewState(row.file)]}</span>
 				</button>
 			{/if}
 		{:else}

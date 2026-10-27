@@ -17,6 +17,7 @@ use crate::notes::{EditorField, EditorTarget, LineSelection, NoteEditor};
 use crate::stream::{CollapseState, LayoutMode, ReviewStream, RowAnchor, RowKey};
 use crate::syntax::SyntaxCache;
 use crate::theme::ThemeFamily;
+use crate::viewed::{self, FileViewed, ViewedChange};
 use crate::walkthrough::{WalkthroughPosition, locate_anchor, pane_height, pane_line_count};
 
 const DEFAULT_TERMINAL_HEIGHT: u16 = 24;
@@ -211,6 +212,7 @@ pub struct App<'a> {
     save_requested: bool,
     save_error: Option<String>,
     close_editor_after_save: bool,
+    viewed_pending: Option<(ViewedChange, Review)>,
     dirty: bool,
     quit_after_save: bool,
     watch_state: Option<WatchState>,
@@ -625,6 +627,33 @@ impl<'a> App<'a> {
         }
     }
 
+    /// Returns the viewed mark change waiting for the persistence boundary.
+    pub fn viewed_change(&self) -> Option<&ViewedChange> {
+        self.viewed_pending.as_ref().map(|(change, _)| change)
+    }
+
+    /// Completes a viewed mark write. A failed write restores the marks shown
+    /// before the change and reports the error.
+    pub fn finish_viewed(&mut self, result: Result<(), String>) {
+        let Some((_, previous)) = self.viewed_pending.take() else {
+            return;
+        };
+        if let Err(error) = result {
+            self.review = Some(previous);
+            self.interaction_error = Some(error);
+        }
+    }
+
+    /// Reports whether the session's reader has viewed one changed file, or
+    /// `None` when no review file is open.
+    pub fn file_viewed(&self, file: usize) -> Option<FileViewed> {
+        let (Some(review), AppState::Ready(stream)) = (&self.review, &self.state) else {
+            return None;
+        };
+        let file = stream.changeset().files().get(file)?;
+        Some(viewed::file_viewed(review, self.author.id(), file))
+    }
+
     /// Returns the active range label, if range selection is in progress.
     pub fn selection_label(&self) -> Option<String> {
         let AppState::Ready(stream) = &self.state else {
@@ -668,7 +697,7 @@ impl<'a> App<'a> {
 
     /// Reports whether replacing an editable review would preserve all unsaved work.
     pub const fn can_reload(&self) -> bool {
-        !self.dirty && !self.save_requested && self.editor.is_none()
+        !self.dirty && !self.save_requested && self.editor.is_none() && self.viewed_pending.is_none()
     }
 
     /// Reports whether local presentation control would interrupt text entry or unsaved review work.
@@ -1128,6 +1157,7 @@ impl<'a> App<'a> {
             save_requested: false,
             save_error: None,
             close_editor_after_save: false,
+            viewed_pending: None,
             dirty: false,
             quit_after_save: false,
             watch_state: None,
@@ -1429,6 +1459,7 @@ impl<'a> App<'a> {
             KeyCode::Char('d') => self.change_selected_note_status(NoteStatus::Dismissed),
             KeyCode::Char('o') => self.change_selected_note_status(NoteStatus::Open),
             KeyCode::Char('a') => self.change_selected_note_status(NoteStatus::AcceptedRisk),
+            KeyCode::Char('m') => self.toggle_selected_file_viewed(),
             _ => return false,
         }
         true
@@ -1650,6 +1681,28 @@ impl<'a> App<'a> {
                 self.save_requested = true;
                 self.interaction_error = None;
                 self.rebuild_stream(self.current_anchor());
+            }
+            Err(error) => self.interaction_error = Some(error.to_string()),
+        }
+    }
+
+    fn toggle_selected_file_viewed(&mut self) {
+        let (Some(review), AppState::Ready(stream)) = (&self.review, &self.state) else {
+            return;
+        };
+        if self.dirty || self.save_requested || self.viewed_pending.is_some() {
+            self.interaction_error = Some("save the review before marking files viewed".to_owned());
+            return;
+        }
+        let Some(file) = stream.changeset().files().get(self.selected_file) else {
+            return;
+        };
+        let change = viewed::toggle(review, self.author.id(), file);
+        match change.apply(review) {
+            Ok(updated) => {
+                let previous = self.review.replace(updated).expect("an editable review is open");
+                self.viewed_pending = Some((change, previous));
+                self.interaction_error = None;
             }
             Err(error) => self.interaction_error = Some(error.to_string()),
         }
@@ -3083,5 +3136,36 @@ mod tests {
     fn review() -> Review {
         let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
         Review::new(ReviewRevision::new(1).unwrap(), changeset, Vec::new(), Vec::new()).unwrap()
+    }
+
+    #[test]
+    fn a_failed_viewed_write_restores_the_file_list_and_reports_the_error() {
+        let changeset = mire_core::parse_patch(
+            b"--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n",
+            mire_core::ChangesetSource::Patch { label: None },
+            mire_core::PatchLimits::default(),
+        )
+        .unwrap();
+        let review = Review::new(
+            mire_core::ReviewRevision::new(1).unwrap(),
+            changeset,
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap();
+        let mut app = App::review_with_options(&review, AppOptions::default());
+        app.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE));
+        assert_eq!(app.file_viewed(0), Some(FileViewed::Viewed));
+        assert!(!app.can_reload());
+        app.finish_viewed(Err("viewed_mismatch".to_owned()));
+        assert_eq!(app.file_viewed(0), Some(FileViewed::NotViewed));
+        assert_eq!(app.note_error(), Some("viewed_mismatch"));
+        assert!(app.viewed_change().is_none());
+        assert!(app.can_reload());
+
+        let mut plain = App::ready(review.changeset());
+        plain.handle_key(KeyEvent::new(KeyCode::Char('m'), KeyModifiers::NONE));
+        assert_eq!(plain.file_viewed(0), None);
+        assert!(plain.viewed_change().is_none());
     }
 }

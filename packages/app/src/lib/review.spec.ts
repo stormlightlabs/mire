@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { completionSummary, hasReviewMetadata, reviewDescription, reviewTitle, type ReviewOverview } from './review';
+import {
+	completionSummary,
+	fileViewState,
+	hasReviewMetadata,
+	reviewDescription,
+	reviewTitle,
+	viewedRoute,
+	type ReviewOverview
+} from './review';
 
 function review(): ReviewOverview {
 	return {
@@ -12,17 +20,19 @@ function review(): ReviewOverview {
 		files: [
 			{
 				id: 'first',
-				path: { display: 'first.rs', lossy: false },
+				path: { display: 'first.rs', lossy: false, raw: '66697273742e7273' },
 				status: 'modified',
 				contentKind: 'text',
-				openFindings: 0
+				openFindings: 0,
+				viewed: { fingerprint: 'first', revision: 1 }
 			},
 			{
 				id: 'second',
-				path: { display: 'second.rs', lossy: false },
+				path: { display: 'second.rs', lossy: false, raw: '7365636f6e642e7273' },
 				status: 'modified',
 				contentKind: 'text',
-				openFindings: 1
+				openFindings: 1,
+				viewed: null
 			}
 		],
 		findings: [],
@@ -35,10 +45,33 @@ function review(): ReviewOverview {
 }
 
 describe('completionSummary', () => {
-	it('combines local viewed files with durable review readiness', () => {
-		const summary = completionSummary(review(), ['first']);
+	it('combines viewed marks with review readiness', () => {
+		const summary = completionSummary(review());
 
 		expect(summary).toEqual({ ready: false, unviewedFiles: 1, openFindings: 1, unsafeAnchors: 0 });
+	});
+
+	it('counts a file that changed since it was viewed as unviewed', () => {
+		const changed = review();
+		changed.files[0].viewed = { fingerprint: 'older', revision: 1 };
+		changed.files[1].viewed = { fingerprint: 'second', revision: 1 };
+		changed.readiness = { ready: true, openFindings: 0, unsafeAnchors: 0 };
+
+		expect(completionSummary(changed)).toEqual({ ready: false, unviewedFiles: 1, openFindings: 0, unsafeAnchors: 0 });
+		changed.files[0].viewed = { fingerprint: 'first', revision: 2 };
+		expect(completionSummary(changed).ready).toBe(true);
+	});
+});
+
+describe('viewed state', () => {
+	it('compares the mark with the current fingerprint', () => {
+		expect(fileViewState({ id: 'abc', viewed: null })).toBe('unviewed');
+		expect(fileViewState({ id: 'abc', viewed: { fingerprint: 'abc', revision: 3 } })).toBe('viewed');
+		expect(fileViewState({ id: 'abc', viewed: { fingerprint: 'old', revision: 2 } })).toBe('changed');
+	});
+
+	it('addresses a path by its raw hex bytes', () => {
+		expect(viewedRoute({ display: 'a�', lossy: true, raw: '61ff' })).toBe('/api/v1/viewed?path=61ff');
 	});
 });
 

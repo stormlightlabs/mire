@@ -53,6 +53,10 @@ pub enum ReviewFileError {
     /// The destination directory could not be synchronized after replacement.
     #[error("review file {path:?} was replaced, but its directory could not be synchronized: {source}")]
     SyncDirectory { path: PathBuf, source: io::Error },
+    /// The review rejected a viewed mark change, such as one that names a
+    /// fingerprint the file did not have.
+    #[error("viewed mark was rejected: {0}")]
+    MarkRejected(ReviewError),
 }
 
 /// Reads and validates a bounded JSON review file.
@@ -95,6 +99,10 @@ pub fn write_review_atomic(path: impl AsRef<Path>, review: &Review) -> Result<()
 }
 
 /// Atomically replaces a review only when its stored revision matches `expected`.
+///
+/// Viewed marks do not advance the revision, so the written review takes the
+/// marks of the file on disk, read under the review lock. A mark that landed
+/// after the caller read the file survives the write.
 pub fn write_review_atomic_if_revision(
     path: impl AsRef<Path>, expected: ReviewRevision, review: &Review,
 ) -> Result<(), ReviewFileError> {
@@ -104,9 +112,37 @@ pub fn write_review_atomic_if_revision(
     if current.revision() != expected {
         return Err(ReviewFileError::RevisionConflict { expected: expected.get(), actual: current.revision().get() });
     }
-    let result = write_review_atomic(path, review);
+    let review = review.clone().with_viewed_from(&current);
+    let result = write_review_atomic(path, &review);
     drop(lock);
     result
+}
+
+/// Changes viewed marks under the review lock and atomically replaces the file.
+///
+/// `change` receives the review as stored and returns it with its marks
+/// changed, such as with [`Review::mark_viewed`]. A rejected change fails with
+/// [`ReviewFileError::MarkRejected`]. A change that leaves the review as it was
+/// writes nothing. Returns the review as stored afterwards.
+pub fn update_review_viewed<F>(path: impl AsRef<Path>, change: F) -> Result<Review, ReviewFileError>
+where
+    F: FnOnce(&Review) -> Result<Review, ReviewError>,
+{
+    let path = path.as_ref();
+    let lock = ReviewLock::acquire(path)?;
+    let current = read_review(path)?;
+    let updated = change(&current).map_err(ReviewFileError::MarkRejected)?;
+    if updated.revision() != current.revision() {
+        return Err(ReviewFileError::RevisionConflict {
+            expected: current.revision().get(),
+            actual: updated.revision().get(),
+        });
+    }
+    if updated != current {
+        write_review_atomic(path, &updated)?;
+    }
+    drop(lock);
+    Ok(updated)
 }
 
 /// Creates a validated review atomically and refuses to replace any existing entry.
@@ -364,6 +400,82 @@ mod tests {
             ReviewFileError::RevisionConflict { expected: 1, actual: 2 }
         ));
         assert_eq!(read_review(&path).unwrap(), first);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn refresh_and_note_writes_keep_marks_that_landed_after_the_read() {
+        use mire_core::{
+            AnchorSide, AnnotationKind, Author, LineNumber, LineRange, NoteInput, NoteSeverity, PatchLimits,
+            Provenance, parse_patch,
+        };
+
+        let directory = test_directory();
+        let path = directory.join("review.json");
+        let capture = |content: &str| {
+            parse_patch(
+                format!("--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+{content}\n").as_bytes(),
+                ChangesetSource::Patch { label: None },
+                PatchLimits::default(),
+            )
+            .unwrap()
+        };
+        let original = Review::new(ReviewRevision::new(1).unwrap(), capture("new"), Vec::new(), Vec::new()).unwrap();
+        create_review_atomic(&path, &original).unwrap();
+        let file = original.changeset().files()[0].clone();
+        let mark = |reader: &'static str, file: mire_core::FileDiff| {
+            update_review_viewed(&path, move |review| {
+                review.mark_viewed(
+                    reader,
+                    file.canonical_path().clone(),
+                    file.fingerprint(),
+                    review.revision(),
+                )
+            })
+        };
+
+        let snapshot = read_review(&path).unwrap();
+        let marked = mark("ana", file.clone()).unwrap();
+        assert_eq!(marked.revision(), original.revision());
+        let refreshed = snapshot.reanchor(capture("newer")).unwrap();
+        assert!(refreshed.viewed().is_empty());
+        write_review_atomic_if_revision(&path, snapshot.revision(), &refreshed).unwrap();
+        let stored = read_review(&path).unwrap();
+        assert_eq!(stored.revision().get(), 2);
+        assert_eq!(
+            stored.viewed_mark("ana", file.canonical_path()).unwrap().fingerprint(),
+            file.fingerprint()
+        );
+        assert!(!stored.is_viewed("ana", &stored.changeset().files()[0]));
+
+        let snapshot = stored;
+        let current = snapshot.changeset().files()[0].clone();
+        mark("ben", current.clone()).unwrap();
+        let line = LineNumber::new(1).unwrap();
+        let note = NoteInput::new(
+            file.canonical_path().clone(),
+            AnchorSide::New,
+            LineRange::new(line, line).unwrap(),
+            Author::new("agent", None).unwrap(),
+            Provenance::Agent { producer: "test".to_owned() },
+            NoteSeverity::Low,
+            AnnotationKind::Comment,
+            "Check this".to_owned(),
+        )
+        .unwrap();
+        let noted = snapshot.apply_notes(vec![note]).unwrap();
+        write_review_atomic_if_revision(&path, snapshot.revision(), &noted).unwrap();
+        let stored = read_review(&path).unwrap();
+        assert_eq!(stored.notes().len(), 1);
+        assert!(stored.is_viewed("ben", &current));
+        assert!(stored.viewed_mark("ana", file.canonical_path()).is_some());
+
+        let error = mark("ana", file).unwrap_err();
+        assert!(matches!(
+            error,
+            ReviewFileError::MarkRejected(ReviewError::ViewedMismatch)
+        ));
+        assert_eq!(read_review(&path).unwrap(), stored);
         fs::remove_dir_all(directory).unwrap();
     }
 

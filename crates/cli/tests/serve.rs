@@ -148,6 +148,15 @@ impl Server {
     fn origin(&self) -> String {
         format!("http://{}", self.address)
     }
+
+    /// Replaces the tracked file in one step. `fs::write` truncates the file
+    /// before writing it, and a watcher refresh that lands between the two
+    /// records the empty file as a revision of its own.
+    fn edit_source(&self, contents: &[u8]) {
+        let staged = self.directory().join("file.txt.next");
+        fs::write(&staged, contents).unwrap();
+        fs::rename(&staged, self.root.join("file.txt")).unwrap();
+    }
 }
 
 impl Drop for Cleanup {
@@ -214,7 +223,7 @@ fn a_source_change_refreshes_the_review_and_streams_an_event() {
 
     let (mut events, mut received) = server.events();
 
-    fs::write(server.root.join("file.txt"), b"newer\n").unwrap();
+    server.edit_source(b"newer\n");
     let response = server.request(
         "POST",
         "/api/v1/refresh",
@@ -222,11 +231,15 @@ fn a_source_change_refreshes_the_review_and_streams_an_event() {
     );
     assert_eq!(response.status, 200, "{}", response.body);
     let refresh: serde_json::Value = serde_json::from_str(&response.body).unwrap();
-    assert_eq!(refresh["revision"], 2, "the watcher or the request refreshed once");
+    // The watcher and the request race to refresh, so either may write the
+    // new revision; the other finds the capture current.
+    let revision = refresh["revision"].as_u64().unwrap();
+    assert!(revision > 1, "{refresh}");
 
-    read_until(&mut events, &mut received, |text| text.contains("\"kind\":\"refresh\""));
+    read_until(&mut events, &mut received, |text| {
+        mire_events(text).any(|event| event["kind"] == "refresh" && event["revision"] == revision)
+    });
     assert!(received.contains("event: mire"), "{received}");
-    assert!(received.contains("\"revision\":2"), "{received}");
 
     let response = server.request(
         "GET",
@@ -234,7 +247,7 @@ fn a_source_change_refreshes_the_review_and_streams_an_event() {
         &[("Host", &host), ("Authorization", &authorization)],
     );
     let overview: serde_json::Value = serde_json::from_str(&response.body).unwrap();
-    assert_eq!(overview["revision"], 2);
+    assert_eq!(overview["revision"], revision);
     assert_eq!(overview["changes"]["additions"], 1);
 }
 
@@ -244,17 +257,21 @@ fn an_external_review_write_streams_a_review_invalidated_event() {
     let (mut events, mut received) = server.events();
 
     // A refresh event from the watcher shows its loop is running with a known
-    // revision, so the next review-file write is compared against revision 2.
-    fs::write(server.root.join("file.txt"), b"newer\n").unwrap();
-    read_until(&mut events, &mut received, |text| text.contains("\"kind\":\"refresh\""));
-    assert!(received.contains("\"revision\":2"), "{received}");
+    // revision, so the next review-file write is compared against it.
+    server.edit_source(b"newer\n");
+    read_until(&mut events, &mut received, |text| {
+        mire_events(text).any(|event| event["kind"] == "refresh")
+    });
+    let refreshed = mire_events(&received).find(|event| event["kind"] == "refresh").unwrap()["revision"]
+        .as_u64()
+        .unwrap();
 
     let added = Command::new(binary())
         .args(["note", "add"])
         .arg(server.directory().join("review.json"))
         .args([
             "--revision",
-            "2",
+            &refreshed.to_string(),
             "--file",
             "file.txt",
             "--new-line",
@@ -278,15 +295,19 @@ fn an_external_review_write_streams_a_review_invalidated_event() {
     assert!(added.status.success(), "{}", String::from_utf8_lossy(&added.stderr));
 
     read_until(&mut events, &mut received, |text| {
-        text.contains("\"kind\":\"review_invalidated\"")
+        mire_events(text).any(|event| event["kind"] == "review_invalidated")
     });
-    let event = received
-        .lines()
-        .filter_map(|line| line.strip_prefix("data: "))
-        .map(|data| serde_json::from_str::<serde_json::Value>(data).unwrap())
+    let event = mire_events(&received)
         .find(|event| event["kind"] == "review_invalidated")
         .unwrap();
-    assert_eq!(event["revision"], 3, "{received}");
+    assert_eq!(event["revision"], refreshed + 1, "{received}");
+}
+
+/// Parses each complete `data:` line of an event stream.
+fn mire_events(text: &str) -> impl Iterator<Item = serde_json::Value> + '_ {
+    text.lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter_map(|data| serde_json::from_str(data).ok())
 }
 
 /// Reads from `stream` into `text` until `done` holds, failing after ten seconds.

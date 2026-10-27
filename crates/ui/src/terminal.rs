@@ -11,7 +11,7 @@ use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
 use mire_core::{Changeset, Review};
 use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
+use ratatui::backend::{Backend, CrosstermBackend};
 
 use crate::{
     App, AppOptions, LiveAction, LiveControl, LiveResponse, ReviewWrite, Theme, WalkthroughAction, WatchUpdate, render,
@@ -126,6 +126,7 @@ where
             changeset,
             options,
             &theme,
+            &mut poll_event,
             &mut reload,
             control.as_ref(),
         )
@@ -153,6 +154,7 @@ where
             review,
             options,
             &theme,
+            &mut poll_event,
             &mut save,
             &mut reload,
             control.as_ref(),
@@ -175,16 +177,24 @@ fn run_loop(
     app.resize(size.width, size.height);
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        let _ = handle_terminal_event(&mut app, control, false)?;
+        let _ = handle_terminal_event(&mut app, poll_event()?, control, false);
     }
     Ok(())
 }
 
-fn run_watch_loop<F>(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>, mut changeset: Changeset, options: AppOptions, theme: &Theme,
+/// Runs a watched changeset session until the quit key.
+///
+/// `next_event` waits briefly for one terminal event. A key handled in the
+/// same pass as a reload ends the session before the reload rebuilds the app,
+/// so the quit key is never dropped with the old app.
+fn run_watch_loop<B, N, F>(
+    terminal: &mut Terminal<B>, mut changeset: Changeset, options: AppOptions, theme: &Theme, next_event: &mut N,
     reload: &mut F, control: Option<&LiveControl>,
 ) -> io::Result<()>
 where
+    B: Backend,
+    io::Error: From<B::Error>,
+    N: FnMut() -> io::Result<Option<Event>>,
     F: FnMut(bool) -> WatchUpdate<Changeset>,
 {
     terminal.draw(|frame| render(frame, &App::loading(), theme))?;
@@ -195,7 +205,10 @@ where
     app.set_watch_state(crate::WatchState::Watching, None);
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        let requested_reload = handle_terminal_event(&mut app, control, true)?;
+        let requested_reload = handle_terminal_event(&mut app, next_event()?, control, true);
+        if app.should_quit() {
+            break;
+        }
         match reload(requested_reload) {
             WatchUpdate::Unchanged => {}
             WatchUpdate::Loaded(updated) => {
@@ -231,17 +244,23 @@ where
     app.resize(size.width, size.height);
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        let _ = handle_terminal_event(&mut app, control, false)?;
+        let _ = handle_terminal_event(&mut app, poll_event()?, control, false);
         finish_requested_save(&mut app, save);
     }
     Ok(())
 }
 
-fn run_review_watch_loop<F, E, R>(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>, mut review: Review, options: AppOptions, theme: &Theme,
+/// Runs a watched review session until the quit key, ending it before a
+/// reload in the same pass can rebuild the app and drop the quit key.
+#[allow(clippy::too_many_arguments)]
+fn run_review_watch_loop<B, N, F, E, R>(
+    terminal: &mut Terminal<B>, mut review: Review, options: AppOptions, theme: &Theme, next_event: &mut N,
     save: &mut F, reload: &mut R, control: Option<&LiveControl>,
 ) -> io::Result<()>
 where
+    B: Backend,
+    io::Error: From<B::Error>,
+    N: FnMut() -> io::Result<Option<Event>>,
     F: FnMut(ReviewWrite<'_>) -> Result<(), E>,
     E: std::fmt::Display,
     R: FnMut(bool) -> WatchUpdate<Review>,
@@ -255,8 +274,11 @@ where
     app.set_watch_state(crate::WatchState::Watching, None);
     while !app.should_quit() {
         terminal.draw(|frame| render(frame, &app, theme))?;
-        let requested_reload = handle_terminal_event(&mut app, control, true)?;
+        let requested_reload = handle_terminal_event(&mut app, next_event()?, control, true);
         finish_requested_save(&mut app, save);
+        if app.should_quit() {
+            break;
+        }
         if requested_reload || matches!(pending, WatchUpdate::Unchanged) {
             pending = reload(requested_reload);
         }
@@ -284,17 +306,24 @@ where
     Ok(())
 }
 
-fn handle_terminal_event(app: &mut App<'_>, control: Option<&LiveControl>, reload_available: bool) -> io::Result<bool> {
-    if event::poll(EVENT_POLL_INTERVAL)? {
-        match event::read()? {
-            Event::Key(key) => app.handle_key(key),
-            Event::Mouse(mouse) => app.handle_mouse(mouse),
-            Event::Resize(width, height) => app.resize(width, height),
-            Event::Paste(text) => app.handle_paste(&text),
-            Event::FocusGained | Event::FocusLost => {}
-        }
+/// Waits up to [`EVENT_POLL_INTERVAL`] for one terminal event.
+fn poll_event() -> io::Result<Option<Event>> {
+    if event::poll(EVENT_POLL_INTERVAL)? { event::read().map(Some) } else { Ok(None) }
+}
+
+/// Applies one terminal event, if any, then the queued live requests, and
+/// reports whether a live client asked for a reload.
+fn handle_terminal_event(
+    app: &mut App<'_>, event: Option<Event>, control: Option<&LiveControl>, reload_available: bool,
+) -> bool {
+    match event {
+        Some(Event::Key(key)) => app.handle_key(key),
+        Some(Event::Mouse(mouse)) => app.handle_mouse(mouse),
+        Some(Event::Resize(width, height)) => app.resize(width, height),
+        Some(Event::Paste(text)) => app.handle_paste(&text),
+        Some(Event::FocusGained | Event::FocusLost) | None => {}
     }
-    Ok(handle_live_requests(app, control, reload_available))
+    handle_live_requests(app, control, reload_available)
 }
 
 fn handle_live_requests(app: &mut App<'_>, control: Option<&LiveControl>, reload_available: bool) -> bool {
@@ -360,4 +389,128 @@ where
         .ok_or_else(|| "editable session lost its review state".to_owned())
         .and_then(|review| save(ReviewWrite::Revision(review)).map_err(|error| error.to_string()));
     app.finish_save(result);
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use mire_core::{ChangesetSource, PatchLimits, ReviewRevision, parse_patch};
+    use ratatui::backend::{ClearType, TestBackend, WindowSize};
+    use ratatui::buffer::Cell;
+    use ratatui::layout::{Position, Size};
+
+    use super::*;
+
+    const PATCH: &[u8] = b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n";
+
+    /// A [`TestBackend`] with the I/O error type the session loops expect.
+    struct IoBackend(TestBackend);
+
+    impl Backend for IoBackend {
+        type Error = io::Error;
+
+        fn draw<'a, I>(&mut self, content: I) -> io::Result<()>
+        where
+            I: Iterator<Item = (u16, u16, &'a Cell)>,
+        {
+            self.0.draw(content).map_err(|never| match never {})
+        }
+
+        fn hide_cursor(&mut self) -> io::Result<()> {
+            self.0.hide_cursor().map_err(|never| match never {})
+        }
+
+        fn show_cursor(&mut self) -> io::Result<()> {
+            self.0.show_cursor().map_err(|never| match never {})
+        }
+
+        fn get_cursor_position(&mut self) -> io::Result<Position> {
+            self.0.get_cursor_position().map_err(|never| match never {})
+        }
+
+        fn set_cursor_position<P: Into<Position>>(&mut self, position: P) -> io::Result<()> {
+            self.0.set_cursor_position(position).map_err(|never| match never {})
+        }
+
+        fn clear(&mut self) -> io::Result<()> {
+            self.0.clear().map_err(|never| match never {})
+        }
+
+        fn clear_region(&mut self, clear_type: ClearType) -> io::Result<()> {
+            self.0.clear_region(clear_type).map_err(|never| match never {})
+        }
+
+        fn size(&self) -> io::Result<Size> {
+            self.0.size().map_err(|never| match never {})
+        }
+
+        fn window_size(&mut self) -> io::Result<WindowSize> {
+            self.0.window_size().map_err(|never| match never {})
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.0.flush().map_err(|never| match never {})
+        }
+    }
+
+    #[test]
+    fn quit_ends_a_watch_session_when_a_reload_lands_in_the_same_pass() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let mut terminal = Terminal::new(IoBackend(TestBackend::new(80, 24))).unwrap();
+        let mut events = quit_then_idle();
+        let mut reloads = 0;
+        let mut reload = |_| {
+            reloads += 1;
+            assert_eq!(reloads, 1, "the reload rebuilt the app and dropped the quit key");
+            WatchUpdate::Loaded(changeset.clone())
+        };
+
+        run_watch_loop(
+            &mut terminal,
+            changeset.clone(),
+            AppOptions::default(),
+            &Theme::plain(),
+            &mut events,
+            &mut reload,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(reloads, 0);
+    }
+
+    #[test]
+    fn quit_ends_a_review_watch_session_when_a_reload_lands_in_the_same_pass() {
+        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+        let review = Review::new(ReviewRevision::new(1).unwrap(), changeset, Vec::new(), Vec::new()).unwrap();
+        let mut terminal = Terminal::new(IoBackend(TestBackend::new(80, 24))).unwrap();
+        let mut events = quit_then_idle();
+        let mut save = |_: ReviewWrite<'_>| Ok::<(), String>(());
+        let mut reloads = 0;
+        let mut reload = |_| {
+            reloads += 1;
+            assert_eq!(reloads, 1, "the reload rebuilt the app and dropped the quit key");
+            WatchUpdate::Loaded(review.clone())
+        };
+
+        run_review_watch_loop(
+            &mut terminal,
+            review.clone(),
+            AppOptions::default(),
+            &Theme::plain(),
+            &mut events,
+            &mut save,
+            &mut reload,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(reloads, 0);
+    }
+
+    /// Yields the quit key once, then no further events.
+    fn quit_then_idle() -> impl FnMut() -> io::Result<Option<Event>> {
+        let mut quit = Some(Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE)));
+        move || Ok(quit.take())
+    }
 }

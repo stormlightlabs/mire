@@ -2,7 +2,7 @@
 id = "arcl-t-01M5SXD5050AF2R8PA2JZCPXVF"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
 title = "Make the watch tests reliable under load"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 2
 +++

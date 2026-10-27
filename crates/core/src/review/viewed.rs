@@ -163,18 +163,12 @@ pub fn validate(viewed: &ViewedMap) -> Result<()> {
 }
 
 fn check_mark(review: &Review, path: &BytePath, fingerprint: Fingerprint, revision: ReviewRevision) -> Result<()> {
-    // Only the current revision can be checked against the stored changeset.
-    // A mark read at an older revision needs the file as it was then, which
-    // the checkpoint lookup answers once the review records checkpoints.
-    if revision != review.revision {
-        return Err(ReviewError::ViewedMismatch);
+    // The checkpoint lookup gives the file as it was at the mark's revision,
+    // so a reader that loaded an older revision can still mark what it saw.
+    match review.file_at_revision(path, revision) {
+        Some((_, row)) if row.fingerprint() == Some(fingerprint) => Ok(()),
+        _ => Err(ReviewError::ViewedMismatch),
     }
-    let matches = review
-        .changeset
-        .files()
-        .iter()
-        .any(|file| file.canonical_path() == path && file.fingerprint() == fingerprint);
-    if matches { Ok(()) } else { Err(ReviewError::ViewedMismatch) }
 }
 
 #[cfg(test)]

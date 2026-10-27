@@ -2,7 +2,7 @@
 id = "arcl-t-01M5YRVM0JS5TYST55RJRWQTGS"
 plan = "arcl-pl-01M5YRTHSYB0P33XC2VD8FFK2D"
 title = "Record checkpoints in the review file"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 3
 blocked-by = ["arcl-t-01M5YRVB5XW3TXHV1HDFZ3Z00Y"]

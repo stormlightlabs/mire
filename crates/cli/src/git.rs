@@ -1,13 +1,15 @@
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
 
 use mire_core::{
-    BytePath, BytePathError, ByteString, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, FilesystemIdentity,
-    GitOperation, PatchError, PatchLimits, RepositoryIdentity, SourceBinding, parse_patch,
+    BytePath, BytePathError, ByteString, Changeset, ChangesetSource, DEFAULT_MAX_PATCH_BYTES, FileContent,
+    FilesystemIdentity, GitOperation, ObjectId, PatchError, PatchLimits, RepositoryIdentity, SourceBinding,
+    parse_patch,
 };
 use thiserror::Error;
 
@@ -190,6 +192,84 @@ pub fn load_show(request: ShowRequest) -> Result<Changeset> {
     let output = run_git(Some(&repository.root), &arguments, DEFAULT_MAX_PATCH_BYTES)?;
     ensure_success("show", &output, &[0])?;
     parse_patch(&output.stdout, source, PatchLimits::default()).map_err(GitError::Patch)
+}
+
+/// Returns the ids among `objects` that the bound repository does not hold
+/// as blobs.
+///
+/// It asks `git cat-file --batch-check`, the batch form of `git cat-file -e`,
+/// after the same identity check as [`load_bound_diff`]. It never writes
+/// objects.
+pub fn missing_blobs(binding: &SourceBinding, objects: &BTreeSet<ObjectId>) -> Result<BTreeSet<ObjectId>> {
+    if objects.is_empty() {
+        return Ok(BTreeSet::new());
+    }
+    let repository = validate_repository_binding(binding)?;
+    let mut input = Vec::new();
+    for object in objects {
+        input.extend_from_slice(object.as_str().as_bytes());
+        input.push(b'\n');
+    }
+    let arguments = [OsString::from("cat-file"), OsString::from("--batch-check")];
+    let output = run_git_with_input(Some(&repository.root), &arguments, input, MAX_GIT_METADATA_BYTES)?;
+    ensure_success("check objects", &output, &[0])?;
+    let mut held = BTreeSet::new();
+    for line in output.stdout.split(|byte| *byte == b'\n') {
+        let mut fields = line.split(|byte| *byte == b' ');
+        if let (Some(id), Some(b"blob")) = (fields.next(), fields.next())
+            && let Some(id) = std::str::from_utf8(id).ok().and_then(ObjectId::new)
+        {
+            held.insert(id);
+        }
+    }
+    Ok(objects.difference(&held).cloned().collect())
+}
+
+/// Rebuilds a file's hunks from the blobs of its two sides in the bound
+/// repository. A side without an id is taken as absent, as for an added or a
+/// deleted file. Returns `None` when Git does not hold a named blob or
+/// neither side has an id.
+pub fn blob_content(
+    binding: &SourceBinding, old: Option<&ObjectId>, new: Option<&ObjectId>,
+) -> Result<Option<FileContent>> {
+    let objects = old.into_iter().chain(new).cloned().collect::<BTreeSet<_>>();
+    if objects.is_empty() || !missing_blobs(binding, &objects)?.is_empty() {
+        return Ok(None);
+    }
+    let repository = validate_repository_binding(binding)?;
+    let patch = match (old, new) {
+        (Some(old), Some(new)) => {
+            let mut arguments = diff_options();
+            arguments.push(OsString::from(old.as_str()));
+            arguments.push(OsString::from(new.as_str()));
+            let output = run_git(Some(&repository.root), &arguments, DEFAULT_MAX_PATCH_BYTES)?;
+            ensure_success("diff blobs", &output, &[0])?;
+            if output.stdout.is_empty() {
+                return Ok(Some(FileContent::Text { hunks: Vec::new() }));
+            }
+            output.stdout
+        }
+        (Some(object), None) | (None, Some(object)) => {
+            let arguments = [
+                OsString::from("cat-file"),
+                OsString::from("blob"),
+                OsString::from(object.as_str()),
+            ];
+            let output = run_git(Some(&repository.root), &arguments, DEFAULT_MAX_PATCH_BYTES)?;
+            ensure_success("read blob", &output, &[0])?;
+            if output.stdout.contains(&0) || std::str::from_utf8(&output.stdout).is_err() {
+                return Ok(Some(FileContent::Binary));
+            }
+            match one_sided_patch(&output.stdout, new.is_some()) {
+                Some(patch) => patch,
+                None => return Ok(Some(FileContent::Text { hunks: Vec::new() })),
+            }
+        }
+        (None, None) => return Ok(None),
+    };
+    let changeset =
+        parse_patch(&patch, ChangesetSource::DirectFiles, PatchLimits::default()).map_err(GitError::Patch)?;
+    Ok(changeset.files().first().map(|file| file.content().clone()))
 }
 
 /// Returns the root watched for Git-backed review changes.
@@ -393,12 +473,55 @@ fn append_untracked_patches(
     Ok(())
 }
 
+/// Builds a patch that adds (`added`) or deletes every line of `content`, or
+/// `None` for an empty file, which has no hunk.
+fn one_sided_patch(content: &[u8], added: bool) -> Option<Vec<u8>> {
+    if content.is_empty() {
+        return None;
+    }
+    let missing_newline = !content.ends_with(b"\n");
+    let body = content.strip_suffix(b"\n").unwrap_or(content);
+    let lines = body.split(|byte| *byte == b'\n').collect::<Vec<_>>();
+    let (marker, range) = if added {
+        (b'+', format!("@@ -0,0 +1,{} @@\n", lines.len()))
+    } else {
+        (b'-', format!("@@ -1,{} +0,0 @@\n", lines.len()))
+    };
+    let mut patch = if added {
+        b"--- /dev/null\n+++ b/file\n".to_vec()
+    } else {
+        b"--- a/file\n+++ /dev/null\n".to_vec()
+    };
+    patch.extend_from_slice(range.as_bytes());
+    for line in lines {
+        patch.push(marker);
+        patch.extend_from_slice(line);
+        patch.push(b'\n');
+    }
+    if missing_newline {
+        patch.extend_from_slice(b"\\ No newline at end of file\n");
+    }
+    Some(patch)
+}
+
 fn run_git(cwd: Option<&Path>, arguments: &[OsString], stdout_limit: usize) -> Result<GitOutput> {
     run_git_with_literal_pathspecs(cwd, arguments, stdout_limit, true)
 }
 
+fn run_git_with_input(
+    cwd: Option<&Path>, arguments: &[OsString], input: Vec<u8>, stdout_limit: usize,
+) -> Result<GitOutput> {
+    spawn_git(cwd, arguments, stdout_limit, true, Some(input))
+}
+
 fn run_git_with_literal_pathspecs(
     cwd: Option<&Path>, arguments: &[OsString], stdout_limit: usize, literal_pathspecs: bool,
+) -> Result<GitOutput> {
+    spawn_git(cwd, arguments, stdout_limit, literal_pathspecs, None)
+}
+
+fn spawn_git(
+    cwd: Option<&Path>, arguments: &[OsString], stdout_limit: usize, literal_pathspecs: bool, input: Option<Vec<u8>>,
 ) -> Result<GitOutput> {
     let mut command = Command::new("git");
     command
@@ -407,7 +530,7 @@ fn run_git_with_literal_pathspecs(
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_PAGER", "cat")
         .env("GIT_LITERAL_PATHSPECS", if literal_pathspecs { "1" } else { "0" })
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(cwd) = cwd {
@@ -420,10 +543,20 @@ fn run_git_with_literal_pathspecs(
             GitError::Spawn(source)
         }
     })?;
+    let writer = input.map(|input| {
+        let mut stdin = child.stdin.take().expect("piped Git stdin is available");
+        thread::spawn(move || stdin.write_all(&input))
+    });
     let stdout = child.stdout.take().expect("piped Git stdout is available");
     let stderr = child.stderr.take().expect("piped Git stderr is available");
     let stdout_reader = thread::spawn(move || read_stream(stdout, stdout_limit));
     let stderr_reader = thread::spawn(move || read_stream(stderr, MAX_GIT_STDERR_BYTES));
+    if let Some(writer) = writer {
+        writer
+            .join()
+            .expect("Git stdin writer does not panic")
+            .map_err(GitError::Spawn)?;
+    }
     let status = child.wait().map_err(GitError::Spawn)?;
     let stdout = stdout_reader
         .join()

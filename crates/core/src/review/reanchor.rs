@@ -2,7 +2,7 @@ use crate::{BytePath, FileDiff};
 
 use super::{
     Anchor, AnchorSide, Changeset, DiffLine, FileContent, LineNumber, LineRange, ReanchorCandidate, ReanchorEvidence,
-    ReanchorOutcome, Result, Review, walkthrough,
+    ReanchorOutcome, Result, Review, checkpoint, walkthrough,
 };
 
 const NEARBY_CONTEXT_LINES: usize = 3;
@@ -44,6 +44,21 @@ pub fn reanchor_review(review: &Review, changeset: Changeset) -> Result<Review> 
     refreshed.description = review.description.clone();
     refreshed.walkthrough = walkthrough;
     refreshed.viewed = review.viewed.clone();
+    refreshed.checkpoints = review.checkpoints.clone();
+    refreshed.pinned = review.pinned.clone();
+    checkpoint::record(
+        &mut refreshed.checkpoints,
+        &review.changeset,
+        &refreshed.changeset,
+        refreshed.revision,
+    );
+    let pins = refreshed.pins();
+    checkpoint::compact(
+        &mut refreshed.checkpoints,
+        &mut refreshed.pinned,
+        &pins,
+        checkpoint::MAX_HISTORY_BYTES,
+    );
     refreshed.extensions = review.extensions.clone();
     refreshed.validate()?;
     Ok(refreshed)

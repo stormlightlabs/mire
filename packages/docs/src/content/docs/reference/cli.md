@@ -126,12 +126,14 @@ fingerprint equals the file's `fingerprint` in the manifest.
 mire file viewed REVIEW.json --file PATH --fingerprint FINGERPRINT --revision REVISION [--reader ID]
 mire file unviewed REVIEW.json --file PATH [--reader ID]
 mire file unviewed REVIEW.json --all [--reader ID]
+mire file history REVIEW.json --file PATH [--revision REVISION]
 ```
 
 `file viewed` records that a reader viewed a file at the fingerprint and review
-revision they read, both from `mire context`. Mire rejects the mark with
-`viewed_mismatch` unless that revision is the review's current revision and the
-fingerprint is the file's current one. `file unviewed` clears the reader's mark
+revision they read, both from `mire context`. Mire looks up the file at that
+revision in the review's checkpoints and rejects the mark with
+`viewed_mismatch` when the file had another fingerprint there or history does
+not reach that revision. `file unviewed` clears the reader's mark
 for the path, whether or not the path is still in the changeset. With `--all`
 it clears every mark the reader holds. Neither command advances the review
 revision, so marks never cause a `revision_conflict` for another writer.
@@ -167,6 +169,44 @@ or longer than 256 bytes, or `too_many_viewed_marks` or
 `too_many_viewed_readers` at a limit. When another process holds the review
 lock, the command exits with status `7` and prints a plain-text error on
 standard error, as the note commands do. Retry after the other write ends.
+
+`file history` lists the revisions that changed a file, newest first. The path
+need not be in the current changeset. Rows that compaction carried forward are
+left out:
+
+```json
+{
+	"schema_version": { "major": 1, "minor": 5 },
+	"review_revision": 4,
+	"path": [115, 114, 99, 47, 108, 105, 98, 46, 114, 115],
+	"history": [
+		{
+			"revision": 4,
+			"fingerprint": "9f2c…",
+			"old_object": "3b18e512dba79e4c8300dd08aeb37f8e728b8dad",
+			"new_object": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+			"copy": true,
+			"available": true,
+			"baseline": false,
+			"gap": false
+		}
+	]
+}
+```
+
+`fingerprint` is `null` at a revision where the file left the changeset.
+`copy` says whether Mire kept a patch copy of the hunks, and `available`
+whether it can show them. `baseline` marks the checkpoint Mire recorded for a
+review file written before checkpoints, and `gap` one where an older release
+refreshed the review and the file changed at a revision Mire did not record.
+
+With `--revision`, the command prints the file's hunks at that revision, the
+`checkpoint_revision` of the row it found, and `source`: `capture` when the
+file has not changed since, `git` when Mire read both blobs from the bound
+repository, or `copy` for the patch copy. A file with no row at that revision
+fails with `checkpoint_not_found`, and a row whose blobs Git no longer holds
+and that has no copy with `checkpoint_unavailable`. Both exit with status `8`
+and a report on standard error.
 
 ## Note commands
 
@@ -304,23 +344,34 @@ reader's mark, with `fingerprint` and `revision`, or `null`. The file is viewed
 while the mark's fingerprint equals the file's `id`. A file that changed after
 it was marked shows as changed since viewed.
 
-| Route                         | Effect                                                                 |
-| ----------------------------- | ---------------------------------------------------------------------- |
-| `PUT /api/v1/viewed?path=`    | Marks the path viewed at the `fingerprint` and `revision` in the body. |
-| `DELETE /api/v1/viewed?path=` | Clears the reader's mark for the path, in the changeset or not.        |
+| Route                                       | Effect                                                                      |
+| ------------------------------------------- | --------------------------------------------------------------------------- |
+| `PUT /api/v1/viewed?path=`                  | Marks the path viewed at the `fingerprint` and `revision` in the body.      |
+| `DELETE /api/v1/viewed?path=`               | Clears the reader's mark for the path, in the changeset or not.             |
+| `GET /api/v1/history?path=`                 | Lists the revisions that changed the path, newest first.                    |
+| `GET /api/v1/history?path=&revision=`       | Returns the path's hunks at that revision.                                  |
+| `GET /api/v1/findings/{note_id}/checkpoint` | Returns the hunks of the file at the checkpoint the finding was written on. |
 
 `path=` takes a path's `raw` field: its bytes as lowercase hex. Every path in a
 response carries `raw` next to `display` and `lossy`, so a path that is not
 valid UTF-8 still round-trips. A value that is not lowercase hex or not a valid
 path fails with `invalid_path` (400). A body without a 64-digit hex
 `fingerprint` and a positive `revision` fails with `invalid_viewed_mark` (400).
-A mark for a fingerprint the file does not have at the current revision fails
-with `viewed_mismatch` (409). A mark past a limit fails with
+A mark for a fingerprint the file did not have at that revision fails with
+`viewed_mismatch` (409). A mark past a limit fails with
 `too_many_viewed_marks` or `too_many_viewed_readers` (422), and a review another
 process is writing with `review_locked` (423). Neither route changes the review
 revision. Each change sends one `viewed` event on `GET /api/v1/events`, and the
 server also sends one when a mark written by the CLI or the terminal changes the
 file without changing its revision.
+
+Each file in `GET /api/v1/review` also has `history`, the entries
+`mire file history` prints, and each finding from `GET /api/v1/findings/{note_id}`
+has `checkpoint`: the `revision` and `path` of the row it was written on, or
+`null`. The history and checkpoint routes return `source`,
+`checkpointRevision`, `fingerprint` and the hunks as `content`, or fail with
+`checkpoint_not_found` or `checkpoint_unavailable` (404). A `revision` that is
+not a positive number fails with `invalid_revision` (400).
 
 ```sh
 # Serve a review on the default port

@@ -1,5 +1,6 @@
 //! Loopback HTTP server for the browser review surface.
 
+use std::collections::BTreeSet;
 use std::convert::Infallible;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -41,6 +42,7 @@ use crate::refresh::{RefreshError, refresh_review};
 use crate::review_file::{ReviewFileError, read_review};
 use crate::watch::WatchSet;
 
+mod history;
 mod viewed;
 
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/web");
@@ -109,6 +111,8 @@ struct FileSummary {
     /// The local reader's viewed mark for this path, or `null`. The file is
     /// viewed while the mark's fingerprint equals `id`.
     viewed: Option<viewed::ViewedState>,
+    /// The revisions that changed this file, newest first.
+    history: Vec<history::HistoryEntry>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -182,6 +186,9 @@ struct FindingDetail {
     body: String,
     author: FindingAuthor,
     provenance: String,
+    /// The checkpoint row the finding was written on, or `null` for findings
+    /// written before checkpoints.
+    checkpoint: Option<history::CheckpointLink>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -362,7 +369,9 @@ enum FindingMutationError {
         export_context,
         get_openapi,
         viewed::put_viewed,
-        viewed::delete_viewed
+        viewed::delete_viewed,
+        history::get_history,
+        history::get_finding_checkpoint
     ),
     components(schemas(
         ReviewOverview,
@@ -391,6 +400,10 @@ enum FindingMutationError {
         viewed::ViewedState,
         viewed::MarkViewedRequest,
         viewed::ViewedResponse,
+        history::HistoryEntry,
+        history::HistoryResponse,
+        history::CheckpointResponse,
+        history::CheckpointLink,
         Problem
     ))
 )]
@@ -456,6 +469,11 @@ fn app(state: AppState) -> Router {
         .route("/api/v1/files/{file_id}", get(get_file))
         .route("/api/v1/findings/{note_id}", get(get_finding).patch(edit_finding))
         .route("/api/v1/findings/{note_id}/decision", post(decide_finding))
+        .route(
+            "/api/v1/findings/{note_id}/checkpoint",
+            get(history::get_finding_checkpoint),
+        )
+        .route("/api/v1/history", get(history::get_history))
         .route("/api/v1/refresh", post(refresh))
         .route("/api/v1/viewed", put(viewed::put_viewed).delete(viewed::delete_viewed))
         .route("/api/v1/events", get(get_events))
@@ -751,9 +769,23 @@ async fn secure_request(State(state): State<AppState>, request: Request, next: N
 async fn get_review(State(state): State<AppState>) -> Response<Body> {
     match load_current_review(&state).await {
         Ok(review) => {
-            let mut overview = review_overview(&state.review_identity, &review, local_author().id());
-            overview.watch = watch_status(&state);
-            Json(overview).into_response()
+            let identity = state.review_identity.clone();
+            let overview = tokio::task::spawn_blocking(move || {
+                let held = crate::history::held_blobs(&review);
+                review_overview(&identity, &review, local_author().id(), &held)
+            })
+            .await;
+            match overview {
+                Ok(mut overview) => {
+                    overview.watch = watch_status(&state);
+                    Json(overview).into_response()
+                }
+                Err(_) => problem(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "review_unavailable",
+                    "The review file could not be read.",
+                ),
+            }
         }
         Err(response) => *response,
     }
@@ -1188,13 +1220,15 @@ async fn static_asset(uri: Uri) -> Response<Body> {
     response
 }
 
-fn review_overview(identity: &str, review: &Review, reader: &str) -> ReviewOverview {
+fn review_overview(
+    identity: &str, review: &Review, reader: &str, held: &BTreeSet<mire_core::ObjectId>,
+) -> ReviewOverview {
     let findings = review.notes().iter().map(FindingSummary::from_note).collect::<Vec<_>>();
     let files = review
         .changeset()
         .files()
         .iter()
-        .map(|file| FileSummary::from_file(file, review, reader))
+        .map(|file| FileSummary::from_file(file, review, reader, held))
         .collect::<Vec<_>>();
     let mut totals = ReviewTotals {
         files: files.len(),
@@ -1270,7 +1304,7 @@ fn reanchor_totals(review: &Review) -> ReanchorTotals {
 }
 
 impl FileSummary {
-    fn from_file(file: &FileDiff, review: &Review, reader: &str) -> Self {
+    fn from_file(file: &FileDiff, review: &Review, reader: &str, held: &BTreeSet<mire_core::ObjectId>) -> Self {
         let path = file_path(file);
         let open_findings = review
             .notes()
@@ -1289,18 +1323,14 @@ impl FileSummary {
             viewed: review
                 .viewed_mark(reader, file.canonical_path())
                 .map(viewed::ViewedState::from_mark),
+            history: history::file_history(review, file.canonical_path(), held),
         }
     }
 }
 
 impl FileDetail {
     fn from_file(file: &FileDiff, review: &Review) -> Self {
-        let content = match file.content() {
-            FileContent::Text { hunks } => {
-                SemanticFileContent::Text { hunks: hunks.iter().map(SemanticHunk::from_hunk).collect() }
-            }
-            FileContent::Binary => SemanticFileContent::Binary,
-        };
+        let content = SemanticFileContent::from_content(file.content());
         Self {
             id: file.fingerprint().to_string(),
             path: PathText::from_bytes(file_path(file)),
@@ -1313,6 +1343,15 @@ impl FileDetail {
                 .filter(|note| finding_matches_file(note, file))
                 .map(FindingSummary::from_note)
                 .collect(),
+        }
+    }
+}
+
+impl SemanticFileContent {
+    fn from_content(content: &FileContent) -> Self {
+        match content {
+            FileContent::Text { hunks } => Self::Text { hunks: hunks.iter().map(SemanticHunk::from_hunk).collect() },
+            FileContent::Binary => Self::Binary,
         }
     }
 }
@@ -1387,6 +1426,7 @@ impl FindingDetail {
                 display_name: note.author().display_name().map(str::to_owned),
             },
             provenance: note.provenance().to_string(),
+            checkpoint: note.anchor().checkpoint().map(history::CheckpointLink::from_reference),
         }
     }
 }

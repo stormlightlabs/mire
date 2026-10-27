@@ -13,10 +13,12 @@ use crate::{
     LineNumber, SchemaVersion,
 };
 
+mod checkpoint;
 mod reanchor;
 mod viewed;
 mod walkthrough;
 
+pub use checkpoint::{Checkpoint, CheckpointRef, CheckpointRow, MAX_HISTORY_BYTES, MAX_PATCH_COPY_BYTES, PatchCopy};
 pub use viewed::{MAX_VIEWED_MARKS, MAX_VIEWED_READERS, ViewedMap, ViewedMark};
 pub use walkthrough::{
     HunkLocation, MAX_STEP_TITLE_BYTES, MAX_WALKTHROUGH_ANCHORS, MAX_WALKTHROUGH_STEPS, MAX_WALKTHROUGH_TEXT_BYTES,
@@ -198,6 +200,9 @@ pub enum ReviewError {
     /// One reader holds two viewed marks for the same path.
     #[error("reader {reader:?} holds more than one viewed mark for {path:?}")]
     DuplicateViewedPath { reader: String, path: String },
+    /// The stored checkpoints break an ordering or uniqueness rule.
+    #[error("invalid checkpoints: {reason}")]
+    InvalidCheckpoints { reason: String },
 }
 
 impl ReviewError {
@@ -263,6 +268,7 @@ impl ReviewError {
             ReviewError::TooManyViewedMarks { .. } => "too_many_viewed_marks",
             ReviewError::TooManyViewedReaders { .. } => "too_many_viewed_readers",
             ReviewError::DuplicateViewedPath { .. } => "duplicate_viewed_path",
+            ReviewError::InvalidCheckpoints { .. } => "invalid_checkpoints",
         }
     }
 }
@@ -619,6 +625,8 @@ pub struct Anchor {
     range: LineRange,
     hunk_fingerprint: Fingerprint,
     content_fingerprint: Fingerprint,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    checkpoint: Option<CheckpointRef>,
     #[serde(default, flatten)]
     extensions: BTreeMap<String, Value>,
 }
@@ -629,7 +637,15 @@ impl Anchor {
         changeset: &Changeset, path: BytePath, side: AnchorSide, range: LineRange, hunk_fingerprint: Fingerprint,
     ) -> Result<Self> {
         let content_fingerprint = anchor_content_fingerprint(changeset, &path, side, range, hunk_fingerprint)?;
-        Ok(Self { path, side, range, hunk_fingerprint, content_fingerprint, extensions: BTreeMap::new() })
+        Ok(Self {
+            path,
+            side,
+            range,
+            hunk_fingerprint,
+            content_fingerprint,
+            checkpoint: None,
+            extensions: BTreeMap::new(),
+        })
     }
 
     /// Returns the repository-relative path selected by this anchor.
@@ -655,6 +671,13 @@ impl Anchor {
     /// Returns the fingerprint of the selected content.
     pub const fn content_fingerprint(&self) -> Fingerprint {
         self.content_fingerprint
+    }
+
+    /// Returns the checkpoint row that held the anchor's file when the note
+    /// was written, or `None` for notes written before checkpoints and for
+    /// anchors that are not a note's own.
+    pub const fn checkpoint(&self) -> Option<&CheckpointRef> {
+        self.checkpoint.as_ref()
     }
 
     /// Verifies this anchor against a captured changeset.
@@ -1088,15 +1111,21 @@ pub struct Review {
     walkthrough: Option<Walkthrough>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     viewed: ViewedMap,
+    checkpoints: Vec<Checkpoint>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pinned: Vec<Checkpoint>,
     #[serde(default, flatten)]
     extensions: BTreeMap<String, Value>,
 }
 
 impl Review {
     /// Creates and validates a review around an immutable changeset capture.
+    ///
+    /// The review's first checkpoint, at `revision`, names every file.
     pub fn new(
         revision: ReviewRevision, changeset: Changeset, notes: Vec<ReviewNote>, events: Vec<NoteEvent>,
     ) -> Result<Self> {
+        let checkpoints = vec![checkpoint::full_checkpoint(&changeset, revision, false)];
         let mut review = Self {
             schema_version: CURRENT_REVIEW_SCHEMA_VERSION,
             revision,
@@ -1108,6 +1137,8 @@ impl Review {
             events,
             walkthrough: None,
             viewed: BTreeMap::new(),
+            checkpoints,
+            pinned: Vec::new(),
             extensions: BTreeMap::new(),
         };
         review.canonicalize();
@@ -1297,6 +1328,92 @@ impl Review {
         self
     }
 
+    /// Returns the checkpoints, oldest first. The first names every file it
+    /// knew; each later one names the files whose fingerprint changed.
+    pub fn checkpoints(&self) -> &[Checkpoint] {
+        &self.checkpoints
+    }
+
+    /// Returns the rows notes pin that compaction folded away, kept under
+    /// their own revision, oldest first.
+    pub fn pinned_checkpoints(&self) -> &[Checkpoint] {
+        &self.pinned
+    }
+
+    /// Finds a file at a revision: the latest checkpoint at or before
+    /// `revision` that names `path`. Returns that checkpoint's revision and
+    /// its row, or `None` when history does not reach back that far or never
+    /// named the path.
+    pub fn file_at_revision(
+        &self, path: &BytePath, revision: ReviewRevision,
+    ) -> Option<(ReviewRevision, &CheckpointRow)> {
+        if revision > self.revision {
+            return None;
+        }
+        checkpoint::lookup(&self.checkpoints, path, revision)
+    }
+
+    /// Returns the checkpoints that changed a file, newest first, each with
+    /// the file's row. Carried rows are left out.
+    pub fn file_history(&self, path: &BytePath) -> Vec<(&Checkpoint, &CheckpointRow)> {
+        self.checkpoints
+            .iter()
+            .rev()
+            .filter_map(|checkpoint| checkpoint.row(path).map(|row| (checkpoint, row)))
+            .filter(|(_, row)| !row.is_carried())
+            .collect()
+    }
+
+    /// Returns the row a checkpoint reference names, looking in the pinned
+    /// rows first and then in the checkpoints.
+    pub fn checkpoint_row(&self, reference: &CheckpointRef) -> Option<&CheckpointRow> {
+        [&self.pinned, &self.checkpoints].into_iter().find_map(|list| {
+            list.iter()
+                .find(|checkpoint| checkpoint.revision() == reference.revision())
+                .and_then(|checkpoint| checkpoint.row(reference.path()))
+        })
+    }
+
+    /// Keeps patch copies on the rows of the checkpoint recorded at the
+    /// current revision that `needs_copy` selects, such as files whose new
+    /// blob Git does not hold.
+    ///
+    /// One copy may take [`MAX_PATCH_COPY_BYTES`] and history
+    /// [`MAX_HISTORY_BYTES`]. A copy over either bound is skipped; when the
+    /// budget skipped one, older checkpoints are compacted to make room for
+    /// later copies. Binary files get no copy.
+    #[must_use]
+    pub fn keep_checkpoint_copies<F>(mut self, needs_copy: F) -> Self
+    where
+        F: FnMut(&FileDiff) -> bool,
+    {
+        let pins = self.pins();
+        checkpoint::keep_copies(
+            &mut self.checkpoints,
+            &mut self.pinned,
+            &pins,
+            &self.changeset,
+            self.revision,
+            needs_copy,
+        );
+        self
+    }
+
+    /// Returns the serialized JSON bytes of the checkpoints and pinned rows.
+    pub fn history_bytes(&self) -> usize {
+        checkpoint::history_bytes(&self.checkpoints, &self.pinned)
+    }
+
+    /// Compacts history until it takes at most `max_bytes`, or until only the
+    /// newest checkpoint's rows, without copies, and the pinned rows remain.
+    /// The revision does not change.
+    #[must_use]
+    pub fn compact_history(mut self, max_bytes: usize) -> Self {
+        let pins = self.pins();
+        checkpoint::compact(&mut self.checkpoints, &mut self.pinned, &pins, max_bytes);
+        self
+    }
+
     /// Validates and appends a batch of notes without partially applying it.
     pub fn import_notes(&self, imported: Vec<ReviewNote>) -> std::result::Result<Self, NoteImportError> {
         if imported.is_empty() {
@@ -1336,7 +1453,10 @@ impl Review {
             );
         }
         let mut notes = self.notes.clone();
-        notes.extend(imported);
+        notes.extend(imported.into_iter().map(|mut note| {
+            note.anchor.checkpoint = self.anchor_checkpoint(&note.anchor);
+            note
+        }));
         let mut review = Self::new(
             ReviewRevision::new(revision).map_err(|error| NoteImportError {
                 failures: vec![NoteImportFailure { note_id: first_note_id.clone(), error }],
@@ -1351,6 +1471,8 @@ impl Review {
         review.description = self.description.clone();
         review.walkthrough = self.walkthrough.clone();
         review.viewed = self.viewed.clone();
+        review.checkpoints = self.checkpoints.clone();
+        review.pinned = self.pinned.clone();
         review.extensions = self.extensions.clone();
         Ok(review)
     }
@@ -1504,6 +1626,8 @@ impl Review {
             walkthrough::validate_walkthrough(&self.changeset, walkthrough)?;
         }
         viewed::validate(&self.viewed)?;
+        checkpoint::validate(&self.checkpoints, self.revision)?;
+        checkpoint::validate(&self.pinned, self.revision)?;
         Ok(())
     }
 
@@ -1511,6 +1635,8 @@ impl Review {
         self.notes.sort_by(|left, right| left.id.cmp(&right.id));
         self.events.sort_by_key(NoteEvent::sequence);
         viewed::canonicalize(&mut self.viewed);
+        checkpoint::canonicalize(&mut self.checkpoints);
+        checkpoint::canonicalize(&mut self.pinned);
     }
 
     fn next_revision(&self) -> Result<ReviewRevision> {
@@ -1529,8 +1655,33 @@ impl Review {
         review.description = self.description.clone();
         review.walkthrough = self.walkthrough.clone();
         review.viewed = self.viewed.clone();
+        review.checkpoints = self.checkpoints.clone();
+        review.pinned = self.pinned.clone();
         review.extensions = self.extensions.clone();
         Ok(review)
+    }
+
+    /// Finds the checkpoint row that holds an anchor's file at the current
+    /// revision.
+    fn anchor_checkpoint(&self, anchor: &Anchor) -> Option<CheckpointRef> {
+        let file = self.changeset.files().iter().find(|file| {
+            let side = match anchor.side {
+                AnchorSide::Old => file.old_side(),
+                AnchorSide::New => file.new_side(),
+            };
+            side.is_some_and(|side| side.path == anchor.path)
+        })?;
+        checkpoint::lookup(&self.checkpoints, file.canonical_path(), self.revision)
+            .map(|(revision, row)| CheckpointRef::new(revision, row.path().clone()))
+    }
+
+    /// Returns the checkpoint rows note anchors point at.
+    fn pins(&self) -> BTreeSet<(ReviewRevision, BytePath)> {
+        self.notes
+            .iter()
+            .filter_map(|note| note.anchor.checkpoint.as_ref())
+            .map(|reference| (reference.revision(), reference.path().clone()))
+            .collect()
     }
 }
 
@@ -1557,6 +1708,8 @@ impl<'de> Deserialize<'de> for Review {
             events: wire.events,
             walkthrough: wire.walkthrough,
             viewed: wire.viewed,
+            checkpoints: wire.checkpoints,
+            pinned: wire.pinned,
             extensions: wire.extensions,
         };
         if let Some(walkthrough) = &mut review.walkthrough {
@@ -1564,6 +1717,7 @@ impl<'de> Deserialize<'de> for Review {
         }
         review.canonicalize();
         review.validate().map_err(de::Error::custom)?;
+        checkpoint::settle_loaded(&mut review.checkpoints, &review.changeset, review.revision);
         Ok(review)
     }
 }
@@ -1585,6 +1739,10 @@ struct ReviewWire {
     walkthrough: Option<Walkthrough>,
     #[serde(default)]
     viewed: ViewedMap,
+    #[serde(default)]
+    checkpoints: Vec<Checkpoint>,
+    #[serde(default)]
+    pinned: Vec<Checkpoint>,
     #[serde(default, flatten)]
     extensions: BTreeMap<String, Value>,
 }
@@ -2388,7 +2546,7 @@ mod tests {
 
     fn changeset_with_new_content(new_content: &str) -> Changeset {
         let path = BytePath::new(b"src/lib.rs".to_vec()).unwrap();
-        let side = FileSide { path, mode: Some(FileMode::REGULAR), fingerprint: None };
+        let side = FileSide { path, mode: Some(FileMode::REGULAR), fingerprint: None, object: None };
         let lines = vec![
             DiffLine::new(
                 LineKind::Deletion,

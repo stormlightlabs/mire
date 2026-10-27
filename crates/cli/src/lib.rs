@@ -3,6 +3,7 @@
 mod cli;
 mod command;
 mod git;
+mod history;
 mod live_session;
 mod output_file;
 mod protocol;

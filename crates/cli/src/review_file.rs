@@ -92,8 +92,9 @@ pub fn read_review(path: impl AsRef<Path>) -> Result<Review, ReviewFileError> {
 /// temporary file. A failure before the final rename leaves the destination
 /// untouched. An abandoned temporary file can be removed after confirming the
 /// destination still loads with [`read_review`]. A review that would exceed
-/// [`DEFAULT_MAX_REVIEW_FILE_BYTES`] fails with
-/// [`ReviewFileError::OutputTooLarge`], so every written file can be read back.
+/// [`DEFAULT_MAX_REVIEW_FILE_BYTES`] has its history compacted first, and
+/// fails with [`ReviewFileError::OutputTooLarge`] only when it still does not
+/// fit, so every written file can be read back.
 pub fn write_review_atomic(path: impl AsRef<Path>, review: &Review) -> Result<(), ReviewFileError> {
     replace_review(path.as_ref(), review, DEFAULT_MAX_REVIEW_FILE_BYTES)
 }
@@ -212,9 +213,22 @@ fn serialize_review(path: &Path, review: &Review, limit: usize) -> Result<Vec<u8
     review
         .validate()
         .map_err(|source| ReviewFileError::InvalidReview { path: path.to_owned(), source })?;
-    let mut serialized =
-        serde_json::to_vec(review).map_err(|source| ReviewFileError::Serialize { path: path.to_owned(), source })?;
-    serialized.push(b'\n');
+    let serialize = |review: &Review| {
+        let mut serialized = serde_json::to_vec(review)
+            .map_err(|source| ReviewFileError::Serialize { path: path.to_owned(), source })?;
+        serialized.push(b'\n');
+        Ok(serialized)
+    };
+    let mut serialized = serialize(review)?;
+    if serialized.len() > limit {
+        // History is the part of a review Mire may drop: compact it before
+        // refusing the write.
+        let excess = serialized.len() - limit;
+        let compacted = review
+            .clone()
+            .compact_history(review.history_bytes().saturating_sub(excess));
+        serialized = serialize(&compacted)?;
+    }
     if serialized.len() > limit {
         return Err(ReviewFileError::OutputTooLarge { path: path.to_owned(), actual: serialized.len() as u64, limit });
     }
@@ -476,6 +490,43 @@ mod tests {
             ReviewFileError::MarkRejected(ReviewError::ViewedMismatch)
         ));
         assert_eq!(read_review(&path).unwrap(), stored);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn a_write_over_the_limit_compacts_history_before_failing() {
+        use mire_core::{PatchLimits, parse_patch};
+
+        let directory = test_directory();
+        let path = directory.join("review.json");
+        let capture = |content: &str| {
+            parse_patch(
+                format!("--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+{content}\n").as_bytes(),
+                ChangesetSource::Patch { label: None },
+                PatchLimits::default(),
+            )
+            .unwrap()
+        };
+        let mut review = Review::new(ReviewRevision::new(1).unwrap(), capture("one"), Vec::new(), Vec::new())
+            .unwrap()
+            .keep_checkpoint_copies(|_| true);
+        for content in ["two", "three", "four"] {
+            review = review
+                .reanchor(capture(content))
+                .unwrap()
+                .keep_checkpoint_copies(|_| true);
+        }
+        assert_eq!(review.checkpoints().len(), 4);
+        let full = serde_json::to_vec(&review).unwrap().len() + 1;
+
+        replace_review(&path, &review, full - 1).unwrap();
+        let stored = read_review(&path).unwrap();
+        assert!(stored.checkpoints().len() < 4, "history was compacted to fit");
+        assert_eq!(stored.revision(), review.revision());
+        assert_eq!(stored.changeset(), review.changeset());
+
+        let error = replace_review(&path, &review, 100).unwrap_err();
+        assert!(matches!(error, ReviewFileError::OutputTooLarge { .. }), "{error:?}");
         fs::remove_dir_all(directory).unwrap();
     }
 

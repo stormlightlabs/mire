@@ -36,6 +36,47 @@ export function fileViewState(file: Pick<FileSummary, 'id' | 'viewed'>): FileVie
 	return file.viewed.fingerprint === file.id ? 'viewed' : 'changed';
 }
 
+/** The file to open after the review reloads, and a notice for the reader when it is not the one they had open. */
+export type ReopenedFile = { file: FileSummary | null; notice: string | null };
+
+/**
+ * Finds the file to keep open after the review reloads. A file's `id` is its
+ * fingerprint, so a source change gives it a new one; the file is then found by
+ * its raw path. When the open file left the review, or was renamed, this falls
+ * back to the first file and returns a notice naming both paths, so the switch
+ * is not silent.
+ */
+export function reopenedFile(files: FileSummary[], previous: Pick<FileSummary, 'id' | 'path'> | null): ReopenedFile {
+	const first = files[0] ?? null;
+	if (!previous) return { file: first, notice: null };
+	const same =
+		files.find((file) => file.id === previous.id) ?? files.find((file) => file.path.raw === previous.path.raw);
+	if (same) return { file: same, notice: null };
+	const gone = `${formatPath(previous.path)} is no longer in the review`;
+	return { file: first, notice: first ? `${gone}; showing ${formatPath(first.path)}.` : `${gone}.` };
+}
+
+/**
+ * Reports whether loading `next` reloads the file already on screen. The page
+ * keeps a shown file and its controls mounted while it reloads, and replaces
+ * the content when the new data arrives, so a click during the reload still
+ * lands.
+ */
+export function isShownFile(shown: Pick<FileDetail, 'path'> | null, next: Pick<FileSummary, 'path'>): boolean {
+	return shown !== null && shown.path.raw === next.path.raw;
+}
+
+/**
+ * Reports the reader's viewed state for the file content on screen. It compares
+ * the mark on the file's path with the shown content's fingerprint, not with the
+ * newest one, so the state matches what the reader sees while a reload is in
+ * flight.
+ */
+export function shownViewState(files: FileSummary[], shown: Pick<FileDetail, 'id' | 'path'>): FileViewState {
+	const summary = files.find((file) => file.path.raw === shown.path.raw);
+	return summary ? fileViewState({ id: shown.id, viewed: summary.viewed }) : 'unviewed';
+}
+
 /** Returns the viewed route for a path. */
 export function viewedRoute(path: PathText): string {
 	return `/api/v1/viewed?path=${path.raw}`;

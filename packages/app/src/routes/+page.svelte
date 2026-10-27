@@ -4,16 +4,19 @@
 	import FileNavigator from '$lib/FileNavigator.svelte';
 	import FindingQueue from '$lib/FindingQueue.svelte';
 	import Overlay from '$lib/Overlay.svelte';
+	import { OverviewLoads } from '$lib/reload';
 	import { loadDevelopmentSessionSecret, parseSessionSecret, saveDevelopmentSessionSecret } from '$lib/session';
 	import { applyTheme, loadTheme, saveTheme, type Theme } from '$lib/theme';
 	import {
 		completionSummary,
 		defaultFindingFilters,
-		fileViewState,
 		filterFindings,
 		hasReviewMetadata,
+		isShownFile,
+		reopenedFile,
 		reviewDescription,
 		reviewTitle,
+		shownViewState,
 		viewedRoute
 	} from '$lib/review';
 	import type {
@@ -34,6 +37,8 @@
 	let review = $state<ReviewOverview | null>(null);
 	let activeFile = $state<string | null>(null);
 	let file = $state<FileDetail | null>(null);
+	let fileLoading = $state(false);
+	let notice = $state<string | null>(null);
 	let activeFinding = $state<FindingDetail | null>(null);
 	let error = $state<string | null>(null);
 	let fileError = $state<string | null>(null);
@@ -52,10 +57,16 @@
 
 	let streamAbort: AbortController | null = null;
 	let secret = '';
+	/** The review revision the shown file was requested at; a viewed mark records it. */
+	let fileRevision = 0;
+	/** Counts file loads, so only the newest one replaces the shown file. */
+	let fileLoads = 0;
+	/** Orders overview loads, so a slow response cannot overwrite a newer one. */
+	const overviewLoads = new OverviewLoads();
 
 	const completion = $derived(review ? completionSummary(review) : null);
 	const activeSummary = $derived(review?.files.find((summary) => summary.id === activeFile) ?? null);
-	const activeViewState = $derived(activeSummary ? fileViewState(activeSummary) : 'unviewed');
+	const shownView = $derived(review && file ? shownViewState(review.files, file) : 'unviewed');
 	const visibleFindings = $derived(review ? filterFindings(review.findings, filters) : []);
 	const title = $derived(reviewTitle(review));
 	const description = $derived(reviewDescription(review));
@@ -119,9 +130,13 @@
 	}
 
 	async function loadReview(): Promise<boolean> {
+		const ticket = overviewLoads.start(false);
 		try {
-			review = await request<ReviewOverview>('/api/v1/review');
+			const overview = await request<ReviewOverview>('/api/v1/review');
+			if (!overviewLoads.settle(ticket).apply) return true;
+			review = overview;
 			if (review.files[0]) await selectFile(review.files[0].id);
+			else closeFile();
 			error = null;
 			return true;
 		} catch (cause) {
@@ -148,12 +163,27 @@
 		}
 	}
 
-	async function reloadReview() {
+	/**
+	 * Reloads the overview. With `reopen`, as after a source change or a finding
+	 * change, the open file loads again too; a viewed mark changes no file's diff
+	 * and passes `false`. When a newer reload's response is shown first, that one
+	 * reopens the file instead, so the diff never lags the header.
+	 */
+	async function reloadReview(reopen = true) {
 		if (!review) return;
+		const ticket = overviewLoads.start(reopen);
 		try {
-			review = await request<ReviewOverview>('/api/v1/review');
+			const overview = await request<ReviewOverview>('/api/v1/review');
+			const settled = overviewLoads.settle(ticket);
+			if (!settled.apply) return;
+			const previous = activeSummary ?? file;
+			review = overview;
+			if (!settled.reopen) return;
 			conflictRevision = null;
-			if (activeFile) await selectFile(activeFile);
+			const reopened = reopenedFile(review.files, previous);
+			if (reopened.notice) notice = reopened.notice;
+			if (reopened.file) await selectFile(reopened.file.id);
+			else closeFile();
 		} catch (cause) {
 			error = handleErr(cause, 'The review could not be reloaded.');
 		}
@@ -225,58 +255,84 @@
 	async function handleEvent(data: string) {
 		const event = JSON.parse(data) as { kind?: string; watch?: WatchStatus };
 		if (event.kind === 'shutdown') return;
-		if (event.kind === 'viewed') {
-			await reloadOverview();
-			return;
-		}
-		await reloadReview();
+		await reloadReview(event.kind !== 'viewed');
 	}
 
-	/** Reloads the overview only. Viewed marks change it without changing any file's diff. */
-	async function reloadOverview() {
-		if (!review) return;
-		try {
-			review = await request<ReviewOverview>('/api/v1/review');
-		} catch (cause) {
-			error = handleErr(cause, 'The review could not be reloaded.');
-		}
-	}
-
+	/**
+	 * Marks or clears the file on screen. A mark records the content the reader
+	 * sees, by its fingerprint and the revision it was loaded at, even when the
+	 * overview has moved on while a reload of the file is in flight.
+	 */
 	async function toggleViewed() {
-		if (!review || !activeSummary) return;
+		if (!review || !file) return;
 		viewedError = null;
-		const route = viewedRoute(activeSummary.path);
+		const shown = file;
+		const route = viewedRoute(shown.path);
+		const revision = fileRevision;
 		try {
-			if (activeViewState === 'viewed') {
+			if (shownViewState(review.files, shown) === 'viewed') {
 				await request<ViewedResponse>(route, { method: 'DELETE' });
 			} else {
 				await request<ViewedResponse>(route, {
 					method: 'PUT',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ fingerprint: activeSummary.id, revision: review.revision })
+					body: JSON.stringify({ fingerprint: shown.id, revision })
 				});
 			}
 		} catch (cause) {
 			viewedError = handleErr(cause, 'The viewed mark could not be saved.');
 		}
-		await reloadOverview();
+		await reloadReview(false);
 	}
 
+	/**
+	 * Loads a file into the diff pane. Reloading the file on screen keeps it and
+	 * its controls mounted until the new content arrives; another file clears the
+	 * pane first. Only the newest load replaces what is shown.
+	 */
 	async function selectFile(id: string, finding?: FindingSummary) {
+		const ticket = ++fileLoads;
+		const next = review?.files.find((summary) => summary.id === id);
+		const revision = review?.revision ?? 0;
 		activeFile = id;
-		file = null;
+		if (!next || !isShownFile(file, next)) file = null;
 		fileError = null;
+		fileLoading = true;
 		try {
-			file = await request<FileDetail>(`/api/v1/files/${encodeURIComponent(id)}`);
+			const detail = await request<FileDetail>(`/api/v1/files/${encodeURIComponent(id)}`);
+			if (ticket !== fileLoads) return;
+			file = detail;
+			fileRevision = revision;
 			viewedError = null;
 			if (finding) window.setTimeout(() => scrollToFinding(finding.id));
 		} catch (cause) {
+			if (ticket !== fileLoads) return;
+			file = null;
 			fileError = handleErr(cause, 'The file diff could not be loaded.');
+		} finally {
+			if (ticket === fileLoads) fileLoading = false;
 		}
+	}
+
+	/** Empties the diff pane when no file is left to show, and drops any file load in flight. */
+	function closeFile() {
+		fileLoads++;
+		activeFile = null;
+		file = null;
+		fileError = null;
+		fileLoading = false;
+		viewedError = null;
+	}
+
+	/** Opens a file the reader picked, which replaces any reload notice. */
+	function chooseFile(id: string) {
+		notice = null;
+		void selectFile(id);
 	}
 
 	async function selectFinding(finding: FindingSummary) {
 		findingError = null;
+		notice = null;
 		try {
 			activeFinding = await request<FindingDetail>(`/api/v1/findings/${encodeURIComponent(finding.id)}`);
 			if (!finding.navigable || !review) return;
@@ -366,7 +422,7 @@
 
 	function selectFileFromDrawer(id: string) {
 		mobilePane = null;
-		void selectFile(id);
+		chooseFile(id);
 	}
 
 	function selectFindingFromDrawer(finding: FindingSummary) {
@@ -478,25 +534,31 @@
 			<DiffPane
 				{file}
 				{fileError}
+				{fileLoading}
+				{notice}
 				{activeFinding}
 				{findingError}
 				{theme}
-				viewState={activeViewState}
+				viewState={shownView}
 				{viewedError}
+				onDismissNotice={() => (notice = null)}
 				onToggleViewed={toggleViewed}
 				onFindingClick={selectFinding}
 				onEditFinding={editFinding}
 				onDecideFinding={decideFinding} />
 		{:else}
-			<FileNavigator files={review.files} {activeFile} onSelect={selectFile} />
+			<FileNavigator files={review.files} {activeFile} onSelect={chooseFile} />
 			<DiffPane
 				{file}
 				{fileError}
+				{fileLoading}
+				{notice}
 				{activeFinding}
 				{findingError}
 				{theme}
-				viewState={activeViewState}
+				viewState={shownView}
 				{viewedError}
+				onDismissNotice={() => (notice = null)}
 				onToggleViewed={toggleViewed}
 				onFindingClick={selectFinding}
 				onEditFinding={editFinding}

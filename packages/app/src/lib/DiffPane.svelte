@@ -14,11 +14,14 @@
 	let {
 		file,
 		fileError,
+		fileLoading = false,
+		notice = null,
 		activeFinding,
 		findingError,
 		theme,
 		viewState,
 		viewedError,
+		onDismissNotice = () => {},
 		onToggleViewed,
 		onFindingClick,
 		onEditFinding,
@@ -26,11 +29,16 @@
 	}: {
 		file: FileDetail | null;
 		fileError: string | null;
+		/** Whether a file load is in flight. A reload of the shown file keeps it on screen meanwhile. */
+		fileLoading?: boolean;
+		/** A short message for the reader, such as the open file leaving the review. */
+		notice?: string | null;
 		activeFinding: FindingDetail | null;
 		findingError: string | null;
 		theme: Theme;
 		viewState: FileViewState;
 		viewedError: string | null;
+		onDismissNotice?: () => void;
 		onToggleViewed: () => void;
 		onFindingClick: (finding: FindingSummary) => void;
 		onEditFinding: (draft: FindingDraft) => Promise<string | null>;
@@ -41,16 +49,27 @@
 	let expandContext = $state(false);
 </script>
 
-<section class="diff-pane" aria-label="File diff">
+<section class="diff-pane" aria-label="File diff" aria-busy={fileLoading}>
+	{#if notice}
+		<div class="notice" role="status">
+			<p>{notice}</p>
+			<button onclick={onDismissNotice}>Dismiss</button>
+		</div>
+	{/if}
 	{#if fileError}
 		<section class="message error">
 			<h1>File unavailable</h1>
 			<p>{fileError}</p>
 		</section>
-	{:else if !file}
+	{:else if !file && fileLoading}
 		<section class="message" aria-live="polite">
 			<h1>Loading file</h1>
 			<p>Reading the semantic diff.</p>
+		</section>
+	{:else if !file}
+		<section class="message" aria-live="polite">
+			<h1>No changed files</h1>
+			<p>The review has no file diffs to show.</p>
 		</section>
 	{:else}
 		<header class="diff-heading">
@@ -115,6 +134,30 @@
 </section>
 
 <style>
+	.notice {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		margin-bottom: 0.85rem;
+		border: 1px solid var(--line-strong);
+		padding: 0.5rem 0.75rem;
+		background: var(--paper);
+		font-size: 0.78rem;
+	}
+	.notice p {
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
+	.notice button {
+		flex: none;
+		border: 1px solid var(--line-strong);
+		padding: 0.2rem 0.55rem;
+		background: var(--surface);
+		color: var(--ink);
+		font: inherit;
+		cursor: pointer;
+	}
 	.diff-pane {
 		min-width: 0;
 		overflow-y: auto;

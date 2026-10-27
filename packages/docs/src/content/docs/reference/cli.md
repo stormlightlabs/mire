@@ -29,10 +29,12 @@ Git reads a changed worktree file twice: once to hash it for the patch's
 torn patch, whose hunks do not match its blob id. For a comparison that reads
 the worktree, Mire rebuilds each text file's new side from the old blob and
 the hunks and checks it against the blob id. On a mismatch it captures again,
-up to five times, then fails with exit status `6` and an error naming the file.
-This applies to `mire diff`, `review init`, `review refresh`, `--watch`
-reloads, and `mire serve` refreshes. Staged and revision-to-revision
-comparisons read only stored objects, so Mire does not check them.
+and after five captures in total it reports an error naming the file.
+`mire diff`, `review init` and `review refresh` then exit with status `6`. A
+`--watch` reload shows the error and keeps the last capture on screen, and a
+`mire serve` refresh sets the watch status to `degraded`; both keep running
+and try again on the next change. Staged and revision-to-revision comparisons
+read only stored objects, so Mire does not check them.
 
 ### `mire show`
 

@@ -2,7 +2,7 @@
 id = "arcl-t-01M5SXD522EWRYNXQ1NZY6P3TM"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
 title = "Walkthrough model in the review file"
-status = "pending"
+status = "in_progress"
 priority = "high"
 position = 6
 blocked-by = ["arcl-t-01M5SXD4ZAB2KCM5B3EKPP1EB5", "arcl-t-01M5SXD4ZQV5YW9TF0093A640S"]

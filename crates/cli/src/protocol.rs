@@ -664,6 +664,20 @@ pub fn viewed_result_json(review: &Review, reader: &str, path: &BytePath, status
     Ok(bytes)
 }
 
+/// Serializes the result of clearing every viewed mark a reader held.
+pub fn viewed_cleared_json(review: &Review, reader: &str, cleared: usize) -> Result<Vec<u8>> {
+    let value = json!({
+        "schema_version": CURRENT_PROTOCOL_SCHEMA_VERSION,
+        "status": "unviewed",
+        "review_revision": review.revision().get(),
+        "reader": reader,
+        "cleared": cleared,
+    });
+    let mut bytes = serde_json::to_vec(&value).map_err(ProtocolError::Serialize)?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
 /// Serializes a rejected viewed mark change with its failure code, such as
 /// `viewed_mismatch` or `invalid_path`.
 pub fn viewed_rejection_json(code: &str, error: &str) -> Result<Vec<u8>> {

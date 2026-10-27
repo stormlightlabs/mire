@@ -20,7 +20,7 @@ use crate::output_file::{OutputFileError, write_output_atomic};
 use crate::protocol::{
     ContextSelection, LocationBatch, NoteBatch, ProtocolError, apply_error_json, check_schema_major, context_json,
     import_error_json, import_result_json, notes_json, notes_markdown, protocol_error_json, review_status_json,
-    review_status_text, revision_conflict_json, viewed_rejection_json, viewed_result_json,
+    review_status_text, revision_conflict_json, viewed_cleared_json, viewed_rejection_json, viewed_result_json,
 };
 use crate::refresh::{RefreshError, refresh_review as refresh_review_file};
 use crate::review_file::{
@@ -751,11 +751,14 @@ fn import_notes(review_path: &OsStr, input: &OsStr, expected_revision: u64) -> R
 fn execute_file(command: FileCommand) -> Result<(), AppError> {
     let (review_path, file, reader, mark) = match command {
         FileCommand::Viewed(FileViewedArgs { review, file, fingerprint, revision, reader }) => {
-            (review, file, reader, Some((fingerprint, revision)))
+            (review, Some(file), reader, Some((fingerprint, revision)))
         }
-        FileCommand::Unviewed(FileUnviewedArgs { review, file, reader }) => (review, file, reader, None),
+        FileCommand::Unviewed(FileUnviewedArgs { review, file, all: _, reader }) => (review, file, reader, None),
     };
     let reader = reader.unwrap_or_else(|| local_author().id().to_owned());
+    let Some(file) = file else {
+        return clear_all_viewed(Path::new(&review_path), &reader);
+    };
     let path = BytePath::new(file.as_encoded_bytes()).map_err(|error| viewed_rejection("invalid_path", &error))?;
     let result = update_review_viewed(Path::new(&review_path), |review| match mark {
         Some((fingerprint, revision)) => {
@@ -763,13 +766,28 @@ fn execute_file(command: FileCommand) -> Result<(), AppError> {
         }
         None => review.unmark_viewed(&reader, &path),
     });
-    let updated = match result {
-        Ok(updated) => updated,
-        Err(ReviewFileError::MarkRejected(error)) => return Err(viewed_rejection(error.error_code(), &error)),
-        Err(error) => return Err(AppError::WriteReviewFile(error)),
-    };
+    let updated = viewed_update(result)?;
     let status = if mark.is_some() { "viewed" } else { "unviewed" };
     write_bytes(&viewed_result_json(&updated, &reader, &path, status).map_err(AppError::Protocol)?)
+}
+
+fn clear_all_viewed(review_path: &Path, reader: &str) -> Result<(), AppError> {
+    let mut cleared = 0;
+    let result = update_review_viewed(review_path, |review| {
+        let (updated, count) = review.unmark_all_viewed(reader)?;
+        cleared = count;
+        Ok(updated)
+    });
+    let updated = viewed_update(result)?;
+    write_bytes(&viewed_cleared_json(&updated, reader, cleared).map_err(AppError::Protocol)?)
+}
+
+fn viewed_update(result: Result<Review, ReviewFileError>) -> Result<Review, AppError> {
+    match result {
+        Ok(updated) => Ok(updated),
+        Err(ReviewFileError::MarkRejected(error)) => Err(viewed_rejection(error.error_code(), &error)),
+        Err(error) => Err(AppError::WriteReviewFile(error)),
+    }
 }
 
 fn viewed_rejection(code: &str, error: &dyn std::fmt::Display) -> AppError {

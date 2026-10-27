@@ -86,16 +86,23 @@ pub fn mark(
         updated.schema_version = CURRENT_REVIEW_SCHEMA_VERSION;
     }
     let marks = updated.viewed.entry(reader.to_owned()).or_default();
-    let mark = ViewedMark { path, fingerprint, revision, extensions: BTreeMap::new() };
     match position {
-        Ok(index) => marks[index] = mark,
-        Err(index) => marks.insert(index, mark),
+        Ok(index) => {
+            // Keep fields a newer Mire stored on the mark.
+            marks[index].fingerprint = fingerprint;
+            marks[index].revision = revision;
+        }
+        Err(index) => marks.insert(
+            index,
+            ViewedMark { path, fingerprint, revision, extensions: BTreeMap::new() },
+        ),
     }
     Ok(updated)
 }
 
-/// Returns `review` without `reader`'s mark for `path`. A missing mark leaves
-/// the review unchanged.
+/// Returns `review` without `reader`'s mark for `path`, whether or not the
+/// path is still in the changeset. A missing mark leaves the review unchanged.
+/// Removing a reader's last mark drops the reader, freeing its slot.
 pub fn unmark(review: &Review, reader: &str, path: &BytePath) -> Result<Review> {
     validate_reader(reader)?;
     let Some(index) = review
@@ -115,6 +122,18 @@ pub fn unmark(review: &Review, reader: &str, path: &BytePath) -> Result<Review> 
     Ok(updated)
 }
 
+/// Returns `review` without any of `reader`'s marks, and the number removed.
+/// The reader is dropped, freeing its slot.
+pub fn unmark_all(review: &Review, reader: &str) -> Result<(Review, usize)> {
+    validate_reader(reader)?;
+    let Some(count) = review.viewed.get(reader).map(Vec::len) else {
+        return Ok((review.clone(), 0));
+    };
+    let mut updated = review.clone();
+    updated.viewed.remove(reader);
+    Ok((updated, count))
+}
+
 /// Sorts each reader's marks by path.
 pub fn canonicalize(viewed: &mut ViewedMap) {
     for marks in viewed.values_mut() {
@@ -122,17 +141,17 @@ pub fn canonicalize(viewed: &mut ViewedMap) {
     }
 }
 
-/// Checks reader ids, the reader and mark limits, and that no reader holds two
-/// marks for one path. Marks must already be sorted by path.
+/// Checks reader ids and that no reader holds two marks for one path. Marks
+/// must already be sorted by path.
+///
+/// The reader and mark limits are not checked here: [`mark`] enforces them
+/// when it adds a mark or a reader, so a file past them still loads and its
+/// marks can still be cleared. The review file size limit bounds what a load
+/// reads. A duplicate path is still rejected, because lookups assume one mark
+/// per path and Mire never writes two.
 pub fn validate(viewed: &ViewedMap) -> Result<()> {
-    if viewed.len() > MAX_VIEWED_READERS {
-        return Err(ReviewError::TooManyViewedReaders { actual: viewed.len(), limit: MAX_VIEWED_READERS });
-    }
     for (reader, marks) in viewed {
         validate_reader(reader)?;
-        if marks.len() > MAX_VIEWED_MARKS {
-            return Err(ReviewError::TooManyViewedMarks { actual: marks.len(), limit: MAX_VIEWED_MARKS });
-        }
         if let Some(pair) = marks.windows(2).find(|pair| pair[0].path == pair[1].path) {
             return Err(ReviewError::DuplicateViewedPath {
                 reader: reader.clone(),
@@ -317,7 +336,25 @@ mod tests {
     }
 
     #[test]
-    fn limits_and_duplicates_are_rejected() {
+    fn duplicates_are_rejected_on_load() {
+        let review = review(PATCH);
+        let file = &review.changeset().files()[0];
+        let mark = ViewedMark {
+            path: file.canonical_path().clone(),
+            fingerprint: file.fingerprint(),
+            revision: review.revision(),
+            extensions: BTreeMap::new(),
+        };
+        let mut viewed = ViewedMap::new();
+        viewed.insert("ana".to_owned(), vec![mark.clone(), mark]);
+        assert!(matches!(
+            validate(&viewed),
+            Err(ReviewError::DuplicateViewedPath { .. })
+        ));
+    }
+
+    #[test]
+    fn clearing_a_readers_last_mark_frees_its_slot() {
         let review = review(PATCH);
         let file = &review.changeset().files()[0];
         let mut crowded = review.clone();
@@ -331,33 +368,209 @@ mod tests {
                 )
                 .unwrap();
         }
-        assert_eq!(
-            crowded.mark_viewed(
+        let one_more = |review: &Review| {
+            review.mark_viewed(
                 "one-more",
                 file.canonical_path().clone(),
                 file.fingerprint(),
-                review.revision()
-            ),
+                review.revision(),
+            )
+        };
+        assert_eq!(
+            one_more(&crowded),
             Err(ReviewError::TooManyViewedReaders { actual: MAX_VIEWED_READERS + 1, limit: MAX_VIEWED_READERS })
         );
+        let freed = crowded.unmark_viewed("reader-0", file.canonical_path()).unwrap();
+        assert!(!freed.viewed().contains_key("reader-0"));
+        assert_eq!(freed.viewed().len(), MAX_VIEWED_READERS - 1);
+        assert!(one_more(&freed).is_ok());
+    }
 
+    #[test]
+    fn a_mark_on_a_departed_path_stays_until_cleared() {
+        let review = review(PATCH);
+        let file = &review.changeset().files()[0];
+        let marked = review
+            .mark_viewed(
+                "ana",
+                file.canonical_path().clone(),
+                file.fingerprint(),
+                review.revision(),
+            )
+            .unwrap();
+        let without_a = parse_patch(
+            b"--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-one\n+two\n",
+            ChangesetSource::Patch { label: None },
+            PatchLimits::default(),
+        )
+        .unwrap();
+        let refreshed = marked.reanchor(without_a).unwrap();
+        let path = file.canonical_path();
+        assert!(
+            refreshed
+                .changeset()
+                .files()
+                .iter()
+                .all(|file| file.canonical_path() != path)
+        );
+        assert!(refreshed.viewed_mark("ana", path).is_some());
+
+        let cleared = refreshed.unmark_viewed("ana", path).unwrap();
+        assert!(cleared.viewed().is_empty());
+    }
+
+    #[test]
+    fn clearing_all_of_a_readers_marks_drops_the_reader() {
+        let review = review(PATCH);
+        let mut marked = review.clone();
+        for reader in ["ana", "ben"] {
+            for file in review.changeset().files() {
+                marked = marked
+                    .mark_viewed(
+                        reader,
+                        file.canonical_path().clone(),
+                        file.fingerprint(),
+                        review.revision(),
+                    )
+                    .unwrap();
+            }
+        }
+        let (cleared, count) = marked.unmark_all_viewed("ana").unwrap();
+        assert_eq!(count, 2);
+        assert_eq!(cleared.revision(), review.revision());
+        assert!(!cleared.viewed().contains_key("ana"));
+        assert_eq!(cleared.viewed_marks("ben").len(), 2);
+        assert_eq!(cleared.unmark_all_viewed("ana").unwrap(), (cleared.clone(), 0));
+        assert!(matches!(
+            cleared.unmark_all_viewed(""),
+            Err(ReviewError::InvalidTextField { field: "reader identifier", .. })
+        ));
+    }
+
+    #[test]
+    fn a_review_past_the_reader_limit_loads_and_only_shrinks() {
+        let review = review(PATCH);
+        let file = &review.changeset().files()[0];
         let mark = ViewedMark {
             path: file.canonical_path().clone(),
             fingerprint: file.fingerprint(),
             revision: review.revision(),
             extensions: BTreeMap::new(),
         };
-        let mut viewed = ViewedMap::new();
-        viewed.insert("ana".to_owned(), vec![mark.clone(), mark.clone()]);
-        assert!(matches!(
-            validate(&viewed),
-            Err(ReviewError::DuplicateViewedPath { .. })
-        ));
-        viewed.insert("ana".to_owned(), vec![mark; MAX_VIEWED_MARKS + 1]);
-        assert_eq!(
-            validate(&viewed),
-            Err(ReviewError::TooManyViewedMarks { actual: MAX_VIEWED_MARKS + 1, limit: MAX_VIEWED_MARKS })
+        let mut crowded = review.clone();
+        for index in 0..=MAX_VIEWED_READERS {
+            crowded.viewed.insert(format!("reader-{index}"), vec![mark.clone()]);
+        }
+        let json = serde_json::to_string(&crowded).unwrap();
+        let loaded: Review = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.viewed().len(), MAX_VIEWED_READERS + 1);
+
+        let other = &review.changeset().files()[1];
+        assert!(
+            loaded
+                .mark_viewed(
+                    "reader-0",
+                    other.canonical_path().clone(),
+                    other.fingerprint(),
+                    review.revision()
+                )
+                .is_ok()
         );
+        assert_eq!(
+            loaded.mark_viewed(
+                "new",
+                file.canonical_path().clone(),
+                file.fingerprint(),
+                review.revision()
+            ),
+            Err(ReviewError::TooManyViewedReaders { actual: MAX_VIEWED_READERS + 2, limit: MAX_VIEWED_READERS })
+        );
+        let shrunk = loaded.unmark_viewed("reader-0", file.canonical_path()).unwrap();
+        assert_eq!(shrunk.viewed().len(), MAX_VIEWED_READERS);
+        let (shrunk, _) = shrunk.unmark_all_viewed("reader-1").unwrap();
+        assert_eq!(shrunk.viewed().len(), MAX_VIEWED_READERS - 1);
+    }
+
+    #[test]
+    fn a_reader_past_the_mark_limit_loads_and_only_shrinks() {
+        let review = review(PATCH);
+        let file = &review.changeset().files()[0];
+        let marks = (0..=MAX_VIEWED_MARKS)
+            .map(|index| ViewedMark {
+                path: BytePath::new(format!("z/{index:05}.txt").into_bytes()).unwrap(),
+                fingerprint: file.fingerprint(),
+                revision: review.revision(),
+                extensions: BTreeMap::new(),
+            })
+            .collect();
+        let mut crowded = review.clone();
+        crowded.viewed.insert("ana".to_owned(), marks);
+        let json = serde_json::to_string(&crowded).unwrap();
+        let loaded: Review = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.viewed_marks("ana").len(), MAX_VIEWED_MARKS + 1);
+
+        assert_eq!(
+            loaded.mark_viewed(
+                "ana",
+                file.canonical_path().clone(),
+                file.fingerprint(),
+                review.revision()
+            ),
+            Err(ReviewError::TooManyViewedMarks { actual: MAX_VIEWED_MARKS + 2, limit: MAX_VIEWED_MARKS })
+        );
+        let departed = BytePath::new(b"z/00000.txt".to_vec()).unwrap();
+        let shrunk = loaded.unmark_viewed("ana", &departed).unwrap();
+        assert_eq!(shrunk.viewed_marks("ana").len(), MAX_VIEWED_MARKS);
+        assert!(
+            shrunk
+                .mark_viewed(
+                    "ana",
+                    file.canonical_path().clone(),
+                    file.fingerprint(),
+                    review.revision()
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn re_marking_keeps_fields_a_newer_mire_stored() {
+        let review = review(PATCH);
+        let file = &review.changeset().files()[0];
+        let mut marked = review
+            .mark_viewed(
+                "ana",
+                file.canonical_path().clone(),
+                file.fingerprint(),
+                review.revision(),
+            )
+            .unwrap();
+        let extension = (String::from("seen_by"), Value::String(String::from("tui")));
+        marked.viewed.get_mut("ana").unwrap()[0]
+            .extensions
+            .extend([extension.clone()]);
+        let changed = parse_patch(
+            b"--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+newer\n--- a/b.txt\n+++ b/b.txt\n@@ -1 +1 @@\n-one\n+two\n",
+            ChangesetSource::Patch { label: None },
+            PatchLimits::default(),
+        )
+        .unwrap();
+        let refreshed = marked.reanchor(changed).unwrap();
+        let file = &refreshed.changeset().files()[0];
+        let remarked = refreshed
+            .mark_viewed(
+                "ana",
+                file.canonical_path().clone(),
+                file.fingerprint(),
+                refreshed.revision(),
+            )
+            .unwrap();
+        let mark = &remarked.viewed_marks("ana")[0];
+        assert_eq!(mark.fingerprint(), file.fingerprint());
+        assert_eq!(mark.revision(), refreshed.revision());
+        assert_eq!(mark.extensions.get(&extension.0), Some(&extension.1));
+        let json = serde_json::to_string(&remarked).unwrap();
+        assert!(json.contains("\"seen_by\":\"tui\""));
     }
 
     fn review(patch: &[u8]) -> Review {

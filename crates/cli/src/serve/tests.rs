@@ -756,6 +756,37 @@ async fn viewed_marks_persist_without_advancing_the_revision() {
 }
 
 #[tokio::test]
+async fn the_delete_route_clears_a_mark_on_a_path_that_left_the_changeset() {
+    let fixture = Fixture::with_note();
+    let (id, raw) = first_file(&fixture).await;
+    let route = format!("/api/v1/viewed?path={raw}");
+    let body = format!(r#"{{"fingerprint":"{id}","revision":2}}"#);
+    let (status, _) = send_json(fixture.state(), api_request(Method::PUT, &route, Some(&body))).await;
+    assert_eq!(status, StatusCode::OK);
+    let review = read_review(fixture.path()).expect("review");
+    let other = parse_patch(
+        b"--- a/other.rs\n+++ b/other.rs\n@@ -1 +1 @@\n-a\n+b\n",
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .expect("changeset");
+    let refreshed = review.reanchor(other).expect("reanchored");
+    crate::write_review_atomic(fixture.path(), &refreshed).expect("review is written");
+    let path = BytePath::new(b"file.rs".to_vec()).expect("path");
+    assert!(
+        read_review(fixture.path())
+            .expect("review")
+            .viewed_mark(local_author().id(), &path)
+            .is_some()
+    );
+
+    let (status, cleared) = send_json(fixture.state(), api_request(Method::DELETE, &route, None)).await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_eq!(cleared["viewed"], serde_json::Value::Null);
+    assert!(read_review(fixture.path()).expect("review").viewed().is_empty());
+}
+
+#[tokio::test]
 async fn viewed_marks_reject_bad_paths_and_changed_fingerprints() {
     let fixture = Fixture::with_note();
     let (id, raw) = first_file(&fixture).await;

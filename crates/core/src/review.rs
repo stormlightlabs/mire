@@ -1262,8 +1262,9 @@ impl Review {
     /// did not have that fingerprint at that revision fails with
     /// [`ReviewError::ViewedMismatch`]. A reader may hold
     /// [`MAX_VIEWED_MARKS`] marks, and a review may hold marks for
-    /// [`MAX_VIEWED_READERS`] readers. The reader id follows the
-    /// [`Author`] id rule.
+    /// [`MAX_VIEWED_READERS`] readers; the limits apply only when a mark adds
+    /// a path or a reader, so a review past them still re-marks and clears.
+    /// The reader id follows the [`Author`] id rule.
     pub fn mark_viewed(
         &self, reader: &str, path: BytePath, fingerprint: Fingerprint, revision: ReviewRevision,
     ) -> Result<Self> {
@@ -1271,9 +1272,18 @@ impl Review {
     }
 
     /// Clears a reader's viewed mark for a path, without advancing the
-    /// revision. A path without a mark leaves the review unchanged.
+    /// revision. The path need not be in the changeset. A path without a mark
+    /// leaves the review unchanged. Clearing a reader's last mark drops the
+    /// reader, freeing its slot.
     pub fn unmark_viewed(&self, reader: &str, path: &BytePath) -> Result<Self> {
         viewed::unmark(self, reader, path)
+    }
+
+    /// Clears every viewed mark a reader holds, without advancing the
+    /// revision, and drops the reader. Returns the review and the number of
+    /// marks cleared.
+    pub fn unmark_all_viewed(&self, reader: &str) -> Result<(Self, usize)> {
+        viewed::unmark_all(self, reader)
     }
 
     /// Replaces this review's viewed marks with those of `stored`.

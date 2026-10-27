@@ -233,9 +233,12 @@ pub struct FileUnviewedArgs {
     /// JSON review file to update.
     #[arg(value_hint = ValueHint::FilePath)]
     pub review: OsString,
-    /// Repository-relative path of the changed file.
-    #[arg(long, value_hint = ValueHint::AnyPath)]
-    pub file: OsString,
+    /// Path of the marked file, in the changeset or not.
+    #[arg(long, value_hint = ValueHint::AnyPath, required_unless_present = "all", conflicts_with = "all")]
+    pub file: Option<OsString>,
+    /// Clear every mark the reader holds and free the reader's slot.
+    #[arg(long)]
+    pub all: bool,
     /// Reader the mark belongs to; defaults to USER, then USERNAME.
     #[arg(long, value_name = "ID")]
     pub reader: Option<String>,

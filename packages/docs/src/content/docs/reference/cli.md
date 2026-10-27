@@ -125,20 +125,24 @@ fingerprint equals the file's `fingerprint` in the manifest.
 ```text
 mire file viewed REVIEW.json --file PATH --fingerprint FINGERPRINT --revision REVISION [--reader ID]
 mire file unviewed REVIEW.json --file PATH [--reader ID]
+mire file unviewed REVIEW.json --all [--reader ID]
 ```
 
 `file viewed` records that a reader viewed a file at the fingerprint and review
 revision they read, both from `mire context`. Mire rejects the mark with
 `viewed_mismatch` unless that revision is the review's current revision and the
 fingerprint is the file's current one. `file unviewed` clears the reader's mark
-for the path. Neither command advances the review revision, so marks never
-cause a `revision_conflict` for another writer.
+for the path, whether or not the path is still in the changeset. With `--all`
+it clears every mark the reader holds. Neither command advances the review
+revision, so marks never cause a `revision_conflict` for another writer.
 
 `--reader` defaults to `USER`, then `USERNAME`, then `local-human`, the author
 Mire uses for notes from the terminal and the browser. A person and an agent in
-one shell share `USER`, so an agent should always pass `--reader`. A reader id
-is 1 to 256 bytes. A reader may hold 10,000 marks, and a review may hold marks
-for 100 readers.
+one shell share `USER`, so an agent should always pass `--reader`, with one
+stable id per agent rather than one per session. A reader id is 1 to 256 bytes.
+A reader may hold 10,000 marks, and a review may hold marks for 100 readers.
+The limits apply only when a mark adds a path or a reader. Clearing a reader's
+last mark frees its slot.
 
 Both commands print the reader's mark for the path, or `null` once cleared:
 
@@ -153,10 +157,16 @@ Both commands print the reader's mark for the path, or `null` once cleared:
 }
 ```
 
+With `--all`, the output names the reader and the number of marks cleared in
+place of `path` and `mark`: `"reader": "review-agent", "cleared": 12`.
+
 A rejected change exits with status `8` and prints a report on standard error
 with the `code` `viewed_mismatch`, `invalid_path` for a path that is not a safe
-repository-relative path, or `too_many_viewed_marks` or
-`too_many_viewed_readers` at a limit.
+repository-relative path, `invalid_text_field` for a `--reader` that is empty
+or longer than 256 bytes, or `too_many_viewed_marks` or
+`too_many_viewed_readers` at a limit. When another process holds the review
+lock, the command exits with status `7` and prints a plain-text error on
+standard error, as the note commands do. Retry after the other write ends.
 
 ## Note commands
 
@@ -297,7 +307,7 @@ it was marked shows as changed since viewed.
 | Route                         | Effect                                                                 |
 | ----------------------------- | ---------------------------------------------------------------------- |
 | `PUT /api/v1/viewed?path=`    | Marks the path viewed at the `fingerprint` and `revision` in the body. |
-| `DELETE /api/v1/viewed?path=` | Clears the reader's mark for the path.                                 |
+| `DELETE /api/v1/viewed?path=` | Clears the reader's mark for the path, in the changeset or not.        |
 
 `path=` takes a path's `raw` field: its bytes as lowercase hex. Every path in a
 response carries `raw` next to `display` and `lossy`, so a path that is not

@@ -94,7 +94,8 @@ pub async fn put_viewed(
     change_viewed(state, path, ViewedChange::Mark { fingerprint, revision }).await
 }
 
-/// Clears the local reader's mark for the path in the `path` query parameter.
+/// Clears the local reader's mark for the path in the `path` query parameter,
+/// whether or not the path is still in the changeset.
 #[utoipa::path(
     delete,
     path = "/api/v1/viewed",

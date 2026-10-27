@@ -123,6 +123,110 @@ fn an_unsafe_path_is_rejected() {
     assert_eq!(report["failures"][0]["code"], "invalid_path");
 }
 
+#[test]
+fn a_mark_on_a_path_that_left_the_changeset_can_be_cleared() {
+    let fixture = Fixture::new();
+    assert_success(&fixture.mark("ana"));
+    let review = read_review(&fixture.review_path).unwrap();
+    let other = parse_patch(
+        b"--- a/src/other.rs\n+++ b/src/other.rs\n@@ -1 +1 @@\n-a\n+b\n",
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .unwrap();
+    let refreshed = review.reanchor(other).unwrap();
+    write_review_atomic_if_revision(&fixture.review_path, review.revision(), &refreshed).unwrap();
+    let path = BytePath::new(b"src/lib.rs".to_vec()).unwrap();
+    assert!(
+        read_review(&fixture.review_path)
+            .unwrap()
+            .viewed_mark("ana", &path)
+            .is_some()
+    );
+
+    let cleared = mire(&[
+        "file",
+        "unviewed",
+        fixture.review_str(),
+        "--file",
+        "src/lib.rs",
+        "--reader",
+        "ana",
+    ]);
+    assert_success(&cleared);
+    assert!(read_review(&fixture.review_path).unwrap().viewed().is_empty());
+}
+
+#[test]
+fn unviewed_all_clears_one_readers_marks_and_frees_the_slot() {
+    let fixture = Fixture::new();
+    assert_success(&fixture.mark("ana"));
+    assert_success(&fixture.mark("ben"));
+
+    let cleared = mire(&["file", "unviewed", fixture.review_str(), "--all", "--reader", "ana"]);
+    assert_success(&cleared);
+    let result: Value = serde_json::from_slice(&cleared.stdout).unwrap();
+    assert_eq!(result["status"], "unviewed");
+    assert_eq!(result["reader"], "ana");
+    assert_eq!(result["cleared"], 1);
+    let review = read_review(&fixture.review_path).unwrap();
+    assert_eq!(review.revision().get(), 1);
+    assert!(!review.viewed().contains_key("ana"));
+    assert!(review.viewed().contains_key("ben"));
+
+    let again = mire(&["file", "unviewed", fixture.review_str(), "--all", "--reader", "ana"]);
+    assert_success(&again);
+    let result: Value = serde_json::from_slice(&again.stdout).unwrap();
+    assert_eq!(result["cleared"], 0);
+
+    let both = mire(&[
+        "file",
+        "unviewed",
+        fixture.review_str(),
+        "--all",
+        "--file",
+        "src/lib.rs",
+    ]);
+    assert_eq!(both.status.code(), Some(2));
+    let neither = mire(&["file", "unviewed", fixture.review_str()]);
+    assert_eq!(neither.status.code(), Some(2));
+}
+
+#[test]
+fn an_invalid_reader_is_rejected() {
+    let fixture = Fixture::new();
+    for args in [
+        vec![
+            "file",
+            "unviewed",
+            fixture.review_str(),
+            "--file",
+            "src/lib.rs",
+            "--reader",
+            "",
+        ],
+        vec!["file", "unviewed", fixture.review_str(), "--all", "--reader", ""],
+    ] {
+        let rejected = mire(&args);
+        assert_eq!(rejected.status.code(), Some(8), "{args:?}");
+        let report: Value = serde_json::from_slice(&rejected.stderr).unwrap();
+        assert_eq!(report["failures"][0]["code"], "invalid_text_field");
+    }
+}
+
+#[test]
+fn a_held_review_lock_exits_with_status_7() {
+    let fixture = Fixture::new();
+    let lock = fixture.directory.join(".review.json.mire-lock");
+    fs::write(&lock, b"").unwrap();
+    let before = fs::read(&fixture.review_path).unwrap();
+    let locked = fixture.mark("ana");
+    assert_eq!(locked.status.code(), Some(7));
+    assert!(String::from_utf8_lossy(&locked.stderr).contains("being updated by another process"));
+    assert_eq!(fs::read(&fixture.review_path).unwrap(), before);
+    fs::remove_file(&lock).unwrap();
+}
+
 struct Fixture {
     directory: PathBuf,
     review_path: PathBuf,
@@ -142,6 +246,23 @@ impl Fixture {
 
     fn review_str(&self) -> &str {
         self.review_path.to_str().unwrap()
+    }
+
+    fn mark(&self, reader: &str) -> Output {
+        let fingerprint = self.fingerprint();
+        mire(&[
+            "file",
+            "viewed",
+            self.review_str(),
+            "--file",
+            "src/lib.rs",
+            "--fingerprint",
+            &fingerprint,
+            "--revision",
+            "1",
+            "--reader",
+            reader,
+        ])
     }
 
     fn fingerprint(&self) -> String {

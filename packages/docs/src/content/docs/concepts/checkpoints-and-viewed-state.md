@@ -163,13 +163,19 @@ A file is viewed for a reader when the mark's fingerprint equals the file's
 current fingerprint. When they differ, the file has changed since that reader
 viewed it, and the checkpoints after the mark's revision say which revisions
 changed it. A mark for a path that left the changeset stays until the reader
-clears it, so the file shows as viewed again if it comes back unchanged.
+clears it, so the file shows as viewed again if it comes back unchanged. The
+terminal and the browser list only current files, so such a mark is cleared
+with `mire file unviewed --file PATH` or the `DELETE` route, which take any
+path the reader has a mark on. `mire file unviewed --all` clears every mark one
+reader holds.
 
 The reader defaults to the local author Mire already uses for notes written
 from the terminal and the browser: `USER`, then `USERNAME`, with `local-human`
 as the fallback. The CLI takes `--reader` to name another reader. A person and
 an agent in the same shell share `USER`, so an agent should always pass
-`--reader` to keep its progress apart from the person's. A reader id follows
+`--reader` to keep its progress apart from the person's. An agent should use
+one stable reader id, such as its name, not one per session: each id takes one
+of the review's reader slots until its last mark is cleared. A reader id follows
 the `Author` id rule (`Author::new` in `crates/core/src/review.rs`): 1 to 256
 bytes.
 
@@ -208,7 +214,11 @@ review file, and send a `viewed` event when they differ and the revision does
 not.
 
 A reader may hold at most one mark per path and 10,000 marks in all, and a
-review may hold marks for at most 100 readers.
+review may hold marks for at most 100 readers. Mire checks the two limits only
+when a mark adds a path or a reader, so a file past them still loads and its
+marks can still be re-marked or cleared. Clearing a reader's last mark removes
+the reader and frees its slot. Re-marking a path keeps any fields a newer Mire
+stored on the mark.
 
 ## Notes and checkpoints
 

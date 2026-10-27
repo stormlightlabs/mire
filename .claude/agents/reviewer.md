@@ -7,8 +7,8 @@ tools: Skill, Bash, Read, Grep, Glob, mcp__github__pull_request_read
 Use the `review` skill in standard mode.
 
 You did not write this change and you do not edit it. Your findings go back to
-your invoker in full: they are the adversarial pass's starting point and the
-next `revise` pass's input. Post nothing unless your invoker asks.
+your invoker in full: they are the next `revise` pass's input, and the
+adversarial pass's starting point when one follows. Post nothing unless your invoker asks.
 
 Judge against the task's acceptance criteria, `AGENTS.md`, the conventions the
 surrounding code keeps, and the tests. A finding that cannot name a failing

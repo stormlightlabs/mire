@@ -1,0 +1,43 @@
+# Puts `fab` on the PATH for the Review gate and Branch PR. In fabrial itself
+# it builds fab from the checkout in the working directory; in a repository
+# that installs fabrial it installs the release .github/fabrial.toml names
+# there, and fails when that release has no `command`.
+name: Install fab
+description: Put fab on the PATH, built here in fabrial or installed from the release fabrial.toml names.
+
+inputs:
+  command:
+    description: The fab command the job runs, checked in the installed release.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: Swatinem/rust-cache@v2
+      if: hashFiles('crates/fab-cli/Cargo.toml') != ''
+
+    - shell: bash
+      env:
+        COMMAND: ${{ inputs.command }}
+      run: |
+        set -o pipefail
+        if [[ -f crates/fab-cli/Cargo.toml ]] && grep -qx 'name = "fab-cli"' crates/fab-cli/Cargo.toml; then
+          cargo build --quiet --locked -p fab-cli
+          bin=$PWD/target/debug
+        else
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' .github/fabrial.toml)
+          if [[ -z $version ]]; then
+            echo "::error title=fab::.github/fabrial.toml names no version; run fab update."
+            exit 1
+          fi
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            "https://github.com/stormlightlabs/fabrial/releases/download/v$version/fab-cli-installer.sh" | sh
+          bin=$HOME/.cargo/bin
+          # A fab built from main before a release can stamp a version that
+          # lacks the command.
+          if ! "$bin/fab" "$COMMAND" --help >/dev/null 2>&1; then
+            echo "::error title=fab::fab $version has no $COMMAND command; run fab update from a newer fabrial release."
+            exit 1
+          fi
+        fi
+        echo "$bin" >> "$GITHUB_PATH"

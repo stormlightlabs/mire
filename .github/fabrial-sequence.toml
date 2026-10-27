@@ -1,0 +1,37 @@
+# The review sequence the `storm` skill runs on a pull request, read by
+# `fab sequence`. Each stage runs once, in this order, in a fresh agent whose
+# role is in .claude/agents/. `depth` is the lowest review depth that runs the
+# stage: `fab review-depth` gives none, standard or full. `when` is the
+# condition a stage needs to run, and `posts` what it leaves on the pull
+# request. `fab sequence` reads this file from the merge base with main, so a
+# change to it applies to the pull requests after the one that makes it.
+# `fab init` installs this file and `fab update` refreshes it.
+
+[[stage]]
+name = "standard review"
+role = "reviewer"
+depth = "standard"
+posts = "The status comment's `Standard pass` section: a line `Standard pass on <short sha> · <model>`, then its findings most severe first, under 200 words."
+
+[[stage]]
+name = "standard revise"
+role = "reviser"
+depth = "standard"
+when = "the standard review found anything above nit"
+posts = "Its fixes, pushed, and replies to the findings."
+
+[[stage]]
+name = "adversarial review"
+role = "adversarial-reviewer"
+depth = "full"
+posts = "Nothing: its findings go in the finish comment under `Adversarial pass on <short sha> · <model>`."
+
+[[stage]]
+name = "adversarial revise"
+role = "reviser"
+depth = "full"
+when = "the adversarial review found anything above nit"
+posts = "Its fixes, pushed; it reports back instead of replying, and the finish comment says what it fixed."
+
+[finish]
+posts = "One comment whose first line is `Review finished at <full head sha>`, then the depth and its reason, then the adversarial findings and their fixes when that review ran."

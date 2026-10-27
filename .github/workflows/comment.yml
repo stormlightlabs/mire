@@ -7,6 +7,11 @@
 #
 # or, through the GitHub MCP tools, actions_run_trigger with method
 # run_workflow, workflow_id comment.yml, ref main and the same inputs.
+#
+# With `section`, such as `-f section="Standard pass"`, the body becomes that
+# section of the bot's status comment on the pull request instead of a new
+# comment: `fab pr-status` posts the status comment once and edits it after,
+# and an edit sends the owner no notification.
 name: Bot comment
 
 on:
@@ -18,6 +23,10 @@ on:
       body:
         description: Comment text, in Markdown
         required: true
+      section:
+        description: A status comment section to set instead of posting a comment
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -32,9 +41,8 @@ jobs:
           app-id: ${{ secrets.THUNDERBOT_APP_ID }}
           private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
 
-      - name: Post the comment
+      - name: Check the pull request
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
           PR: ${{ inputs.pr }}
           BODY: ${{ inputs.body }}
         run: |
@@ -42,5 +50,30 @@ jobs:
             echo "::error title=pr::'$PR' is not a pull request number."
             exit 1
           fi
-          printf '%s\n' "$BODY" > body.md
-          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file body.md
+          printf '%s\n' "$BODY" > "$RUNNER_TEMP/body.md"
+
+      # A section needs fab, from the default branch as the Review gate
+      # takes it, whatever ref the run was dispatched on.
+      - uses: actions/checkout@v5
+        if: inputs.section != ''
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/fab
+        if: inputs.section != ''
+        with:
+          command: pr-status
+
+      - name: Post the comment
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ inputs.pr }}
+          SECTION: ${{ inputs.section }}
+        run: |
+          if [[ -n $SECTION ]]; then
+            fab pr-status --body-file "$RUNNER_TEMP/body.md"
+          else
+            gh pr comment "$PR" --repo "$REPO" --body-file "$RUNNER_TEMP/body.md"
+          fi

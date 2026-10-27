@@ -2,14 +2,18 @@
 # storm/) as stormlight-thunderbot, so the owner can approve it under the
 # ruleset on main. Ported from desertthunder/knowledgebase.
 #
-# The title is the branch's first commit subject and the body is that commit's
-# body without its trailers, so it needs no model. A title or body set later by
-# hand or by an agent is kept. The PR stays a draft until its review finishes;
-# the Review gate then marks it ready and posts the squash message, and the
-# owner merges it, by hand or with auto-merge. Nothing here turns auto-merge
-# on. The suggested squash message takes the PR title and number, and its body
-# from the PR body through .github/storm/squash-body.sh, whose only trailer is a
-# Co-authored-by line for the owner.
+# `fab branch-pr` takes the title from the branch's first commit subject and
+# the body from that commit's body as the squash keeps it, so it needs no
+# model. A pull request already open keeps its title and body. The pull
+# request stays a draft until its review finishes; the Review gate then marks
+# it ready and sets the squash message, and the owner merges it, by hand or
+# with auto-merge. Nothing here turns auto-merge on.
+#
+# `fab` comes from the branch, as this workflow does: in fabrial it is built
+# from the branch, and elsewhere it is the release the branch's
+# .github/fabrial.toml names, so a branch that runs `fab update` gets the
+# release it updates to. In fabrial, a first push that does not build opens
+# no pull request; once it builds, run this from the Actions tab.
 #
 # It runs only on the push that creates the branch; later pushes skip the job,
 # which costs no runner time. A branch pushed with no commits ahead of main,
@@ -45,66 +49,16 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Open or update the PR
+      - uses: ./.github/actions/fab
+        with:
+          command: branch-pr
+
+      - name: Open the PR
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
-        run: |
-          # Credits the owner, who reviewed and approved, on the squash commit.
-          # Read from main's settings, as the Review gate does, so a branch
-          # cannot change the trailer and one cut before the file still works.
-          # Until main has the file, as on the push that adds it, read the
-          # branch's own copy; the owner's approval still gates the merge.
-          settings=origin/main
-          if ! git cat-file -e origin/main:.github/fabrial.toml 2>/dev/null; then
-            settings=HEAD
-          fi
-          OWNER_TRAILER=$(git show "$settings:.github/fabrial.toml" 2>/dev/null \
-            | sed -n 's/^trailer = "\(.*\)"$/\1/p' || true)
-          if [[ -z "$OWNER_TRAILER" ]]; then
-            echo "::error title=settings::.github/fabrial.toml has no trailer on main or this branch."
-            exit 1
-          fi
-          subjects=$(git log --reverse --format=%s origin/main..HEAD)
-          if [[ -z "$subjects" ]]; then
-            echo "No commits ahead of main."
-            exit 0
-          fi
-
-          number=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
-          if [[ -z "$number" ]]; then
-            title=$(printf '%s\n' "$subjects" | head -n 1)
-            first=$(git rev-list --reverse origin/main..HEAD | head -n 1)
-            # The text above the footer becomes the squash commit body.
-            {
-              text=$(git show -s --format=%b "$first" | .github/storm/squash-body.sh --text)
-              [[ -z $text ]] || printf '%s\n\n' "$text"
-              echo '<!-- fabrial:footer: the text above becomes the squash commit body. -->'
-              echo "From \`$BRANCH\`. Draft until the review finishes; the owner merges it."
-            } > body.md
-            # GitHub skips CODEOWNERS on a draft and requests the owner's
-            # review when the Review gate marks it ready. Asking with
-            # --reviewer fails with "Could not add requested reviewers".
-            gh pr create --draft --base main --head "$BRANCH" --title "$title" --body-file body.md
-            number=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
-          else
-            title=$(gh pr view "$number" --json title --jq .title)
-            gh pr view "$number" --json body --jq .body > body.md
-            # `/storm:stop` labels the PR and turns auto-merge off. Leave a
-            # stopped PR alone; only the owner turns auto-merge back on.
-            if gh pr view "$number" --json labels --jq '.labels[].name' | grep -qx 'storm:stopped'; then
-              echo "#$number is labelled storm:stopped."
-              exit 0
-            fi
-          fi
-
-          # A draft waits for its review: the Review gate marks it ready and
-          # posts the squash message when `Review finished` names its head.
-          if [[ $(gh pr view "$number" --json isDraft --jq .isDraft) == true ]]; then
-            echo "#$number is a draft; it waits for the review."
-            exit 0
-          fi
-
-          # Merging is the owner's: by hand, or with auto-merge they turn on.
-          echo "#$number is ready; the owner merges it."
+          HEAD_DIR: .
+        run: fab branch-pr

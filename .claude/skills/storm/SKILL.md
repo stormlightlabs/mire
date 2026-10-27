@@ -1,6 +1,6 @@
 ---
 name: storm
-description: Run one task (an arcl task, a GitHub issue or a description) or one open pull request through implement, a standard review and its revise, then an adversarial review and its revise, ending with `Review finished at <sha>`. Use for /storm, when asked to take a task to a reviewed pull request, or to review and finish a pull request this session opened.
+description: Run one task (an arcl task, a GitHub issue or a description) or one open pull request through implement and the review stages `fab sequence` gives, ending with `Review finished at <sha>`. Use for /storm, when asked to take a task to a reviewed pull request, or to review and finish a pull request this session opened.
 argument-hint: <task|pr-number>
 ---
 
@@ -35,14 +35,25 @@ with method `run_workflow`, `workflow_id` `comment.yml`, `ref` `main`, and
 scratch directory, never inside the repository. The comment appears once the
 run finishes, after about ten seconds.
 
-Both return once the run is queued, before it is listed, so a run that fails
-on a bad `pr` or a missing secret goes unseen, and the newest listed run may be
-an earlier one. Confirm each post by its result: within about a minute,
-`gh pr view <n> --comments`, or `pull_request_read` method `get_comments` in a
-cloud session, should show a comment from `stormlight-thunderbot[bot]`, created
-after you dispatched, whose first line matches yours. If none appears, look for
-a failure among the newest `comment.yml` runs and report it. Do not retry in a
-loop.
+A stage whose `posts` line names a section of the status comment adds
+`section`, such as `-f section="Standard pass"` or `"section": "Standard
+pass"` in `inputs`. That section of the bot's one status comment is set
+instead of a new comment, and an edit sends the owner no notification. The
+gate sets the `Squash message` section the same way. `Review finished` and
+the gate's requests to post a command again stay separate comments, since
+they need the owner or start the gate. A section post installs `fab` first,
+which in fabrial builds it and can take several minutes, so it lands later
+than a comment.
+
+Both return once the run is queued, before it is listed, so a run that fails on
+a bad `pr` or a missing secret goes unseen, and the newest listed run may be an
+earlier one. Confirm each post by its result: within about a minute, or for a
+section once its `comment.yml` run has finished, `gh pr view <n> --comments`,
+or `pull_request_read` method `get_comments` in a cloud session, should show a
+comment from `stormlight-thunderbot[bot]`, created after you dispatched, whose
+first line matches yours, or for a section, the status comment holding your
+text. If none appears, look for a failure among the newest `comment.yml` runs
+and report it. Do not retry in a loop.
 
 ## Implement
 
@@ -56,25 +67,30 @@ in a cloud session.
 
 ## Review
 
-The sequence is fixed: one standard pass, its revise, one adversarial pass,
-its revise. It runs once per pull request, never in a loop. Reviewers check
-their own findings before reporting them. Dispatch the `verifier` agent only
-when the driver asks for it.
+The stages live in `.github/fabrial-sequence.toml`. The sequence runs once
+per pull request, never in a loop. Reviewers check their own findings before
+reporting them. Dispatch the `verifier` agent only when the driver asks for it.
 
-1. **Standard pass.** Fetch the branch and pin its head SHA. Dispatch the
-   `reviewer` agent with the pull request, the SHA and the task ID.
-2. **Post.** One comment with its findings, in the `review` skill's format,
-   most severe first, under 200 words. Open it with
-   `Standard pass on <short sha> · <model>`.
-3. **Revise.** When anything above `nit` was found, dispatch the `reviser`
-   agent with the pull request, the worktree and the findings. It fixes,
-   pushes and replies.
-4. **Adversarial pass.** Pin the new head. Dispatch the `adversarial-reviewer`
-   agent with it, the standard pass's findings and the reviser's reply.
-5. **Revise** as in step 3, but tell the reviser to report back rather than
-   reply on the pull request. The findings and its report go in the Finish
-   comment, under `Adversarial pass on <short sha> · <model>`, so the run
-   posts one comment fewer.
+Fetch the branch, pin its head SHA and run `fab sequence --head <sha>` in the
+worktree. It prints the review depth with its reason, then the numbered stages
+that depth gives, each with its role, the condition it needs to run and what
+it posts, then the finish. It reads the file and the roles from the merge
+base with `main`, so a pull request's change to them applies to later pull
+requests, not its own review. Without `fab`, or when it fails, run every stage
+in the file on `main`, or, when `main` has none, a standard review and its
+revise then an adversarial review and its revise. The driver can ask for more
+stages than the depth gives, never fewer.
+
+Run the stages in order, each in a fresh agent of its role, and post what each
+stage's line says:
+
+- A reviewer gets the pull request, the pinned head and the task ID, and the
+  earlier stages' findings and replies when there are any.
+- A reviser gets the pull request, the task worktree and its review's
+  findings.
+- After each stage that pushes, pin the new head and run `fab sequence` on it
+  again. When the depth rose, the run goes on to the stages it added. The
+  depth never drops.
 
 Nits are left in the comments for the owner; they start no revise.
 
@@ -108,19 +124,19 @@ history is not a fresh reader.
 
 ## Finish
 
-After the adversarial pass and its revise, post one comment whose first line
-is exactly:
+After the last stage the depth gives, post the comment the finish line of
+`fab sequence` describes. Its first line is exactly:
 
 ```text
 Review finished at <full head sha>
 ```
 
-Below a blank line, the same comment carries the adversarial pass's findings
-and what the revise did about them. Each comment is one Bot comment run.
+Each comment is one Bot comment run.
 
 For an arcl task, first complete it on the branch and push, as the
 `implement` skill's **Complete the task** says, so the checks below and the
-gate read the final head.
+gate read the final head. Run `fab sequence` again on that head; when the
+depth rose, run the stages it now adds before posting.
 
 Before posting it, check that the pull request still merges. The review
 passes read the diff, not the base, so they do not see a conflict. `gh pr
@@ -144,10 +160,10 @@ request this run reviews.
 
 Post it through the Bot comment workflow like the rest. The Review gate
 workflow then turns `storm/review` green for that head, marks the draft ready
-and posts the squash message. It never turns on auto-merge: the owner merges,
-by hand or with auto-merge they turn on. Post it only once the
-sequence has run to its end. A push after it sets the check back to pending,
-unless the push only moved the base.
+and sets the squash message in the status comment. It never turns on
+auto-merge: the owner merges, by hand or with auto-merge they turn on. Post it
+only once the sequence has run to its end. A push after it sets the check back
+to pending, unless the push only moved the base.
 
 Confirm the finish comment appeared, then watch `storm/review` and the
 repository's required checks for this head. With `gh`, use `gh pr checks <n>`
@@ -201,6 +217,7 @@ Any of these ends the run without `Review finished`. Report the reason.
 
 - Review, revise or verify in this session's own context.
 - Post `Review finished` before the sequence has run to its end.
+- Skip a stage `fab sequence` gives, or pick a lower depth than it printed.
 - Start another review pass on your own. A second sequence needs
   `/storm:review`.
 - Approve or merge.

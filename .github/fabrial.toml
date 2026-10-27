@@ -13,4 +13,4 @@ gates = "just check"
 
 # The fabrial version that wrote the installed files. `fab check`
 # compares it with its own.
-version = "0.4.0"
+version = "0.7.1"

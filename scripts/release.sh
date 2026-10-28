@@ -4,12 +4,13 @@
 # Usage: scripts/release.sh <version>
 #
 # The section lists the conventional commit subjects since the last v* tag,
-# headed `## [<version>] - <today>`. It goes above the newest release's
-# section, or at the end of the file when there is none. The script fails,
-# changing nothing, when <version> is not a release like 0.2.0, differs from
-# the [workspace.package] version in Cargo.toml, is already tagged
-# v<version> here or on origin, already has a section in CHANGELOG.md, or has
-# no commits to list. It also fails when it cannot read origin's tags.
+# headed `## [<version>] - <today>`. It replaces the version's section when
+# CHANGELOG.md has one, since the version is not tagged yet, and otherwise
+# goes above the newest release's section, or at the end of the file. The
+# script fails, changing nothing, when <version> is not a release like 0.2.0,
+# differs from the [workspace.package] version in Cargo.toml, is already
+# tagged v<version> here or on origin, or has no commits to list. It also
+# fails when it cannot read origin's tags.
 set -euo pipefail
 
 usage() {
@@ -49,18 +50,21 @@ if git remote get-url origin >/dev/null 2>&1; then
   esac
 fi
 
-if grep -q "^## \[${version//./\\.}\]" CHANGELOG.md; then
-  fail "CHANGELOG.md already has a $version section."
-fi
-
 section=$(git cliff --config cliff.toml --unreleased --tag "$tag" --strip all)
 grep -q '^- ' <<<"$section" || fail "no commits to list since the last release."
 
-# Insert above the first `## [<digit>` heading, or append when none exists.
+# Replace the version's section, which runs to the next `## [` heading, or
+# insert above the first `## [<digit>` heading, or append when neither exists.
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
-# awk reads the section from the environment, which keeps its backslashes.
-SECTION=$section awk '
+# awk reads the section and heading from the environment, which keeps their
+# backslashes.
+SECTION=$section HEADING="## [$version]" awk '
+  skip && /^## \[/ { skip = 0 }
+  skip { next }
+  !done && index($0, ENVIRON["HEADING"]) == 1 {
+    print ENVIRON["SECTION"]; print ""; done = 1; skip = 1; next
+  }
   !done && /^## \[[0-9]/ { print ENVIRON["SECTION"]; print ""; done = 1 }
   { print }
   END { if (!done) { print ""; print ENVIRON["SECTION"] } }

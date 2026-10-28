@@ -4,13 +4,17 @@
 # dist's plan, and pushes storm/release-<version>, which Branch PR opens. The
 # owner edits the lines there before accepting it. Release tag tags the merge
 # commit. Nothing here writes to main.
+#
+# Run it again with the same version when Release tag refused a merged release
+# pull request because main gained changes after the section was written: the
+# version is still untagged, so the run rewrites its section.
 name: Release PR
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: The release, such as 0.2.0. It must sort above the current version, or equal it for the first release.
+        description: The release, such as 0.2.0. It must sort above the current version, or equal it while it is untagged.
         required: true
 
 permissions:
@@ -20,18 +24,10 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
-        id: app
-        with:
-          app-id: ${{ secrets.THUNDERBOT_APP_ID }}
-          private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
-
-      # The App token pushes the branch, so Branch PR runs on it; a push made
-      # with GITHUB_TOKEN starts no workflows.
       - uses: actions/checkout@v5
         with:
           ref: main
-          token: ${{ steps.app.outputs.token }}
+          persist-credentials: false
           # The changelog reads every commit since the last tag.
           fetch-depth: 0
           fetch-tags: true
@@ -42,9 +38,10 @@ jobs:
         with:
           tool: git-cliff
 
-      - name: Open the release pull request
+      # This step runs dist's installer, so it has no token beyond the
+      # checkout's read-only one, which checkout did not keep.
+      - name: Write the release commit
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
           VERSION: ${{ inputs.version }}
         run: |
           if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -52,20 +49,22 @@ jobs:
             exit 1
           fi
           current=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)
-          # The first release may keep the current version, since nothing has
-          # been released under it.
-          first=
-          if ! git tag --list 'v[0-9]*' | grep -q .; then
-            first=1
-          fi
-          if [[ $(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -n 1) != "$VERSION" ]] ||
-            [[ $current == "$VERSION" && -z $first ]]; then
+          tagged() {
+            git rev-parse -q --verify "refs/tags/v$1" >/dev/null
+          }
+          if [[ $current == "$VERSION" ]]; then
+            # The first release, or a release whose merge Release tag refused:
+            # nothing has been released under the version yet.
+            if tagged "$VERSION"; then
+              echo "::error title=version::v$VERSION is already tagged."
+              exit 1
+            fi
+          elif [[ $(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -n 1) != "$VERSION" ]]; then
             echo "::error title=version::$VERSION does not sort above the current $current."
             exit 1
-          fi
           # The changelog starts at the last tag, so an untagged release would
           # be listed again. Before the first release there is no tag to need.
-          if [[ -z $first ]] && ! git rev-parse -q --verify "refs/tags/v$current" >/dev/null; then
+          elif git tag --list 'v[0-9]*' | grep -q . && ! tagged "$current"; then
             echo "::error title=version::v$current is not tagged. Run Release tag from the Actions tab with its merge commit, then run this again."
             exit 1
           fi
@@ -82,6 +81,9 @@ jobs:
             exit 1
           fi
 
+          # Release tag compares main at the merge with this commit, so the
+          # release commit records it.
+          base=$(git rev-parse HEAD)
           if [[ $current != "$VERSION" ]]; then
             sed -i "/^\[workspace.package\]/,/^\[/s/^version = \"$current\"$/version = \"$VERSION\"/" Cargo.toml
             cargo update --workspace --quiet
@@ -98,5 +100,27 @@ jobs:
           git switch -c "$branch"
           git -c user.name='stormlight-thunderbot[bot]' \
             -c user.email='340296662+stormlight-thunderbot[bot]@users.noreply.github.com' \
-            commit -qam "chore: release $VERSION" -m "Sets the version to $VERSION and lists the changes since the last release in CHANGELOG.md. Release tag tags v$VERSION when this merges."
-          git push -u origin "$branch"
+            commit -qam "chore: release $VERSION" \
+            -m "Sets the version to $VERSION and lists the changes since the last release in CHANGELOG.md. Release tag tags v$VERSION when this merges." \
+            -m "Changelog-Base: $base"
+
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ secrets.THUNDERBOT_APP_ID }}
+          private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
+          permission-contents: write
+
+      # The App token pushes the branch, so Branch PR runs on it; a push made
+      # with GITHUB_TOKEN starts no workflows. Only this step sees the token,
+      # and git runs no hooks with it.
+      - name: Push the release branch
+        env:
+          TOKEN: ${{ steps.app.outputs.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w 0)
+          echo "::add-mask::$auth"
+          git -c core.hooksPath=/dev/null \
+            -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push origin "storm/release-$VERSION"

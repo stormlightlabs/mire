@@ -1,12 +1,13 @@
-# Tags a release when the Release PR workflow's pull request merges: the push to
-# main raises the workspace version, or for the first release adds its
-# CHANGELOG.md section, and GitHub names storm/release-<version> as the merged
-# pull request behind the commit, whatever its squash message says. It tags v<version> on the merge commit the owner approved, which
-# starts the dist workflow (release.yml): that builds mire and publishes the
-# GitHub release with the version's section of CHANGELOG.md. A revert or a
-# hand edit of the version tags nothing. To tag a release merge a run missed,
-# run this from the Actions tab with that commit; a re-run uses the workflow
-# as it was at that commit.
+# Tags a release when the Release PR workflow's pull request merges: the push
+# to main raises the workspace version, or rewrites the CHANGELOG.md section of
+# a version not yet tagged, and GitHub names storm/release-<version> as the
+# merged pull request behind the commit, whatever its squash message says. It
+# tags v<version> on the merge commit the owner approved, which starts the dist
+# workflow (release.yml): that builds mire and publishes the GitHub release
+# with the version's section of CHANGELOG.md. A revert or a hand edit of the
+# version tags nothing. To tag a release merge a run missed, run this from the
+# Actions tab with that commit; a re-run uses the workflow as it was at that
+# commit.
 name: Release tag
 
 on:
@@ -21,25 +22,32 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
-  tag:
+  # Runs dist's installer, so it has only the read-only GITHUB_TOKEN, which
+  # checkout does not keep.
+  check:
     runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.check.outputs.sha }}
+      version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/create-github-app-token@v2
-        id: app
-        with:
-          app-id: ${{ secrets.THUNDERBOT_APP_ID }}
-          private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
-
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.commit || github.sha }}
-          fetch-depth: 2
+          persist-credentials: false
+          # The changelog check reads the commits since the release PR's base.
+          fetch-depth: 0
 
-      - name: Tag
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - name: Check the release
+        id: check
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
           sha=$(git rev-parse HEAD)
@@ -55,6 +63,13 @@ jobs:
             git show "$1:Cargo.toml" 2>/dev/null |
               sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p'
           }
+          # Prints the version's CHANGELOG.md section at a commit.
+          section() {
+            git show "$1:CHANGELOG.md" 2>/dev/null |
+              awk -v h="## [$version]" 'index($0, h) == 1 { on = 1; print; next }
+                on && /^## \[/ { exit }
+                on { print }'
+          }
           version=$(workspace_version "$sha")
           before=$(workspace_version "$sha^")
           if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -62,19 +77,17 @@ jobs:
             exit 1
           fi
           if [[ $before == "$version" || $(printf '%s\n%s\n' "$before" "$version" | sort -V | tail -n 1) != "$version" ]]; then
-            # The first release keeps the version it started with, so its
-            # sign is a commit that adds the version's CHANGELOG.md section
-            # while origin has no v* tag.
-            heading="^## \[${version//./\\.}\]"
-            tags=$(git ls-remote --tags origin 'refs/tags/v*')
-            had=$(git show "$sha^:CHANGELOG.md" 2>/dev/null || true)
-            has=$(git show "$sha:CHANGELOG.md" 2>/dev/null || true)
-            if [[ $before != "$version" || -n $tags ]] ||
-              grep -q "$heading" <<<"$had" || ! grep -q "$heading" <<<"$has"; then
+            # The first release keeps the version it started with, and a
+            # rerun of Release PR keeps a version Release tag refused, so
+            # their sign is a commit that changes the version's CHANGELOG.md
+            # section while v<version> is untagged.
+            if [[ $before != "$version" ]] ||
+              [[ -n $(git ls-remote --tags origin "refs/tags/v$version") ]] ||
+              [[ -z $(section "$sha") || $(section "$sha") == "$(section "$sha^")" ]]; then
               echo "The version did not rise (${before:-none} to $version); nothing to tag."
               exit 0
             fi
-            echo "First release: CHANGELOG.md gained the $version section."
+            echo "v$version is untagged and CHANGELOG.md changed its $version section."
           fi
 
           # The owner's approval of the release pull request is the gate.
@@ -109,9 +122,33 @@ jobs:
           fi
 
           # dist publishes this section as the release notes.
-          changelog=$(git show "$sha:CHANGELOG.md")
-          if ! grep -q "^## \[$version\]" <<<"$changelog"; then
+          if [[ -z $(section "$sha") ]]; then
             echo "::error title=release::CHANGELOG.md has no '## [$version]' section."
+            exit 1
+          fi
+
+          # The section lists main as it was when Release PR ran, and the tag
+          # goes on main as it is at the merge. A change merged in between
+          # ships in v<version> without a line in any section, so refuse it.
+          # The release commit records the base it was written from; its
+          # lines may have been edited since, so compare commits, not text.
+          rerun="Run Release PR again with $version to rewrite the section, then merge that pull request."
+          base=$(gh api --paginate "repos/$REPO/pulls/$found/commits" --jq '.[].commit.message' |
+            sed -n 's/^Changelog-Base: \([0-9a-f]\{40\}\)$/\1/p' | tail -n 1)
+          if [[ -z $base ]]; then
+            echo "::error title=release::Pull request #$found has no Changelog-Base line in its commits; nothing was tagged. $rerun"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$base" "$sha^"; then
+            echo "::error title=release::The changelog base $base of #$found is not on main before $sha; nothing was tagged. $rerun"
+            exit 1
+          fi
+          since=$(git cliff --config cliff.toml --strip all "$base..$sha^")
+          missed=$(grep '^- ' <<<"$since" || true)
+          if [[ -n $missed ]]; then
+            echo "These changes merged after the $version section was written:"
+            echo "$missed"
+            echo "::error title=release::CHANGELOG.md's $version section misses changes merged after it was written; nothing was tagged. $rerun"
             exit 1
           fi
 
@@ -122,7 +159,31 @@ jobs:
           curl --proto '=https' --tlsv1.2 -LsSf \
             "https://github.com/axodotdev/cargo-dist/releases/download/v$dist_version/cargo-dist-installer.sh" | sh
           "$HOME/.cargo/bin/dist" plan --tag "v$version" >/dev/null
-          # The App token's tag push starts the dist workflow; a push made with
-          # GITHUB_TOKEN would not.
-          gh api "repos/$REPO/git/refs" -f "ref=refs/tags/v$version" -f "sha=$sha" >/dev/null
-          echo "Tagged v$version on $sha."
+
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+  # A fresh runner, so nothing the check job ran can read the App token.
+  tag:
+    needs: check
+    if: needs.check.outputs.version != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ secrets.THUNDERBOT_APP_ID }}
+          private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
+          permission-contents: write
+
+      # The App token's tag starts the dist workflow; a tag made with
+      # GITHUB_TOKEN would not.
+      - name: Tag
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.check.outputs.sha }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          gh api "repos/$REPO/git/refs" -f "ref=refs/tags/v$VERSION" -f "sha=$SHA" >/dev/null
+          echo "Tagged v$VERSION on $SHA."

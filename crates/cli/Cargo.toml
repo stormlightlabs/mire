@@ -3,6 +3,10 @@ name = "mire"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Terminal diffing and code review for humans and agents"
 include = [
     "assets/web/**",
     "build.rs",
@@ -17,8 +21,8 @@ base64 = "0.22.1"
 clap = { version = "4.6.1", default-features = false, features = ["derive", "error-context", "help", "std", "suggestions", "usage"] }
 getrandom = "0.3.4"
 include_dir = "0.7.4"
-mire-core = { version = "0.1.0", path = "../core" }
-mire-tui = { version = "0.1.0", path = "../ui" }
+mire-core = { path = "../core" }
+mire-tui = { path = "../ui" }
 notify = { version = "8.2.0", default-features = false, features = ["macos_fsevent"] }
 open = "5.3.2"
 serde.workspace = true
@@ -35,13 +39,21 @@ utoipa = { version = "5.4.0", features = ["axum_extras"] }
 clap = { version = "4.6.1", default-features = false, features = ["derive", "error-context", "help", "std", "suggestions", "usage"] }
 clap_complete = "4.6.0"
 clap_mangen = "0.2.29"
-mire-core = { version = "0.1.0", path = "../core" }
+mire-core = { path = "../core" }
 serde_json.workspace = true
 
 [dev-dependencies]
 insta = { version = "1.48.0", default-features = false, features = ["json"] }
 portable-pty = { version = "0.9.0", default-features = false }
 tower = { version = "0.5.2", features = ["util"] }
+
+# cargo-binstall fetches the archive dist publishes for the target on the
+# GitHub release v<version>, such as mire-x86_64-unknown-linux-gnu.tar.xz,
+# which holds mire-<target>/mire.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
+bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "txz"
 
 [lints]
 workspace = true

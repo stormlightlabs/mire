@@ -1,0 +1,15 @@
+# Steps dist's Release workflow (release.yml) runs before each `dist build`,
+# set by `github-build-setup` in dist-workspace.toml. The mire binary embeds
+# the web app from crates/cli/assets/web, so build it first, as `just check`
+# does. Run `dist generate` after changing this file.
+- name: Set up pnpm
+  uses: pnpm/action-setup@v4
+- name: Set up Node
+  uses: actions/setup-node@v5
+  with:
+    node-version: 22
+    cache: pnpm
+- name: Build the web app
+  run: |
+    pnpm install --frozen-lockfile
+    pnpm --filter @stormlightlabs/mire-app build

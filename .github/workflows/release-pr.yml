@@ -1,0 +1,86 @@
+# Opens the pull request for a Mire release, run by hand with the version.
+# The bot sets the workspace version, writes the release's section of
+# CHANGELOG.md with scripts/release.sh (git-cliff and cliff.toml), checks
+# dist's plan, and pushes storm/release-<version>, which Branch PR opens. The
+# owner edits the lines there before accepting it. Release tag tags the merge
+# commit. Nothing here writes to main.
+name: Release PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The release, such as 0.2.0. It must sort above the current version.
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v2
+        id: app
+        with:
+          app-id: ${{ secrets.THUNDERBOT_APP_ID }}
+          private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
+
+      # The App token pushes the branch, so Branch PR runs on it; a push made
+      # with GITHUB_TOKEN starts no workflows.
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          token: ${{ steps.app.outputs.token }}
+          # The changelog reads every commit since the last tag.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - name: Open the release pull request
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error title=version::$VERSION is not a release like 0.2.0."
+            exit 1
+          fi
+          current=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)
+          if [[ $(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -n 1) != "$VERSION" || $current == "$VERSION" ]]; then
+            echo "::error title=version::$VERSION does not sort above the current $current."
+            exit 1
+          fi
+          # The changelog starts at the last tag, so an untagged release would
+          # be listed again. Before the first release there is no tag to need.
+          if git tag --list 'v[0-9]*' | grep -q . && ! git rev-parse -q --verify "refs/tags/v$current" >/dev/null; then
+            echo "::error title=version::v$current is not tagged. Run Release tag from the Actions tab with its merge commit, then run this again."
+            exit 1
+          fi
+          branch="storm/release-$VERSION"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "::error title=branch::$branch exists. Delete it, or close its pull request and delete it, then run again."
+            exit 1
+          fi
+
+          sed -i "/^\[workspace.package\]/,/^\[/s/^version = \"$current\"$/version = \"$VERSION\"/" Cargo.toml
+          cargo update --workspace --quiet
+          # Fails when v$VERSION is already tagged.
+          scripts/release.sh "$VERSION"
+          # dist's Release workflow runs only once the tag exists, so check
+          # here that its config, release.yml and the notes still agree.
+          dist_version=$(sed -n 's/^cargo-dist-version = "\(.*\)"$/\1/p' dist-workspace.toml)
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            "https://github.com/axodotdev/cargo-dist/releases/download/v$dist_version/cargo-dist-installer.sh" | sh
+          "$HOME/.cargo/bin/dist" plan --tag "v$VERSION" >/dev/null
+
+          git switch -c "$branch"
+          git -c user.name='stormlight-thunderbot[bot]' \
+            -c user.email='340296662+stormlight-thunderbot[bot]@users.noreply.github.com' \
+            commit -qam "chore: release $VERSION" -m "Sets the version to $VERSION and lists the changes since the last release in CHANGELOG.md. Release tag tags v$VERSION when this merges."
+          git push -u origin "$branch"

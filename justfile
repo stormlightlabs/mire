@@ -42,6 +42,10 @@ shots *names:
 changelog:
     git cliff --unreleased
 
+# Write the release's section of CHANGELOG.md; the workspace version must already be <version>
+release version:
+    scripts/release.sh {{version}}
+
 # deploy the kit doc site & then push
 deploy-docs:
     pnpm --filter @stormlightlabs/mire-docs run deploy && git push

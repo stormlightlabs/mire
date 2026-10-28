@@ -2,7 +2,7 @@
 id = "arcl-t-01M5SXD54ZDX8WPC9Z4XA549WH"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
 title = "Release workflow and GitHub releases"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 12
 +++

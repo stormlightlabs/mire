@@ -206,6 +206,24 @@ To use a Chromium that is already installed, set `MIRE_E2E_CHROMIUM` to its
 executable. `just check` leaves these tests out to stay fast; CI runs them in
 the `e2e` job of the Check workflow.
 
+## Release Mire
+
+Run the Release PR workflow from the Actions tab with the new version, such as
+`0.2.0`. It sets the workspace version, writes the version's section of
+`CHANGELOG.md` with `scripts/release.sh`, and pushes `storm/release-<version>`
+for review. Edit the changelog lines in that pull request before merging it.
+
+The merge tags `v<version>`. The tag runs dist's Release workflow, which builds
+the archives for each target, publishes the GitHub release with the changelog
+section and the shell installer, and commits the `mire` formula to
+`stormlightlabs/homebrew-tap`.
+
+`just release <version>` runs the changelog script locally. It needs
+[git-cliff](https://git-cliff.org) and fails when `v<version>` is already
+tagged or the version differs from the one in `Cargo.toml`. After changing
+`dist-workspace.toml` or `.github/build-setup.yml`, run `dist generate` to
+rewrite `.github/workflows/release.yml`.
+
 ## Troubleshooting
 
 ### "This review URL is missing its session secret"

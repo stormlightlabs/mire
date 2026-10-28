@@ -6,9 +6,10 @@ group: Get started
 order: 1
 ---
 
-Mire needs Git. Prebuilt binaries cover macOS on Apple silicon
-(`aarch64-apple-darwin`) and Linux on x86-64 (`x86_64-unknown-linux-gnu`).
-Each GitHub release publishes them.
+Mire needs Git. Each GitHub release publishes prebuilt binaries for two
+targets: macOS on Apple silicon (`aarch64-apple-darwin`) and Linux on x86-64
+(`x86_64-unknown-linux-gnu`). On any other platform, including Intel macOS,
+Linux on ARM and Windows, [install from source](#install-from-source).
 
 ## Install a release
 
@@ -31,6 +32,9 @@ release archive. Mire is not on crates.io, so pass the repository:
 ```sh
 cargo binstall --git https://github.com/stormlightlabs/mire mire
 ```
+
+On a platform without a release archive, cargo-binstall stops with an error
+instead of compiling.
 
 Add `~/.cargo/bin` to `PATH` if your shell cannot find `mire` after the shell
 installer or cargo-binstall.

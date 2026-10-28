@@ -1,7 +1,7 @@
 # Tags a release when the Release PR workflow's pull request merges: the push to
-# main raises the workspace version, and GitHub names storm/release-<version>
-# as the merged pull request behind the commit, whatever its squash message
-# says. It tags v<version> on the merge commit the owner approved, which
+# main raises the workspace version, or for the first release adds its
+# CHANGELOG.md section, and GitHub names storm/release-<version> as the merged
+# pull request behind the commit, whatever its squash message says. It tags v<version> on the merge commit the owner approved, which
 # starts the dist workflow (release.yml): that builds mire and publishes the
 # GitHub release with the version's section of CHANGELOG.md. A revert or a
 # hand edit of the version tags nothing. To tag a release merge a run missed,
@@ -12,7 +12,7 @@ name: Release tag
 on:
   push:
     branches: [main]
-    paths: [Cargo.toml]
+    paths: [Cargo.toml, CHANGELOG.md]
   workflow_dispatch:
     inputs:
       commit:
@@ -62,8 +62,19 @@ jobs:
             exit 1
           fi
           if [[ $before == "$version" || $(printf '%s\n%s\n' "$before" "$version" | sort -V | tail -n 1) != "$version" ]]; then
-            echo "The version did not rise (${before:-none} to $version); nothing to tag."
-            exit 0
+            # The first release keeps the version it started with, so its
+            # sign is a commit that adds the version's CHANGELOG.md section
+            # while origin has no v* tag.
+            heading="^## \[${version//./\\.}\]"
+            tags=$(git ls-remote --tags origin 'refs/tags/v*')
+            had=$(git show "$sha^:CHANGELOG.md" 2>/dev/null || true)
+            has=$(git show "$sha:CHANGELOG.md" 2>/dev/null || true)
+            if [[ $before != "$version" || -n $tags ]] ||
+              grep -q "$heading" <<<"$had" || ! grep -q "$heading" <<<"$has"; then
+              echo "The version did not rise (${before:-none} to $version); nothing to tag."
+              exit 0
+            fi
+            echo "First release: CHANGELOG.md gained the $version section."
           fi
 
           # The owner's approval of the release pull request is the gate.
@@ -83,7 +94,7 @@ jobs:
             fi
           done
           if [[ -z $found ]]; then
-            echo "::error title=release::The version rose to $version outside a storm/release-$version pull request; nothing was tagged. If it was one, run Release tag from the Actions tab with $sha."
+            echo "::error title=release::Release $version came from outside a storm/release-$version pull request; nothing was tagged. If it was one, run Release tag from the Actions tab with $sha."
             exit 1
           fi
 

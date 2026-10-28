@@ -49,11 +49,14 @@ tower = { version = "0.5.2", features = ["util"] }
 
 # cargo-binstall fetches the archive dist publishes for the target on the
 # GitHub release v<version>, such as mire-x86_64-unknown-linux-gnu.tar.xz,
-# which holds mire-<target>/mire.
+# which holds mire-<target>/mire. On other targets it stops: quick-install
+# would look up an unrelated crate's builds, and compiling from git fails
+# because the embedded web app is not committed.
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
 bin-dir = "{ name }-{ target }/{ bin }{ binary-ext }"
 pkg-fmt = "txz"
+disabled-strategies = ["quick-install", "compile"]
 
 [lints]
 workspace = true

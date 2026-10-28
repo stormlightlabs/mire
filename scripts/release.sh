@@ -8,7 +8,8 @@
 # section, or at the end of the file when there is none. The script fails,
 # changing nothing, when <version> is not a release like 0.2.0, differs from
 # the [workspace.package] version in Cargo.toml, is already tagged
-# v<version> here or on origin, or has no commits to list.
+# v<version> here or on origin, already has a section in CHANGELOG.md, or has
+# no commits to list. It also fails when it cannot read origin's tags.
 set -euo pipefail
 
 usage() {
@@ -36,8 +37,20 @@ current=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Car
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
   fail "$tag is already tagged."
 fi
-if git remote get-url origin >/dev/null 2>&1 && git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
-  fail "$tag is already tagged on origin."
+if git remote get-url origin >/dev/null 2>&1; then
+  # --exit-code returns 2 when nothing matches; other codes are failures to
+  # reach or read origin, not an absent tag.
+  status=0
+  git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null || status=$?
+  case $status in
+    0) fail "$tag is already tagged on origin." ;;
+    2) ;;
+    *) fail "could not read origin's tags (git ls-remote exited $status)." ;;
+  esac
+fi
+
+if grep -q "^## \[${version//./\\.}\]" CHANGELOG.md; then
+  fail "CHANGELOG.md already has a $version section."
 fi
 
 section=$(git cliff --config cliff.toml --unreleased --tag "$tag" --strip all)

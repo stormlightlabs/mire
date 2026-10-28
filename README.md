@@ -32,8 +32,19 @@ brew install stormlightlabs/tap/mire
 cargo binstall --git https://github.com/stormlightlabs/mire mire
 ```
 
+Other platforms build from source, which needs Rust 1.88 or newer, Node 22
+and pnpm. The binary embeds the web app, so build that first:
+
+```sh
+git clone https://github.com/stormlightlabs/mire.git
+cd mire
+pnpm install
+pnpm --filter @stormlightlabs/mire-app build
+cargo install --path crates/cli --locked
+```
+
 See the [installation guide](packages/docs/src/content/docs/getting-started/installation.md)
-for building from source, updates, and uninstall instructions.
+for updates and uninstall instructions.
 
 ## Quick start
 

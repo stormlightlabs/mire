@@ -2,10 +2,16 @@ export type Theme = 'light' | 'dark';
 
 const THEME_STORAGE_KEY = 'mire:theme';
 
-/** Applies the selected color theme to the application document. */
+/**
+ * Applies the selected color mode to the application document. The server sets
+ * the palette family on the root element, and `themes.css` holds each
+ * family's light and dark palettes.
+ */
 export function applyTheme(theme: Theme) {
-	document.documentElement.dataset.theme = theme;
-	document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#1b1d21' : '#f7f7f5');
+	const root = document.documentElement;
+	root.dataset.theme = theme;
+	const paper = getComputedStyle(root).getPropertyValue('--paper').trim();
+	if (paper) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', paper);
 }
 
 /** Loads a saved color theme or uses the operating-system preference. */

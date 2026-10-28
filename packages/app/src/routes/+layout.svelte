@@ -1,5 +1,6 @@
 <script lang="ts">
 	import 'virtual:uno.css';
+	import '../themes.css';
 	import '../app.css';
 
 	let { children } = $props();
@@ -7,7 +8,7 @@
 
 <svelte:head>
 	<title>Mire review</title>
-	<meta name="theme-color" content="#f7f7f5" />
+	<meta name="theme-color" content="#e5e9f0" />
 </svelte:head>
 
 {@render children()}

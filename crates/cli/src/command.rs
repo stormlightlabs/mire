@@ -257,7 +257,7 @@ fn execute(cli: Cli) -> Result<(), AppError> {
                 theme,
             ),
         },
-        Command::Serve(arguments) => serve_review(arguments),
+        Command::Serve(arguments) => serve_review(arguments, theme),
         Command::Show(ShowArgs { revision, paths, format, language, watch }) => {
             let request = ShowRequest { revision, paths };
             let changeset = git::load_show(request.clone()).map_err(AppError::Git)?;
@@ -290,13 +290,13 @@ fn execute(cli: Cli) -> Result<(), AppError> {
     }
 }
 
-fn serve_review(arguments: ServeArgs) -> Result<(), AppError> {
+fn serve_review(arguments: ServeArgs, theme: ThemeFamily) -> Result<(), AppError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_io()
         .enable_time()
         .build()
         .map_err(AppError::WebReviewRuntime)?;
-    runtime.block_on(serve::run(arguments)).map_err(AppError::Serve)
+    runtime.block_on(serve::run(arguments, theme)).map_err(AppError::Serve)
 }
 
 fn initialize_review(arguments: ReviewInitArgs) -> Result<(), AppError> {

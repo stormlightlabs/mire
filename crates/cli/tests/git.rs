@@ -24,6 +24,10 @@ impl FixtureRepository {
         git(&path, ["init", "--quiet"]);
         git(&path, ["config", "user.name", "Mire Tests"]);
         git(&path, ["config", "user.email", "mire@example.invalid"]);
+        // Background gc or maintenance started by the fixture's own commits
+        // would repack objects while a test compares the repository.
+        git(&path, ["config", "gc.auto", "0"]);
+        git(&path, ["config", "maintenance.auto", "false"]);
 
         write(&path, "tracked.txt", b"base\n");
         write(&path, "delete.txt", b"delete me\n");

@@ -37,8 +37,19 @@ test('collapses generated files until the reader opens them', async ({ page, mir
 	await expect(group).toHaveAttribute('aria-expanded', 'false');
 	await expect(generated).toHaveCount(0);
 
-	// Opening the file from the review queue expands the group, with its diff collapsed again.
+	// Opening the file from the tree again starts its diff collapsed.
 	await files.getByRole('treeitem', { name: /one\.txt/ }).click();
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+	await group.click();
+	await generated.click();
+	await expect(diff.getByRole('button', { name: 'Show diff' })).toBeVisible();
+	await group.click();
+	await expect(generated).toHaveCount(0);
+
+	// Selecting its finding from the review queue expands the group and opens the diff at the finding.
+	const marker = diff.getByRole('button', { name: /Open low finding: Is the capital Y/ });
+	await files.getByRole('treeitem', { name: /one\.txt/ }).click();
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
 	await page
 		.getByRole('complementary', { name: 'Review queue' })
 		.getByRole('button', { name: /capital Y/ })
@@ -46,7 +57,18 @@ test('collapses generated files until the reader opens them', async ({ page, mir
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('two.txt');
 	await expect(group).toHaveAttribute('aria-expanded', 'true');
 	await expect(generated).toHaveAttribute('aria-selected', 'true');
-	await expect(diff.getByRole('button', { name: 'Show diff' })).toBeVisible();
+	await expect(diff.getByRole('heading', { level: 2, name: 'Generated file' })).toHaveCount(0);
+	await expect(marker).toBeInViewport();
+
+	// J and K reach the finding the same way.
+	await files.getByRole('treeitem', { name: /one\.txt/ }).click();
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+	await page.keyboard.press('k');
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+	await page.keyboard.press('j');
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('two.txt');
+	await expect(diff.getByRole('heading', { level: 2, name: 'Generated file' })).toHaveCount(0);
+	await expect(marker).toBeInViewport();
 
 	// A reload after marking the open file viewed keeps the group as the reader left it.
 	await group.click();

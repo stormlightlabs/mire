@@ -9,6 +9,9 @@
 //! `git check-attr` reads the attributes, so nested `.gitattributes` files,
 //! `$GIT_DIR/info/attributes`, macros and `core.attributesFile` apply as Git
 //! applies them.
+//!
+//! The marks only change how a file is shown, so reading them never fails a
+//! capture: when Git cannot report the attributes, no file is marked.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
@@ -23,8 +26,10 @@ const LINGUIST_GENERATED: &str = "linguist-generated";
 /// The attribute whose unset value hides a file's diff.
 const DIFF: &str = "diff";
 /// Output bytes `git check-attr -z` may print for one path, beyond the path
-/// itself: two attribute names, two values and the separators.
-const MAX_ATTRIBUTE_LINE_BYTES: usize = 128;
+/// itself: two attribute names, two values and the separators. Values come
+/// from the repository and have no length limit, so this is an allowance:
+/// output past it leaves every file unmarked.
+const MAX_ATTRIBUTE_RECORD_BYTES: usize = 4096;
 
 /// The tree whose attribute files apply to a comparison.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -63,10 +68,11 @@ pub fn attribute_source(operation: &GitOperation) -> AttributeSource {
 ///
 /// When Git cannot read a revision's tree, because the Git in use predates
 /// `check-attr --source` (Git 2.40) or the revision does not name a tree,
-/// the worktree's attributes apply instead.
-pub fn mark_generated(root: &Path, changeset: &mut Changeset, source: &AttributeSource) -> Result<()> {
+/// the worktree's attributes apply instead. When Git cannot report the
+/// attributes at all, no file is marked.
+pub fn mark_generated(root: &Path, changeset: &mut Changeset, source: &AttributeSource) {
     if changeset.files().is_empty() {
-        return Ok(());
+        return;
     }
     let paths = changeset
         .files()
@@ -74,15 +80,19 @@ pub fn mark_generated(root: &Path, changeset: &mut Changeset, source: &Attribute
         .map(|file| file.canonical_path().as_bytes().to_vec())
         .collect::<Vec<_>>();
     let generated = match generated_paths(root, &paths, source) {
-        Err(_) if matches!(source, AttributeSource::Tree(_)) => {
-            generated_paths(root, &paths, &AttributeSource::Worktree)?
+        Err(error) if matches!(source, AttributeSource::Tree(_)) => {
+            tracing::debug!(%error, "Mire falls back to worktree attributes");
+            generated_paths(root, &paths, &AttributeSource::Worktree)
         }
-        result => result?,
+        result => result,
     };
+    let generated = generated.unwrap_or_else(|error| {
+        tracing::debug!(%error, "Mire cannot read generated-file attributes; no file is marked");
+        BTreeSet::new()
+    });
     for (index, path) in paths.iter().enumerate() {
         changeset.set_generated(index, generated.contains(path));
     }
-    Ok(())
 }
 
 /// Returns the members of `paths` that the repository at `root` marks as
@@ -109,7 +119,7 @@ fn generated_paths(root: &Path, paths: &[Vec<u8>], source: &AttributeSource) -> 
     for path in paths {
         input.extend_from_slice(path);
         input.push(0);
-        limit = limit.saturating_add(path.len().saturating_mul(2).saturating_add(MAX_ATTRIBUTE_LINE_BYTES));
+        limit = limit.saturating_add(path.len().saturating_mul(2).saturating_add(MAX_ATTRIBUTE_RECORD_BYTES));
     }
     let output = run_git_with_input(Some(root), &arguments, input, limit)?;
     ensure_success("check attributes", &output, &[0])?;
@@ -354,25 +364,68 @@ d.min.js\0linguist-generated\0false\0d.min.js\0diff\0unset\0";
         repository.write(".gitattributes", "*.gen linguist-generated\n");
         repository.write("a.gen", "a\n");
         repository.write("b.txt", "b\n");
+        let mut changeset = two_file_changeset();
+
+        let source = AttributeSource::Tree(OsString::from("no-such-revision"));
+        mark_generated(&repository.0, &mut changeset, &source);
+
+        assert_eq!(marks(&changeset), [true, false]);
+    }
+
+    fn two_file_changeset() -> Changeset {
         let patch =
             b"diff --git a/a.gen b/a.gen\nnew file mode 100644\n--- /dev/null\n+++ b/a.gen\n@@ -0,0 +1 @@\n+a\n\
 diff --git a/b.txt b/b.txt\nnew file mode 100644\n--- /dev/null\n+++ b/b.txt\n@@ -0,0 +1 @@\n+b\n";
-        let mut changeset = mire_core::parse_patch(
+        mire_core::parse_patch(
             patch,
             mire_core::ChangesetSource::DirectFiles,
             mire_core::PatchLimits::default(),
         )
-        .unwrap();
+        .unwrap()
+    }
 
-        let source = AttributeSource::Tree(OsString::from("no-such-revision"));
-        mark_generated(&repository.0, &mut changeset, &source).unwrap();
+    fn marks(changeset: &Changeset) -> Vec<bool> {
+        changeset.files().iter().map(|file| file.is_generated()).collect()
+    }
 
-        let marks = changeset
-            .files()
-            .iter()
-            .map(|file| file.is_generated())
-            .collect::<Vec<_>>();
-        assert_eq!(marks, [true, false]);
+    #[test]
+    fn long_attribute_values_are_read() {
+        let repository = Repository::new("long-values");
+        let value = "x".repeat(200);
+        repository.write(
+            ".git/info/attributes",
+            &format!("* linguist-generated={value}\n*.gen -diff\n"),
+        );
+        let mut changeset = two_file_changeset();
+
+        mark_generated(&repository.0, &mut changeset, &AttributeSource::Worktree);
+
+        assert_eq!(marks(&changeset), [true, false]);
+    }
+
+    #[test]
+    fn attributes_git_cannot_report_leave_files_unmarked() {
+        let repository = Repository::new("oversized-values");
+        let value = "x".repeat(MAX_ATTRIBUTE_RECORD_BYTES * 4);
+        repository.write(".git/info/attributes", &format!("* linguist-generated={value} -diff\n"));
+        let mut changeset = two_file_changeset();
+
+        mark_generated(&repository.0, &mut changeset, &AttributeSource::Worktree);
+
+        assert_eq!(marks(&changeset), [false, false]);
+    }
+
+    #[test]
+    fn a_failing_check_attr_leaves_files_unmarked() {
+        let repository = Repository::new("broken");
+        repository.write(".gitattributes", "*.gen linguist-generated\n");
+        repository.write(".git/config", "[core\n");
+        let mut changeset = two_file_changeset();
+        changeset.set_generated(0, true);
+
+        mark_generated(&repository.0, &mut changeset, &AttributeSource::Worktree);
+
+        assert_eq!(marks(&changeset), [false, false]);
     }
 
     #[test]

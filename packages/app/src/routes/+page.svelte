@@ -55,6 +55,8 @@
 	let themeReady = $state(false);
 	let isNarrow = $state(false);
 	let mobilePane = $state<'files' | 'findings' | null>(null);
+	/** The raw path of the generated file whose diff is open, if any. */
+	let openedGenerated = $state<string | null>(null);
 
 	let streamAbort: AbortController | null = null;
 	let secret = '';
@@ -306,7 +308,11 @@
 			file = detail;
 			fileRevision = revision;
 			viewedError = null;
-			if (finding) window.setTimeout(() => scrollToFinding(finding.id));
+			if (finding) {
+				// A finding's line is inside the diff, so a collapsed generated diff opens first.
+				if (detail.generated) openedGenerated = detail.path.raw;
+				window.setTimeout(() => scrollToFinding(finding.id));
+			}
 		} catch (cause) {
 			if (ticket !== fileLoads) return;
 			file = null;
@@ -543,6 +549,7 @@
 				{theme}
 				viewState={shownView}
 				{viewedError}
+				bind:openedGenerated
 				onDismissNotice={() => (notice = null)}
 				onToggleViewed={toggleViewed}
 				onFindingClick={selectFinding}
@@ -560,6 +567,7 @@
 				{theme}
 				viewState={shownView}
 				{viewedError}
+				bind:openedGenerated
 				onDismissNotice={() => (notice = null)}
 				onToggleViewed={toggleViewed}
 				onFindingClick={selectFinding}

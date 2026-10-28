@@ -21,6 +21,7 @@
 		theme,
 		viewState,
 		viewedError,
+		openedGenerated = $bindable(null),
 		onDismissNotice = () => {},
 		onToggleViewed,
 		onFindingClick,
@@ -38,6 +39,8 @@
 		theme: Theme;
 		viewState: FileViewState;
 		viewedError: string | null;
+		/** The raw path of the generated file whose diff is open, if any. Selecting a finding opens its file. */
+		openedGenerated?: string | null;
 		onDismissNotice?: () => void;
 		onToggleViewed: () => void;
 		onFindingClick: (finding: FindingSummary) => void;
@@ -47,8 +50,6 @@
 
 	let diffStyle = $state<'unified' | 'split'>('unified');
 	let expandContext = $state(false);
-	/** The raw path of the generated file whose diff the reader opened, if any. */
-	let openedGenerated = $state<string | null>(null);
 	const generatedCollapsed = $derived(file !== null && file.generated && openedGenerated !== file.path.raw);
 
 	// Another file closes the opened generated diff, so returning to it starts collapsed.

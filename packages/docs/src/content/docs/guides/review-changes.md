@@ -57,11 +57,15 @@ The attributes come from the new side of the comparison. A worktree
 comparison reads the worktree, `--staged` reads the index, and a comparison
 whose new side is a revision, such as `A..B`, `A...B`, `A B` or `mire show
 REV`, reads that revision's tree. Reading a tree needs Git 2.40 or later;
-older Git reads the worktree's attributes instead.
+older Git reads the worktree's attributes instead. The marks come from the
+local Git and its settings, so another Git version or `core.attributesFile`
+can mark different files. When Git cannot report the attributes, Mire
+captures the comparison with no file marked.
 
 The terminal file list shows `gen` after a generated file's path, and the
 browser lists generated files in a collapsed group and hides each one's diff
-until you select Show diff. Mire still captures a generated file's hunks, and
+until you select Show diff. Selecting a finding on a generated file opens
+its diff at the finding. Mire still captures a generated file's hunks, and
 notes and viewed marks work on it as on any file. Patch input carries no
 attributes, so `mire patch` marks nothing. A review refresh reads the
 attributes again, so an attribute change, or a review created before Mire

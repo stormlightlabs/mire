@@ -12,7 +12,7 @@ position = 0
 Alternating a file between two contents by rename while running `git diff --full-index` in a loop gave 25 torn patches in 2007 runs. The `mire serve` browser test failed twice in 690 runs from it.
 
 Acceptance criteria:
-- [ ] A capture whose text-file hunks do not match its `index` blob ids is not recorded; Mire captures again, a bounded number of times, and fails the refresh with a named error if it never gets a consistent patch.
+- [ ] Mire never stores a blob id it could not check against the file's hunks. It captures again, a bounded number of times, while a file is torn, then keeps the capture without that file's new blob id rather than failing.
 - [ ] Init, refresh and the watch reload all use the check.
 
 Verification:

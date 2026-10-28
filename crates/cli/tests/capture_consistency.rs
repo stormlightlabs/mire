@@ -243,6 +243,27 @@ fn sha256_repositories_are_accepted() {
     }
 }
 
+#[test]
+fn a_text_file_that_reads_as_binary_keeps_no_new_blob_id() {
+    let repository = Repository::new(|repository| {
+        repository.write(".gitattributes", "marked.txt binary\n");
+        repository.write("text.txt", "one\n");
+        repository.write("marked.txt", "one\n");
+        repository.write("data.bin", b"\0one\n");
+    });
+    for path in ["text.txt", "marked.txt", "data.bin"] {
+        repository.write(path, b"\0two\n");
+    }
+    let files = repository.assert_accepted(&[]);
+    let object = |path: &str| &files.iter().find(|(name, _)| name == path).unwrap().1["new"]["object"];
+    // A torn read pads a text file with zeros, so a text blob that comes
+    // back binary cannot be told from one, and its id is not stored.
+    assert!(object("text.txt").is_null());
+    // Attributes or the old content already made these binary.
+    assert!(object("marked.txt").is_string());
+    assert!(object("data.bin").is_string());
+}
+
 fn files(output: &Output) -> Vec<(String, Value)> {
     let json: Value = serde_json::from_slice(&output.stdout).expect("mire prints JSON");
     json["files"]

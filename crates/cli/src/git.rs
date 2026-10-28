@@ -16,7 +16,7 @@ use thiserror::Error;
 
 mod consistency;
 
-/// Worktree captures taken before a torn capture fails the comparison.
+/// Worktree captures taken before Mire keeps a capture with torn files.
 const MAX_CAPTURE_ATTEMPTS: u32 = 5;
 /// The wait after the first torn capture. It doubles after each later one.
 const CAPTURE_RETRY_DELAY: Duration = Duration::from_millis(10);
@@ -99,10 +99,6 @@ pub enum GitError {
     /// The captured source binding violated a core review invariant.
     #[error("cannot create source binding: {0}")]
     SourceBinding(mire_core::ReviewError),
-    /// A worktree file kept changing while Git read it, so the hunks of
-    /// every capture disagreed with the file's new blob id.
-    #[error("{path} changed while Git read it; its hunks did not match its blob id in {attempts} captures")]
-    TornCapture { path: String, attempts: u32 },
 }
 
 /// A Git-backed diff request from the command line.
@@ -334,9 +330,14 @@ fn load_diff_in_repository(repository: &GitRepository, request: &DiffRequest) ->
     load_diff_in_repository_with_source(repository, request, source, true)
 }
 
-/// Captures a comparison. A comparison that reads the worktree is captured
-/// again while a text file's hunks disagree with its new blob id, which
-/// happens when the file changes while Git reads it.
+/// Captures a comparison. A comparison that reads the worktree is checked
+/// for blob ids that disagree with their hunks, which happens when a file
+/// changes while Git reads it.
+///
+/// Blob reads are capped at [`DEFAULT_MAX_PATCH_BYTES`], the most Mire reads
+/// from one `git diff`, so checking a file never holds more than capturing
+/// it did. A smaller cap, such as the 1 MiB patch copy limit, would leave
+/// ordinary large files without ids that Mire can check.
 fn load_diff_in_repository_with_source(
     repository: &GitRepository, request: &DiffRequest, source: ChangesetSource, literal_pathspecs: bool,
 ) -> Result<Changeset> {
@@ -344,28 +345,54 @@ fn load_diff_in_repository_with_source(
     if !matches!(&source, ChangesetSource::Git { operation } if consistency::reads_worktree(operation)) {
         return capture();
     }
-    capture_untorn(capture, |changeset| consistency::torn_file(&repository.root, changeset))
+    let mut checker = consistency::Checker::new(&repository.root, DEFAULT_MAX_PATCH_BYTES);
+    capture_checked(capture, |changeset| checker.check(changeset))
 }
 
-/// Runs `capture` until `torn` finds no torn file in its result, at most
+/// Runs `capture` until `check` finds no torn file in its result, at most
 /// [`MAX_CAPTURE_ATTEMPTS`] times, waiting longer after each torn capture.
-fn capture_untorn(
-    mut capture: impl FnMut() -> Result<Changeset>, mut torn: impl FnMut(&Changeset) -> Result<Option<BytePath>>,
+/// A capture Git fails with a short read, because a file shrank while Git
+/// hashed it, is retried the same way.
+///
+/// It returns the last capture with the new-side blob id cleared on every
+/// file still torn or not checkable. That is safe: Git reads a file once for
+/// its hunks, so they show content the file really had, and only the id
+/// came from the other read. A file without an id gets a patch copy of its
+/// hunks at a checkpoint, as a file Git does not hold does, so Mire stores
+/// no id it could not check and the capture still succeeds.
+fn capture_checked(
+    mut capture: impl FnMut() -> Result<Changeset>, mut check: impl FnMut(&Changeset) -> Result<consistency::Findings>,
 ) -> Result<Changeset> {
     let mut delay = CAPTURE_RETRY_DELAY;
-    for attempt in 1..=MAX_CAPTURE_ATTEMPTS {
-        let changeset = capture()?;
-        let Some(path) = torn(&changeset)? else {
-            return Ok(changeset);
+    let mut attempt = 1;
+    loop {
+        let last = attempt == MAX_CAPTURE_ATTEMPTS;
+        let mut changeset = match capture() {
+            Err(error) if !last && is_short_read(&error) => {
+                thread::sleep(delay);
+                delay *= 2;
+                attempt += 1;
+                continue;
+            }
+            result => result?,
         };
-        if attempt == MAX_CAPTURE_ATTEMPTS {
-            let path = String::from_utf8_lossy(path.as_bytes()).into_owned();
-            return Err(GitError::TornCapture { path, attempts: MAX_CAPTURE_ATTEMPTS });
+        let findings = check(&changeset)?;
+        if findings.torn.is_empty() || last {
+            for index in findings.torn.iter().chain(&findings.unchecked) {
+                changeset.clear_new_object(*index);
+            }
+            return Ok(changeset);
         }
         thread::sleep(delay);
         delay *= 2;
+        attempt += 1;
     }
-    unreachable!("the last capture attempt returns")
+}
+
+/// Reports whether Git failed because a file was shorter when read than
+/// when it was examined, as when a write replaces it during the read.
+fn is_short_read(error: &GitError) -> bool {
+    matches!(error, GitError::CommandFailed { message, .. } if message.contains("short read"))
 }
 
 fn capture_diff(
@@ -816,38 +843,83 @@ mod tests {
     }
 
     #[test]
-    fn torn_captures_are_retried_then_rejected() {
+    fn torn_captures_are_retried_then_kept_without_their_ids() {
+        let patch = "diff --git a/f b/f\nindex 78981922613b2afb6025042ff6bd878ac1994e85..422c2b7ab3b3c668038da977e4e93a5fc623169c 100644\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n";
         let changeset = || {
-            Ok(Changeset::new(
-                ChangesetSource::DirectFiles,
-                Vec::new(),
-                mire_core::Fingerprint::new([0; 32]),
-            ))
+            parse_patch(patch.as_bytes(), ChangesetSource::DirectFiles, PatchLimits::default()).map_err(GitError::Patch)
         };
-        let path = BytePath::new(b"file.txt".to_vec()).unwrap();
+        let new_object = |changeset: &Changeset| changeset.files()[0].new_side().unwrap().object.clone();
+        let torn = || consistency::Findings { torn: BTreeSet::from([0]), unchecked: BTreeSet::new() };
 
         let mut captures = 0;
-        let error = capture_untorn(
+        let kept = capture_checked(
             || {
                 captures += 1;
                 changeset()
             },
-            |_| Ok(Some(path.clone())),
+            |_| Ok(torn()),
         )
-        .unwrap_err();
+        .unwrap();
         assert_eq!(captures, MAX_CAPTURE_ATTEMPTS);
-        assert!(matches!(
-            &error,
-            GitError::TornCapture { path, attempts: MAX_CAPTURE_ATTEMPTS } if path == "file.txt"
-        ));
+        assert_eq!(new_object(&kept), None);
+        assert!(kept.files()[0].old_side().unwrap().object.is_some());
 
         let mut checks = 0;
-        capture_untorn(changeset, |_| {
+        let kept = capture_checked(changeset, |_| {
             checks += 1;
-            Ok((checks == 1).then(|| path.clone()))
+            Ok(if checks == 1 { torn() } else { consistency::Findings::default() })
         })
         .unwrap();
         assert_eq!(checks, 2);
+        assert!(new_object(&kept).is_some());
+
+        // A short read from Git is retried; another failure is not.
+        let short_read = || GitError::CommandFailed {
+            operation: "diff",
+            status: String::new(),
+            message: "error: short read while indexing f".to_owned(),
+        };
+        let mut captures = 0;
+        capture_checked(
+            || {
+                captures += 1;
+                if captures == 1 { Err(short_read()) } else { changeset() }
+            },
+            |_| Ok(consistency::Findings::default()),
+        )
+        .unwrap();
+        assert_eq!(captures, 2);
+        let mut captures = 0;
+        let error = capture_checked(
+            || {
+                captures += 1;
+                Err::<Changeset, _>(short_read())
+            },
+            |_| Ok(consistency::Findings::default()),
+        )
+        .unwrap_err();
+        assert_eq!(captures, MAX_CAPTURE_ATTEMPTS);
+        assert!(is_short_read(&error));
+        let mut captures = 0;
+        capture_checked(
+            || {
+                captures += 1;
+                Err::<Changeset, _>(GitError::NotRepository)
+            },
+            |_| Ok(consistency::Findings::default()),
+        )
+        .unwrap_err();
+        assert_eq!(captures, 1);
+
+        // A file that can never be checked is cleared without a retry.
+        let mut checks = 0;
+        let kept = capture_checked(changeset, |_| {
+            checks += 1;
+            Ok(consistency::Findings { torn: BTreeSet::new(), unchecked: BTreeSet::from([0]) })
+        })
+        .unwrap();
+        assert_eq!(checks, 1);
+        assert_eq!(new_object(&kept), None);
     }
 
     #[test]

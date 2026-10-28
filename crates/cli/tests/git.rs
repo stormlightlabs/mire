@@ -272,6 +272,10 @@ fn generated_files_follow_the_attributes_of_the_compared_tree() {
             .is_some_and(|hunks| !hunks.is_empty())
     );
 
+    if !git_reads_tree_attributes() {
+        eprintln!("skipped the revision check: reading a revision's attributes needs Git 2.40 or later");
+        return;
+    }
     // The topic commit carries no attributes, so its own diff marks nothing.
     let show = run_mire(
         &repository.path,
@@ -279,6 +283,19 @@ fn generated_files_follow_the_attributes_of_the_compared_tree() {
     );
     assert_success(&show);
     assert!(files(&show).values().all(|file| file.get("generated").is_none()));
+}
+
+/// Reports whether the installed Git has `check-attr --source`, added in Git
+/// 2.40.
+fn git_reads_tree_attributes() -> bool {
+    let output = Command::new("git").arg("--version").output().expect("git runs");
+    let version = String::from_utf8_lossy(&output.stdout);
+    let mut numbers = version
+        .trim()
+        .trim_start_matches("git version ")
+        .split('.')
+        .map(|part| part.parse::<u32>().unwrap_or(0));
+    (numbers.next().unwrap_or(0), numbers.next().unwrap_or(0)) >= (2, 40)
 }
 
 fn files(output: &Output) -> BTreeMap<String, Value> {

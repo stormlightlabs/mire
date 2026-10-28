@@ -43,7 +43,7 @@ pub enum AttributeSource {
 ///
 /// A comparison against the worktree reads the worktree, a staged one the
 /// index, and a comparison whose new side is a revision (`A B`, `A..B`,
-/// `A...B`, `A^!`, or a shown commit) that revision's tree. Any other
+/// `A...B`, `A^!`, `A^-`, or a shown commit) that revision's tree. Any other
 /// revision form reads the worktree, as `git diff` does.
 pub fn attribute_source(operation: &GitOperation) -> AttributeSource {
     match operation {
@@ -147,10 +147,11 @@ fn is_generated(linguist_generated: &[u8], diff: &[u8]) -> bool {
 }
 
 /// Reads the new side of one revision argument: the right end of `A..B` or
-/// `A...B`, `HEAD` when that end is empty, and `A` for `A^!`. A plain
-/// revision is compared with the worktree.
+/// `A...B`, `HEAD` when that end is empty, and `A` for `A^!`, `A^-` and
+/// `A^-n`, which mean `A^n..A`. A plain revision is compared with the
+/// worktree.
 fn single_revision_source(revision: &[u8]) -> AttributeSource {
-    if let Some(commit) = revision.strip_suffix(b"^!") {
+    if let Some(commit) = parent_shorthand_commit(revision) {
         return AttributeSource::Tree(bytes_to_os_string(commit));
     }
     let Some(position) = revision.windows(2).position(|pair| pair == b"..") else {
@@ -163,6 +164,16 @@ fn single_revision_source(revision: &[u8]) -> AttributeSource {
     } else {
         AttributeSource::Tree(bytes_to_os_string(new))
     }
+}
+
+/// Returns `A` from `A^!`, `A^-` or `A^-n`, or `None` for any other form.
+fn parent_shorthand_commit(revision: &[u8]) -> Option<&[u8]> {
+    if let Some(commit) = revision.strip_suffix(b"^!") {
+        return Some(commit);
+    }
+    let position = revision.windows(2).rposition(|pair| pair == b"^-")?;
+    let parent = &revision[position + 2..];
+    (position > 0 && parent.iter().all(u8::is_ascii_digit)).then_some(&revision[..position])
 }
 
 fn byte_string_to_os_string(value: &ByteString) -> OsString {
@@ -236,6 +247,19 @@ mod tests {
         }
     }
 
+    /// Reports whether the installed Git has `check-attr --source`, added in
+    /// Git 2.40.
+    fn git_reads_tree_attributes() -> bool {
+        let output = Command::new("git").arg("--version").output().unwrap();
+        let version = String::from_utf8_lossy(&output.stdout);
+        let mut numbers = version
+            .trim()
+            .trim_start_matches("git version ")
+            .split('.')
+            .map(|part| part.parse::<u32>().unwrap_or(0));
+        (numbers.next().unwrap_or(0), numbers.next().unwrap_or(0)) >= (2, 40)
+    }
+
     #[test]
     fn attribute_values_decide_the_mark() {
         assert!(is_generated(b"set", b"unspecified"));
@@ -302,6 +326,10 @@ d.min.js\0linguist-generated\0false\0d.min.js\0diff\0unset\0";
 
     #[test]
     fn staged_and_revision_comparisons_read_their_own_tree() {
+        if !git_reads_tree_attributes() {
+            eprintln!("skipped: reading a revision's attributes needs Git 2.40 or later");
+            return;
+        }
         let repository = Repository::new("trees");
         repository.write(".gitattributes", "*.gen linguist-generated\n");
         repository.write("a.gen", "a\n");
@@ -373,6 +401,10 @@ diff --git a/b.txt b/b.txt\nnew file mode 100644\n--- /dev/null\n+++ b/b.txt\n@@
         assert_eq!(attribute_source(&diff(&["main...topic"])), tree("topic"));
         assert_eq!(attribute_source(&diff(&["main..."])), tree("HEAD"));
         assert_eq!(attribute_source(&diff(&["topic^!"])), tree("topic"));
+        assert_eq!(attribute_source(&diff(&["topic^-"])), tree("topic"));
+        assert_eq!(attribute_source(&diff(&["topic~2^-2"])), tree("topic~2"));
+        assert_eq!(attribute_source(&diff(&["^-"])), AttributeSource::Worktree);
+        assert_eq!(attribute_source(&diff(&["topic^-x"])), AttributeSource::Worktree);
         assert_eq!(attribute_source(&diff(&["a", "b", "c"])), AttributeSource::Worktree);
     }
 }

@@ -27,12 +27,19 @@
 	const treeRows = $derived(buildTreeRows(visibleFiles.filter((file) => !file.generated)));
 	const generatedFiles = $derived(visibleFiles.filter((file) => file.generated));
 	let generatedOpen = $state(false);
+	/** A filter lists every matching generated file, and the group cannot collapse while it is active. */
+	const filtering = $derived(query.trim() !== '');
 	/** Generated files start collapsed, and show while a filter is active. */
-	const showGenerated = $derived(generatedOpen || query.trim() !== '');
+	const showGenerated = $derived(generatedOpen || filtering);
 
+	/** The raw path of the last active file, so a reload of the same file leaves the group as the reader set it. */
+	let expandedFor: string | null = null;
 	// Opening a generated file from elsewhere, such as the review queue, expands the group.
 	$effect(() => {
-		if (files.some((file) => file.generated && file.id === activeFile)) generatedOpen = true;
+		const active = files.find((file) => file.id === activeFile);
+		if (!active || active.path.raw === expandedFor) return;
+		expandedFor = active.path.raw;
+		if (active.generated) generatedOpen = true;
 	});
 	let collapsed = new SvelteSet<string>();
 	const visibleRows = $derived(
@@ -134,13 +141,18 @@
 				aria-level={1}
 				aria-selected="false"
 				aria-expanded={showGenerated}
-				onclick={() => (generatedOpen = !showGenerated)}>
+				disabled={filtering}
+				onclick={() => (generatedOpen = !generatedOpen)}>
 				<span class="i-lucide-chevron-down disclosure" class:collapsed={!showGenerated}></span>
 				<span class="i-lucide-cog tree-icon"></span>
 				<span class="node-name">Generated</span>
 				<span class="group-count"
 					>{generatedFiles.length}
-					{generatedFiles.length === 1 ? 'file' : 'files'}{showGenerated ? '' : ', collapsed'}</span>
+					{generatedFiles.length === 1 ? 'file' : 'files'}{filtering
+						? ', shown by filter'
+						: showGenerated
+							? ''
+							: ', collapsed'}</span>
 			</button>
 			{#if showGenerated}
 				{#each generatedFiles as generated (generated.id)}
@@ -249,8 +261,11 @@
 		font-size: 0.68rem;
 		white-space: nowrap;
 	}
-	.directory:hover {
+	.directory:not(:disabled):hover {
 		background: var(--paper);
+	}
+	.generated-group:disabled {
+		cursor: default;
 	}
 	.disclosure {
 		width: 0.7rem;

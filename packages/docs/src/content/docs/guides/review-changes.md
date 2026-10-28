@@ -63,9 +63,10 @@ The terminal file list shows `gen` after a generated file's path, and the
 browser lists generated files in a collapsed group and hides each one's diff
 until you select Show diff. Mire still captures a generated file's hunks, and
 notes and viewed marks work on it as on any file. Patch input carries no
-attributes, so `mire patch` marks nothing. A review marks files when Mire
-captures the changeset, so an attribute change shows after the next refresh
-that changes the diff.
+attributes, so `mire patch` marks nothing. A review refresh reads the
+attributes again, so an attribute change, or a review created before Mire
+marked files, shows its marks after the next refresh. A refresh that changes
+only the marks keeps the review revision.
 
 ## Review a patch
 

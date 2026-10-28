@@ -47,4 +47,25 @@ test('collapses generated files until the reader opens them', async ({ page, mir
 	await expect(group).toHaveAttribute('aria-expanded', 'true');
 	await expect(generated).toHaveAttribute('aria-selected', 'true');
 	await expect(diff.getByRole('button', { name: 'Show diff' })).toBeVisible();
+
+	// A reload after marking the open file viewed keeps the group as the reader left it.
+	await group.click();
+	await expect(group).toHaveAttribute('aria-expanded', 'false');
+	const viewed = diff.getByRole('button', { name: 'Viewed' });
+	await viewed.click();
+	await expect(viewed).toHaveAttribute('aria-pressed', 'true');
+	await expect(group).toHaveAttribute('aria-expanded', 'false');
+	await expect(generated).toHaveCount(0);
+
+	// A filter shows matching generated files, and the group cannot collapse until it clears.
+	const filter = page.getByRole('searchbox', { name: 'Filter files' });
+	await filter.fill('two');
+	await expect(group).toHaveAttribute('aria-expanded', 'true');
+	await expect(group).toBeDisabled();
+	await expect(group).toContainText('1 file, shown by filter');
+	await expect(generated).toContainText('viewed');
+	await filter.fill('');
+	await expect(group).toBeEnabled();
+	await expect(group).toHaveAttribute('aria-expanded', 'false');
+	await expect(generated).toHaveCount(0);
 });

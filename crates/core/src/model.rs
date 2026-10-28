@@ -244,10 +244,15 @@ impl Changeset {
     }
 
     /// Marks the file at `index` in [`Self::files`] as generated, or clears
-    /// the mark. Does nothing when `index` is out of range.
+    /// the mark. Does nothing when `index` is out of range. Setting a mark
+    /// raises a changeset read from an older schema to the current one, the
+    /// first that defines the mark.
     pub fn set_generated(&mut self, index: usize, generated: bool) {
         if let Some(file) = self.files.get_mut(index) {
             file.generated = generated;
+            if generated {
+                self.schema_version = CURRENT_SCHEMA_VERSION;
+            }
         }
     }
 }

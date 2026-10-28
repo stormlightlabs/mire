@@ -1539,8 +1539,10 @@ fn secure_headers(mut response: Response<Body>) -> Response<Body> {
         .remove("x-mire-inline-script-hash")
         .and_then(|value| value.to_str().ok().map(|hash| format!(" 'sha256-{hash}'")))
         .unwrap_or_default();
+    // The icons are CSS masks whose SVGs UnoCSS inlines as `data:` URLs.
+    // An image loaded from `data:` makes no request and runs no script.
     let policy = format!(
-        "default-src 'self'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src 'self'; script-src 'self'{script_source}; style-src 'self' 'unsafe-inline'"
+        "default-src 'self'; base-uri 'none'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src 'self' data:; script-src 'self'{script_source}; style-src 'self' 'unsafe-inline'"
     );
     headers.insert(
         CONTENT_SECURITY_POLICY,

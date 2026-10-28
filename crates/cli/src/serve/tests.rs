@@ -638,6 +638,19 @@ async fn the_static_application_is_public_with_a_script_hash_policy() {
 }
 
 #[tokio::test]
+async fn the_page_policy_allows_only_data_images_beyond_its_own_origin() {
+    let fixture = Fixture::new();
+    let mut request = api_request(Method::GET, "/", None);
+    request.headers_mut().remove(AUTHORIZATION);
+    let (_, headers, _) = send(fixture.state(), request).await;
+    let policy = headers
+        .get(CONTENT_SECURITY_POLICY)
+        .and_then(|value| value.to_str().ok())
+        .expect("the page has a content security policy");
+    assert!(policy.contains("; img-src 'self' data:;"), "{policy}");
+}
+
+#[tokio::test]
 async fn the_page_carries_the_theme_family_from_the_command_line() {
     let mut fixture = Fixture::new();
     fixture.state.theme = ThemeFamily::Catppuccin;

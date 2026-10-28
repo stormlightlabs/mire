@@ -259,7 +259,8 @@ mire serve <REVIEW> [--port <PORT>] [--open]
 - Embedded hashed assets receive immutable cache headers. The SPA entry point
   receives `no-cache`, and unknown non-API routes fall back to it.
 - The app uses self-hosted fonts and icons only. A strict Content Security Policy
-  allows assets and API connections from the same origin.
+  allows assets and API connections from the same origin, plus `data:` images
+  for the icons' inline SVG masks.
 
 ### Loopback security
 

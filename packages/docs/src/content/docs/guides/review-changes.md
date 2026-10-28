@@ -127,6 +127,10 @@ one when it cannot tell.
 
 `mire serve` takes the same flag. The browser review follows the browser's
 light or dark color scheme, and the header button switches between the two.
+The browser saves the button's choice for the server's address and stops
+following the color scheme. The review has no control to undo this: to follow
+the scheme again, clear the site data for that address, or remove the
+`mire:theme` key from its local storage.
 
 Set [`NO_COLOR`](https://github.com/jcs/no_color) to disable terminal color.
 A terminal with `TERM=dumb` gets a basic ANSI theme.

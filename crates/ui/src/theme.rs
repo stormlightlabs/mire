@@ -9,13 +9,15 @@ pub use web::web_stylesheet;
 #[cfg(test)]
 pub mod contrast;
 mod web;
+#[cfg(test)]
+pub mod xterm256;
 
 const ICEBERG_DARK: Palette = Palette {
     accent: rgb(132, 160, 198),
     background: rgb(22, 24, 33),
     raised: rgb(15, 17, 23),
-    header: rgb(30, 33, 50),
-    selection: rgb(39, 44, 66),
+    header: rgb(17, 20, 66),
+    selection: rgb(42, 47, 70),
     border: rgb(95, 103, 143),
     overlay1: rgb(132, 137, 160),
     text: rgb(198, 200, 209),
@@ -28,7 +30,7 @@ const ICEBERG_DARK: Palette = Palette {
     addition_emphasis: rgb(73, 77, 64),
     yellow: rgb(226, 164, 120),
     red: rgb(226, 120, 120),
-    deletion_bg: rgb(53, 38, 46),
+    deletion_bg: rgb(50, 35, 43),
     deletion_emphasis: rgb(88, 54, 61),
     blue: rgb(132, 160, 198),
     teal: rgb(137, 184, 194),
@@ -49,11 +51,11 @@ const NORD_LIGHT: Palette = Palette {
     pink: rgb(153, 50, 75),
     green: rgb(79, 137, 76),
     added: rgb(56, 100, 53),
-    addition_bg: rgb(223, 230, 225),
+    addition_bg: rgb(218, 240, 221),
     addition_emphasis: rgb(188, 210, 182),
     yellow: rgb(235, 203, 139),
     red: rgb(153, 50, 75),
-    deletion_bg: rgb(230, 219, 225),
+    deletion_bg: rgb(239, 217, 220),
     deletion_emphasis: rgb(218, 182, 192),
     blue: rgb(59, 110, 168),
     teal: rgb(57, 142, 172),
@@ -64,8 +66,8 @@ const ELDRITCH_MINIMAL: Palette = Palette {
     accent: rgb(55, 244, 153),
     background: rgb(23, 25, 40),
     raised: rgb(23, 25, 40),
-    header: rgb(33, 35, 55),
-    selection: rgb(41, 46, 66),
+    header: rgb(20, 23, 70),
+    selection: rgb(44, 46, 69),
     border: rgb(96, 106, 150),
     overlay1: rgb(122, 137, 204),
     text: rgb(235, 250, 250),
@@ -74,7 +76,7 @@ const ELDRITCH_MINIMAL: Palette = Palette {
     pink: rgb(242, 101, 181),
     green: rgb(55, 244, 153),
     added: rgb(55, 244, 153),
-    addition_bg: rgb(28, 58, 57),
+    addition_bg: rgb(23, 53, 52),
     addition_emphasis: rgb(35, 104, 81),
     yellow: rgb(241, 252, 121),
     red: rgb(241, 108, 117),
@@ -90,7 +92,7 @@ const ELDRITCH_DUSK: Palette = Palette {
     background: rgb(240, 243, 244),
     raised: rgb(226, 230, 232),
     header: rgb(213, 217, 219),
-    selection: rgb(220, 219, 236),
+    selection: rgb(219, 218, 239),
     border: rgb(118, 122, 134),
     overlay1: rgb(91, 115, 220),
     text: rgb(30, 32, 41),
@@ -114,7 +116,7 @@ const CATPPUCCIN_MOCHA: Palette = Palette {
     accent: rgb(203, 166, 247),
     background: rgb(30, 30, 46),
     raised: rgb(24, 24, 37),
-    header: rgb(49, 50, 68),
+    header: rgb(46, 47, 65),
     selection: rgb(58, 59, 80),
     border: rgb(108, 112, 134),
     overlay1: rgb(137, 142, 166),
@@ -124,11 +126,11 @@ const CATPPUCCIN_MOCHA: Palette = Palette {
     pink: rgb(245, 194, 231),
     green: rgb(166, 227, 161),
     added: rgb(166, 227, 161),
-    addition_bg: rgb(50, 60, 63),
+    addition_bg: rgb(50, 60, 60),
     addition_emphasis: rgb(73, 93, 83),
     yellow: rgb(249, 226, 175),
     red: rgb(243, 139, 168),
-    deletion_bg: rgb(62, 47, 64),
+    deletion_bg: rgb(77, 31, 80),
     deletion_emphasis: rgb(98, 65, 85),
     blue: rgb(137, 180, 250),
     teal: rgb(148, 226, 213),
@@ -149,11 +151,11 @@ const CATPPUCCIN_LATTE: Palette = Palette {
     pink: rgb(234, 118, 203),
     green: rgb(64, 160, 43),
     added: rgb(40, 105, 26),
-    addition_bg: rgb(208, 226, 209),
+    addition_bg: rgb(206, 235, 208),
     addition_emphasis: rgb(166, 207, 160),
     yellow: rgb(240, 196, 120),
     red: rgb(186, 12, 50),
-    deletion_bg: rgb(235, 209, 219),
+    deletion_bg: rgb(237, 209, 219),
     deletion_emphasis: rgb(232, 186, 199),
     blue: rgb(24, 88, 215),
     teal: rgb(23, 146, 153),
@@ -777,6 +779,47 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn surfaces_stay_distinct_after_xterm_256_rounding() {
+        for variant in ThemeVariant::ALL {
+            let palette = variant.palette();
+            let index = |color| xterm256::xterm256_index(color);
+            let name = variant.as_str();
+            let (background, raised, header, selection) = (
+                index(palette.background),
+                index(palette.raised),
+                index(palette.header),
+                index(palette.selection),
+            );
+            let (addition, deletion) = (index(palette.addition_bg), index(palette.deletion_bg));
+            assert_ne!(header, background, "{name}: file heading on the diff");
+            assert_ne!(selection, background, "{name}: selected row on the diff");
+            assert_ne!(selection, raised, "{name}: selected row in the sidebar");
+            assert_ne!(selection, header, "{name}: selected file heading");
+            assert_ne!(addition, deletion, "{name}: added and removed rows");
+            for (role, row) in [("added", addition), ("removed", deletion)] {
+                for (surface, neighbour) in [
+                    ("diff", background),
+                    ("hunk header", raised),
+                    ("file heading", header),
+                    ("selection", selection),
+                ] {
+                    assert_ne!(row, neighbour, "{name}: {role} row matches the {surface}");
+                }
+            }
+            assert_ne!(
+                index(palette.addition_emphasis),
+                addition,
+                "{name}: added emphasis on its row"
+            );
+            assert_ne!(
+                index(palette.deletion_emphasis),
+                deletion,
+                "{name}: removed emphasis on its row"
+            );
         }
     }
 

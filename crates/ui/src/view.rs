@@ -505,7 +505,7 @@ impl RenderContext<'_, '_, '_, '_> {
                     .iter()
                     .any(|(start, end)| bounds[0] >= *start && bounds[0] < *end)
                 {
-                    style = style.patch(self.theme.intraline);
+                    style = style.patch(self.theme.emphasis(base));
                 }
                 if search
                     .iter()
@@ -697,6 +697,8 @@ const fn missing_side(marker: MissingNewline) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    mod contrast;
+
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use mire_core::{ChangesetSource, PatchLimits, parse_patch};
     use ratatui::Terminal;
@@ -807,8 +809,12 @@ new file mode 100644
         terminal.draw(|frame| render(frame, &unified, &theme)).unwrap();
         let buffer = terminal.backend().buffer();
         for x in unified_area.x..unified_area.right() {
-            assert!([theme.deletion.bg, theme.intraline.bg].contains(&buffer[(x, unified_area.y + 2)].style().bg));
-            assert!([theme.addition.bg, theme.intraline.bg].contains(&buffer[(x, unified_area.y + 3)].style().bg));
+            assert!(
+                [theme.deletion.bg, theme.deletion_emphasis.bg].contains(&buffer[(x, unified_area.y + 2)].style().bg)
+            );
+            assert!(
+                [theme.addition.bg, theme.addition_emphasis.bg].contains(&buffer[(x, unified_area.y + 3)].style().bg)
+            );
         }
         assert_eq!(
             buffer[(unified_area.right() - 1, unified_area.y + 2)].style().bg,
@@ -828,10 +834,10 @@ new file mode 100644
         let buffer = terminal.backend().buffer();
         let changed_row = split_area.y + 2;
         for x in split_area.x..split_area.x + cell_width {
-            assert!([theme.deletion.bg, theme.intraline.bg].contains(&buffer[(x, changed_row)].style().bg));
+            assert!([theme.deletion.bg, theme.deletion_emphasis.bg].contains(&buffer[(x, changed_row)].style().bg));
         }
         for x in split_area.x + cell_width + 3..split_area.right() {
-            assert!([theme.addition.bg, theme.intraline.bg].contains(&buffer[(x, changed_row)].style().bg));
+            assert!([theme.addition.bg, theme.addition_emphasis.bg].contains(&buffer[(x, changed_row)].style().bg));
         }
         assert_eq!(
             buffer[(split_area.x + cell_width - 1, changed_row)].style().bg,
@@ -898,11 +904,14 @@ new file mode 100644
 
         let styles = rendered_styles(app, 120, 12, &theme);
         assert!(has_style(&styles, theme.search_match));
-        assert!(styles.iter().any(|style| {
-            style.bg == theme.intraline.bg
-                && style.add_modifier.contains(Modifier::BOLD)
-                && !style.add_modifier.contains(Modifier::UNDERLINED)
-        }));
+        for emphasis in [theme.addition_emphasis, theme.deletion_emphasis] {
+            assert!(styles.iter().any(|style| {
+                style.fg == emphasis.fg
+                    && style.bg == emphasis.bg
+                    && style.add_modifier.contains(Modifier::BOLD)
+                    && !style.add_modifier.contains(Modifier::UNDERLINED)
+            }));
+        }
         let addition_styles = styles
             .iter()
             .filter(|style| style.bg == theme.addition.bg)

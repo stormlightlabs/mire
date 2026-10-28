@@ -7,48 +7,54 @@ use terminal_colorsaurus::{QueryOptions, ThemeMode, theme_mode};
 pub use web::web_stylesheet;
 
 #[cfg(test)]
-mod contrast;
+pub mod contrast;
 mod web;
 
 const ICEBERG_DARK: Palette = Palette {
     accent: rgb(132, 160, 198),
-    panel_bg: rgb(22, 24, 33),
-    surface0: rgb(30, 33, 50),
-    surface1: rgb(39, 44, 66),
-    surface_dim: rgb(15, 17, 23),
-    overlay0: rgb(68, 75, 113),
-    overlay1: rgb(107, 112, 137),
+    background: rgb(22, 24, 33),
+    raised: rgb(15, 17, 23),
+    header: rgb(30, 33, 50),
+    selection: rgb(39, 44, 66),
+    border: rgb(95, 103, 143),
+    overlay1: rgb(132, 137, 160),
     text: rgb(198, 200, 209),
-    subtext0: rgb(129, 133, 150),
+    subtext0: rgb(152, 156, 172),
     mauve: rgb(160, 147, 199),
     pink: rgb(242, 101, 181),
     green: rgb(180, 190, 130),
+    added: rgb(180, 190, 130),
     addition_bg: rgb(46, 49, 48),
+    addition_emphasis: rgb(73, 77, 64),
     yellow: rgb(226, 164, 120),
     red: rgb(226, 120, 120),
     deletion_bg: rgb(53, 38, 46),
+    deletion_emphasis: rgb(88, 54, 61),
     blue: rgb(132, 160, 198),
     teal: rgb(137, 184, 194),
     peach: rgb(226, 164, 120),
 };
 
 const NORD_LIGHT: Palette = Palette {
-    accent: rgb(56, 104, 160),
-    panel_bg: rgb(229, 233, 240),
-    surface0: rgb(194, 208, 231),
-    surface1: rgb(184, 197, 219),
-    surface_dim: rgb(229, 233, 240),
-    overlay0: rgb(174, 186, 207),
+    accent: rgb(46, 90, 145),
+    background: rgb(236, 239, 244),
+    raised: rgb(229, 233, 240),
+    header: rgb(216, 222, 233),
+    selection: rgb(209, 218, 230),
+    border: rgb(108, 120, 142),
     overlay1: rgb(96, 114, 140),
     text: rgb(46, 52, 64),
-    subtext0: rgb(87, 104, 127),
+    subtext0: rgb(76, 86, 106),
     mauve: rgb(151, 54, 91),
     pink: rgb(153, 50, 75),
     green: rgb(79, 137, 76),
-    addition_bg: rgb(206, 219, 215),
-    yellow: rgb(154, 117, 0),
+    added: rgb(56, 100, 53),
+    addition_bg: rgb(223, 230, 225),
+    addition_emphasis: rgb(188, 210, 182),
+    yellow: rgb(235, 203, 139),
     red: rgb(153, 50, 75),
-    deletion_bg: rgb(218, 206, 215),
+    deletion_bg: rgb(230, 219, 225),
+    deletion_emphasis: rgb(218, 182, 192),
     blue: rgb(59, 110, 168),
     teal: rgb(57, 142, 172),
     peach: rgb(172, 68, 38),
@@ -56,43 +62,49 @@ const NORD_LIGHT: Palette = Palette {
 
 const ELDRITCH_MINIMAL: Palette = Palette {
     accent: rgb(55, 244, 153),
-    panel_bg: rgb(23, 25, 40),
-    surface0: rgb(33, 35, 55),
-    surface1: rgb(41, 46, 66),
-    surface_dim: rgb(23, 25, 40),
-    overlay0: rgb(59, 66, 97),
-    overlay1: rgb(100, 115, 183),
+    background: rgb(23, 25, 40),
+    raised: rgb(23, 25, 40),
+    header: rgb(33, 35, 55),
+    selection: rgb(41, 46, 66),
+    border: rgb(96, 106, 150),
+    overlay1: rgb(122, 137, 204),
     text: rgb(235, 250, 250),
     subtext0: rgb(171, 180, 218),
     mauve: rgb(164, 140, 242),
     pink: rgb(242, 101, 181),
     green: rgb(55, 244, 153),
+    added: rgb(55, 244, 153),
     addition_bg: rgb(28, 58, 57),
+    addition_emphasis: rgb(35, 104, 81),
     yellow: rgb(241, 252, 121),
     red: rgb(241, 108, 117),
     deletion_bg: rgb(56, 37, 52),
+    deletion_emphasis: rgb(102, 55, 68),
     blue: rgb(4, 209, 249),
     teal: rgb(4, 209, 249),
     peach: rgb(247, 198, 127),
 };
 
 const ELDRITCH_DUSK: Palette = Palette {
-    accent: rgb(56, 255, 159),
-    panel_bg: rgb(240, 243, 244),
-    surface0: rgb(226, 230, 232),
-    surface1: rgb(213, 217, 219),
-    surface_dim: rgb(240, 243, 244),
-    overlay0: rgb(201, 203, 205),
+    accent: rgb(98, 70, 190),
+    background: rgb(240, 243, 244),
+    raised: rgb(226, 230, 232),
+    header: rgb(213, 217, 219),
+    selection: rgb(220, 219, 236),
+    border: rgb(118, 122, 134),
     overlay1: rgb(91, 115, 220),
     text: rgb(30, 32, 41),
-    subtext0: rgb(81, 102, 196),
-    mauve: rgb(116, 88, 207),
+    subtext0: rgb(75, 86, 140),
+    mauve: rgb(98, 70, 190),
     pink: rgb(251, 91, 182),
     green: rgb(56, 255, 159),
+    added: rgb(16, 108, 64),
     addition_bg: rgb(212, 245, 230),
+    addition_emphasis: rgb(163, 248, 208),
     yellow: rgb(255, 249, 82),
-    red: rgb(188, 68, 76),
+    red: rgb(160, 45, 55),
     deletion_bg: rgb(242, 220, 222),
+    deletion_emphasis: rgb(223, 187, 190),
     blue: rgb(10, 214, 255),
     teal: rgb(10, 214, 255),
     peach: rgb(255, 175, 77),
@@ -100,44 +112,50 @@ const ELDRITCH_DUSK: Palette = Palette {
 
 const CATPPUCCIN_MOCHA: Palette = Palette {
     accent: rgb(203, 166, 247),
-    panel_bg: rgb(30, 30, 46),
-    surface0: rgb(49, 50, 68),
-    surface1: rgb(69, 71, 90),
-    surface_dim: rgb(24, 24, 37),
-    overlay0: rgb(108, 112, 134),
-    overlay1: rgb(127, 132, 156),
+    background: rgb(30, 30, 46),
+    raised: rgb(24, 24, 37),
+    header: rgb(49, 50, 68),
+    selection: rgb(58, 59, 80),
+    border: rgb(108, 112, 134),
+    overlay1: rgb(137, 142, 166),
     text: rgb(205, 214, 244),
     subtext0: rgb(166, 173, 200),
     mauve: rgb(203, 166, 247),
     pink: rgb(245, 194, 231),
     green: rgb(166, 227, 161),
+    added: rgb(166, 227, 161),
     addition_bg: rgb(50, 60, 63),
+    addition_emphasis: rgb(73, 93, 83),
     yellow: rgb(249, 226, 175),
     red: rgb(243, 139, 168),
     deletion_bg: rgb(62, 47, 64),
+    deletion_emphasis: rgb(98, 65, 85),
     blue: rgb(137, 180, 250),
     teal: rgb(148, 226, 213),
     peach: rgb(250, 179, 135),
 };
 
 const CATPPUCCIN_LATTE: Palette = Palette {
-    accent: rgb(133, 56, 234),
-    panel_bg: rgb(239, 241, 245),
-    surface0: rgb(204, 208, 218),
-    surface1: rgb(188, 192, 204),
-    surface_dim: rgb(230, 233, 239),
-    overlay0: rgb(156, 160, 176),
+    accent: rgb(114, 40, 210),
+    background: rgb(239, 241, 245),
+    raised: rgb(230, 233, 239),
+    header: rgb(220, 224, 232),
+    selection: rgb(222, 213, 240),
+    border: rgb(110, 113, 135),
     overlay1: rgb(140, 143, 161),
     text: rgb(76, 79, 105),
-    subtext0: rgb(99, 102, 122),
+    subtext0: rgb(86, 89, 112),
     mauve: rgb(136, 57, 239),
     pink: rgb(234, 118, 203),
     green: rgb(64, 160, 43),
-    addition_bg: rgb(213, 229, 220),
-    yellow: rgb(223, 142, 29),
-    red: rgb(206, 15, 56),
-    deletion_bg: rgb(235, 207, 219),
-    blue: rgb(30, 102, 245),
+    added: rgb(40, 105, 26),
+    addition_bg: rgb(208, 226, 209),
+    addition_emphasis: rgb(166, 207, 160),
+    yellow: rgb(240, 196, 120),
+    red: rgb(186, 12, 50),
+    deletion_bg: rgb(235, 209, 219),
+    deletion_emphasis: rgb(232, 186, 199),
+    blue: rgb(24, 88, 215),
     teal: rgb(23, 146, 153),
     peach: rgb(254, 100, 11),
 };
@@ -145,7 +163,7 @@ const CATPPUCCIN_LATTE: Palette = Palette {
 /// A stable built-in theme identifier selected by users.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ThemeFamily {
-    /// Select the Eldritch variant matching the terminal color mode.
+    /// Select Nord Light on light backgrounds and Eldritch Minimal on dark ones.
     #[default]
     Auto,
     /// Select Iceberg Dark or Nord Light.
@@ -230,28 +248,38 @@ pub struct Theme {
     pub footer: Style,
     /// Style for matching search text.
     pub search_match: Style,
-    /// Style patched onto changed text within an added or removed row.
-    pub intraline: Style,
+    /// Style for changed text within an added row.
+    pub addition_emphasis: Style,
+    /// Style for changed text within a removed row.
+    pub deletion_emphasis: Style,
 }
 
+/// One built-in palette's colors, named by the role each plays.
+///
+/// The four surfaces step from `background` (the diff) through `raised` (the
+/// sidebar, title bar, footer and dialogs) and `header` (file and help
+/// headings) to `selection`, an accent-tinted step for the selected row.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Palette {
     accent: Color,
-    panel_bg: Color,
-    surface0: Color,
-    surface1: Color,
-    surface_dim: Color,
-    overlay0: Color,
+    background: Color,
+    raised: Color,
+    header: Color,
+    selection: Color,
+    border: Color,
     overlay1: Color,
     text: Color,
     subtext0: Color,
     mauve: Color,
     pink: Color,
     green: Color,
+    added: Color,
     addition_bg: Color,
+    addition_emphasis: Color,
     yellow: Color,
     red: Color,
     deletion_bg: Color,
+    deletion_emphasis: Color,
     blue: Color,
     teal: Color,
     peach: Color,
@@ -378,7 +406,8 @@ impl Theme {
             error: Style::new().add_modifier(Modifier::BOLD),
             footer: Style::new(),
             search_match: Style::new().add_modifier(Modifier::REVERSED),
-            intraline: Style::new().add_modifier(Modifier::BOLD),
+            addition_emphasis: Style::new().add_modifier(Modifier::BOLD),
+            deletion_emphasis: Style::new().add_modifier(Modifier::BOLD),
         }
     }
 
@@ -408,7 +437,8 @@ impl Theme {
             error: Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
             footer: Style::new(),
             search_match: Style::new().add_modifier(Modifier::REVERSED),
-            intraline: Style::new().add_modifier(Modifier::BOLD),
+            addition_emphasis: Style::new().add_modifier(Modifier::BOLD),
+            deletion_emphasis: Style::new().add_modifier(Modifier::BOLD),
         }
     }
 
@@ -435,31 +465,23 @@ impl Theme {
         }
     }
 
-    /// Maps a variant's palette to the semantic roles both the terminal and the browser use.
-    pub const fn from_palette(variant: ThemeVariant) -> Self {
-        let palette = variant.palette();
-        let emphasis_text = match variant {
-            ThemeVariant::NordLight => palette.surface_dim,
-            ThemeVariant::EldritchDusk | ThemeVariant::CatppuccinLatte => palette.text,
-            ThemeVariant::IcebergDark | ThemeVariant::EldritchMinimal | ThemeVariant::CatppuccinMocha => {
-                palette.surface_dim
-            }
-        };
-        let danger_text = palette.surface_dim;
-        let light_variant = variant.is_light();
-        let interface_accent =
-            if matches!(variant, ThemeVariant::EldritchDusk) { palette.mauve } else { palette.accent };
-        let (addition_meta, deletion_meta) = if light_variant {
-            (
-                Style::new().fg(palette.text).add_modifier(Modifier::BOLD),
-                Style::new().fg(palette.text).add_modifier(Modifier::ITALIC),
-            )
+    /// Returns the style for changed text within a row drawn in `base`.
+    ///
+    /// Added and removed rows get their own emphasis; any other row gets none.
+    pub fn emphasis(self, base: Style) -> Style {
+        if base == self.addition {
+            self.addition_emphasis
+        } else if base == self.deletion {
+            self.deletion_emphasis
         } else {
-            (
-                Style::new().fg(palette.green).add_modifier(Modifier::BOLD),
-                Style::new().fg(palette.red).add_modifier(Modifier::BOLD),
-            )
-        };
+            Style::new()
+        }
+    }
+
+    /// Maps a variant's palette to the semantic roles both the terminal and the browser use.
+    const fn from_palette(variant: ThemeVariant) -> Self {
+        let palette = variant.palette();
+        let light_variant = variant.is_light();
         let syntax = if light_variant {
             SyntaxStyles {
                 comment: palette.text,
@@ -483,55 +505,60 @@ impl Theme {
             variant: Some(variant),
             syntax_colors: true,
             syntax,
-            application: Style::new().fg(palette.text).bg(palette.panel_bg),
-            panel: Style::new().fg(palette.text).bg(palette.surface_dim),
-            accent: Style::new().fg(interface_accent).add_modifier(Modifier::BOLD),
+            application: Style::new().fg(palette.text).bg(palette.background),
+            panel: Style::new().fg(palette.text).bg(palette.raised),
+            accent: Style::new().fg(palette.accent).add_modifier(Modifier::BOLD),
             muted: Style::new().fg(palette.subtext0),
-            title: Style::new().fg(palette.text).bg(palette.surface_dim),
+            title: Style::new().fg(palette.text).bg(palette.raised),
             selected: Style::new()
                 .fg(palette.text)
-                .bg(palette.surface1)
+                .bg(palette.selection)
                 .add_modifier(Modifier::BOLD),
-            divider: Style::new().fg(palette.overlay0).bg(palette.panel_bg),
+            divider: Style::new().fg(palette.border),
             file: Style::new()
                 .fg(palette.text)
-                .bg(palette.surface0)
+                .bg(palette.header)
                 .add_modifier(Modifier::BOLD),
-            hunk: if light_variant {
-                Style::new().fg(palette.text).bg(palette.surface0)
-            } else {
-                Style::new().fg(palette.blue).bg(palette.surface_dim)
-            },
+            hunk: Style::new()
+                .fg(if light_variant { palette.accent } else { palette.blue })
+                .bg(palette.raised),
             addition: Style::new().fg(palette.text).bg(palette.addition_bg),
-            addition_meta,
+            addition_meta: Style::new().fg(palette.added).add_modifier(Modifier::BOLD),
             deletion: Style::new().fg(palette.text).bg(palette.deletion_bg),
-            deletion_meta,
-            context: Style::new().fg(palette.text).bg(palette.panel_bg),
+            deletion_meta: Style::new().fg(palette.red).add_modifier(Modifier::BOLD),
+            context: Style::new().fg(palette.text).bg(palette.background),
             marker: if light_variant {
                 Style::new()
-                    .fg(palette.text)
-                    .bg(palette.surface0)
+                    .fg(palette.subtext0)
+                    .bg(palette.background)
                     .add_modifier(Modifier::ITALIC)
             } else {
-                Style::new().fg(palette.peach).bg(palette.panel_bg)
+                Style::new().fg(palette.peach).bg(palette.background)
             },
             error: Style::new()
-                .fg(danger_text)
+                .fg(palette.raised)
                 .bg(palette.red)
                 .add_modifier(Modifier::BOLD),
-            footer: Style::new().fg(palette.subtext0).bg(palette.surface_dim),
+            footer: Style::new().fg(palette.subtext0).bg(palette.raised),
             search_match: Style::new()
-                .fg(emphasis_text)
+                .fg(if light_variant { palette.text } else { palette.raised })
                 .bg(palette.yellow)
                 .add_modifier(Modifier::BOLD),
-            intraline: Style::new().bg(palette.surface1).add_modifier(Modifier::BOLD),
+            addition_emphasis: Style::new()
+                .fg(palette.text)
+                .bg(palette.addition_emphasis)
+                .add_modifier(Modifier::BOLD),
+            deletion_emphasis: Style::new()
+                .fg(palette.text)
+                .bg(palette.deletion_emphasis)
+                .add_modifier(Modifier::BOLD),
         }
     }
 }
 
 impl ThemeVariant {
     /// Every built-in palette, dark and light variants of each family in turn.
-    pub const ALL: [Self; 6] = [
+    const ALL: [Self; 6] = [
         Self::IcebergDark,
         Self::NordLight,
         Self::EldritchMinimal,
@@ -540,32 +567,22 @@ impl ThemeVariant {
         Self::CatppuccinLatte,
     ];
 
-    /// Picks the terminal palette for a family in a color mode.
+    /// Picks the palette for a family in a color mode, in the terminal and the browser alike.
     ///
-    /// `auto` follows Eldritch: Eldritch Minimal on dark backgrounds and Eldritch Dusk on light ones.
-    pub const fn resolve(family: ThemeFamily, mode: ColorMode) -> Self {
+    /// `auto` uses Nord Light on light backgrounds and Eldritch Minimal on dark ones.
+    const fn resolve(family: ThemeFamily, mode: ColorMode) -> Self {
         match (family, mode) {
             (ThemeFamily::Iceberg, ColorMode::Dark) => Self::IcebergDark,
-            (ThemeFamily::Iceberg, ColorMode::Light) => Self::NordLight,
+            (ThemeFamily::Auto | ThemeFamily::Iceberg, ColorMode::Light) => Self::NordLight,
             (ThemeFamily::Auto | ThemeFamily::Eldritch, ColorMode::Dark) => Self::EldritchMinimal,
-            (ThemeFamily::Auto | ThemeFamily::Eldritch, ColorMode::Light) => Self::EldritchDusk,
+            (ThemeFamily::Eldritch, ColorMode::Light) => Self::EldritchDusk,
             (ThemeFamily::Catppuccin, ColorMode::Dark) => Self::CatppuccinMocha,
             (ThemeFamily::Catppuccin, ColorMode::Light) => Self::CatppuccinLatte,
         }
     }
 
-    /// Picks the browser review's palette for a family in a color mode.
-    ///
-    /// Matches [`ThemeVariant::resolve`], except that `auto` uses Nord Light in light mode.
-    pub const fn resolve_browser(family: ThemeFamily, mode: ColorMode) -> Self {
-        match (family, mode) {
-            (ThemeFamily::Auto, ColorMode::Light) => Self::NordLight,
-            _ => Self::resolve(family, mode),
-        }
-    }
-
     /// Returns the stable kebab-case name of this palette.
-    pub const fn as_str(self) -> &'static str {
+    const fn as_str(self) -> &'static str {
         match self {
             Self::IcebergDark => "iceberg-dark",
             Self::NordLight => "nord-light",
@@ -577,7 +594,7 @@ impl ThemeVariant {
     }
 
     /// Reports whether this palette is meant for a light background.
-    pub const fn is_light(self) -> bool {
+    const fn is_light(self) -> bool {
         matches!(self, Self::NordLight | Self::EldritchDusk | Self::CatppuccinLatte)
     }
 
@@ -638,7 +655,7 @@ mod tests {
             (ThemeFamily::Catppuccin, ColorMode::Dark, ThemeVariant::CatppuccinMocha),
             (ThemeFamily::Catppuccin, ColorMode::Light, ThemeVariant::CatppuccinLatte),
             (ThemeFamily::Auto, ColorMode::Dark, ThemeVariant::EldritchMinimal),
-            (ThemeFamily::Auto, ColorMode::Light, ThemeVariant::EldritchDusk),
+            (ThemeFamily::Auto, ColorMode::Light, ThemeVariant::NordLight),
         ];
         for (family, mode, expected) in cases {
             assert_eq!(Theme::resolve(family, Some(mode)).variant(), Some(expected));
@@ -655,19 +672,19 @@ mod tests {
     fn palette_sources_map_to_exact_semantic_colors() {
         let cases = [
             (ICEBERG_DARK, rgb(22, 24, 33), rgb(180, 190, 130), rgb(226, 120, 120)),
-            (NORD_LIGHT, rgb(229, 233, 240), rgb(79, 137, 76), rgb(153, 50, 75)),
+            (NORD_LIGHT, rgb(236, 239, 244), rgb(79, 137, 76), rgb(153, 50, 75)),
             (ELDRITCH_MINIMAL, rgb(23, 25, 40), rgb(55, 244, 153), rgb(241, 108, 117)),
-            (ELDRITCH_DUSK, rgb(240, 243, 244), rgb(56, 255, 159), rgb(188, 68, 76)),
+            (ELDRITCH_DUSK, rgb(240, 243, 244), rgb(56, 255, 159), rgb(160, 45, 55)),
             (
                 CATPPUCCIN_MOCHA,
                 rgb(30, 30, 46),
                 rgb(166, 227, 161),
                 rgb(243, 139, 168),
             ),
-            (CATPPUCCIN_LATTE, rgb(239, 241, 245), rgb(64, 160, 43), rgb(206, 15, 56)),
+            (CATPPUCCIN_LATTE, rgb(239, 241, 245), rgb(64, 160, 43), rgb(186, 12, 50)),
         ];
         for (palette, background, addition, deletion) in cases {
-            assert_eq!(palette.panel_bg, background);
+            assert_eq!(palette.background, background);
             assert_eq!(palette.green, addition);
             assert_eq!(palette.red, deletion);
         }
@@ -763,7 +780,7 @@ mod tests {
         }
     }
 
-    fn semantic_styles(theme: Theme) -> [Style; 19] {
+    fn semantic_styles(theme: Theme) -> [Style; 20] {
         [
             theme.application,
             theme.panel,
@@ -783,7 +800,8 @@ mod tests {
             theme.error,
             theme.footer,
             theme.search_match,
-            theme.intraline,
+            theme.addition_emphasis,
+            theme.deletion_emphasis,
         ]
     }
 

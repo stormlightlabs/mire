@@ -18,7 +18,7 @@ test.describe('with a light browser and --theme iceberg', () => {
 		const root = page.locator('html');
 		await expect(root).toHaveAttribute('data-theme-family', 'iceberg');
 		await expect(root).toHaveAttribute('data-theme', 'light');
-		expect(await background(page)).toBe('rgb(229, 233, 240)');
+		expect(await background(page)).toBe('rgb(236, 239, 244)');
 	});
 });
 
@@ -45,5 +45,15 @@ test.describe('with a dark browser and no --theme', () => {
 		await open(page, mire.url);
 		await expect(page.locator('html')).toHaveAttribute('data-theme-family', 'auto');
 		expect(await background(page)).toBe('rgb(23, 25, 40)');
+	});
+});
+
+test.describe('with a light browser and no --theme', () => {
+	test.use({ colorScheme: 'light' });
+
+	test('uses Nord Light, as the terminal does', async ({ page, mire }) => {
+		await open(page, mire.url);
+		await expect(page.locator('html')).toHaveAttribute('data-theme-family', 'auto');
+		expect(await background(page)).toBe('rgb(236, 239, 244)');
 	});
 });

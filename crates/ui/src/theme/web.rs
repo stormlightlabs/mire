@@ -51,18 +51,18 @@ fn properties(variant: ThemeVariant) -> [(&'static str, Color); 14] {
         ("selected", fg(theme.application)),
         ("selected-ink", bg(theme.application)),
         ("danger", bg(theme.error)),
-        ("success", variant.palette().green),
+        ("success", fg(theme.addition_meta)),
     ]
 }
 
 fn selectors(variant: ThemeVariant) -> Vec<String> {
     let mut selectors = Vec::new();
-    if ThemeVariant::resolve_browser(ThemeFamily::Auto, ColorMode::Light) == variant {
+    if ThemeVariant::resolve(ThemeFamily::Auto, ColorMode::Light) == variant {
         selectors.push(":root".to_owned());
     }
     for family in ThemeFamily::ALL {
         for mode in [ColorMode::Light, ColorMode::Dark] {
-            if ThemeVariant::resolve_browser(family, mode) != variant {
+            if ThemeVariant::resolve(family, mode) != variant {
                 continue;
             }
             let mode_selector = match mode {
@@ -117,18 +117,25 @@ mod tests {
                         variant.as_str()
                     );
                 }
+                // The status dot is a graphic, so 3:1 is enough.
+                let ratio = contrast_ratio(color("success"), color(background));
+                assert!(
+                    ratio >= 3.0,
+                    "{}: --success on --{background} is {ratio:.2}:1",
+                    variant.as_str()
+                );
             }
         }
     }
 
     #[test]
-    fn auto_uses_nord_light_and_eldritch_minimal_in_the_browser() {
+    fn auto_uses_nord_light_and_eldritch_minimal() {
         assert_eq!(
-            ThemeVariant::resolve_browser(ThemeFamily::Auto, ColorMode::Light),
+            ThemeVariant::resolve(ThemeFamily::Auto, ColorMode::Light),
             ThemeVariant::NordLight
         );
         assert_eq!(
-            ThemeVariant::resolve_browser(ThemeFamily::Auto, ColorMode::Dark),
+            ThemeVariant::resolve(ThemeFamily::Auto, ColorMode::Dark),
             ThemeVariant::EldritchMinimal
         );
         let css = web_stylesheet();

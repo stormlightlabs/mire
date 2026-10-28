@@ -13,7 +13,7 @@
 # PNG's path.
 set -euo pipefail
 
-SCENARIOS=(unified split narrow help sidebar-hidden collapsed note viewed walkthrough walkthrough-step walkthrough-narrow session-walkthrough no-color)
+SCENARIOS=(unified split narrow help sidebar-hidden collapsed note viewed walkthrough walkthrough-step walkthrough-narrow session-walkthrough generated no-color)
 
 usage() {
   echo "usage: scripts/shots.sh [--list | <scenario>...]" >&2
@@ -197,6 +197,13 @@ capture() {
           "$0" session walkthrough start "$session" >/dev/null
           "$0" session walkthrough next "$session" >/dev/null) &
         exec "$0" review review.json --theme eldritch' "$mire"
+      ;;
+    generated)
+      # A global attributes file marks the README as generated without
+      # adding a .gitattributes file to the fixture's diff.
+      printf 'README.md linguist-generated\n' >"$work/attributes"
+      run generated 120 32 env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.attributesFile \
+        GIT_CONFIG_VALUE_0="$work/attributes" "${diff[@]}"
       ;;
     no-color) run no-color 120 32 env NO_COLOR=1 "$mire" diff --staged ;;
   esac

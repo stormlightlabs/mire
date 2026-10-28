@@ -24,7 +24,16 @@
 	const visibleFiles = $derived(
 		files.filter((file) => file.path.display.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
 	);
-	const treeRows = $derived(buildTreeRows(visibleFiles));
+	const treeRows = $derived(buildTreeRows(visibleFiles.filter((file) => !file.generated)));
+	const generatedFiles = $derived(visibleFiles.filter((file) => file.generated));
+	let generatedOpen = $state(false);
+	/** Generated files start collapsed, and show while a filter is active. */
+	const showGenerated = $derived(generatedOpen || query.trim() !== '');
+
+	// Opening a generated file from elsewhere, such as the review queue, expands the group.
+	$effect(() => {
+		if (files.some((file) => file.generated && file.id === activeFile)) generatedOpen = true;
+	});
 	let collapsed = new SvelteSet<string>();
 	const visibleRows = $derived(
 		treeRows.filter((row) => query.trim() || row.ancestors.every((ancestor) => !collapsed.has(ancestor)))
@@ -115,8 +124,45 @@
 				</button>
 			{/if}
 		{:else}
-			<p class="empty">No changed files match this filter.</p>
+			{#if generatedFiles.length === 0}<p class="empty">No changed files match this filter.</p>{/if}
 		{/each}
+		{#if generatedFiles.length > 0}
+			<button
+				class="directory generated-group"
+				style:--tree-depth={0}
+				role="treeitem"
+				aria-level={1}
+				aria-selected="false"
+				aria-expanded={showGenerated}
+				onclick={() => (generatedOpen = !showGenerated)}>
+				<span class="i-lucide-chevron-down disclosure" class:collapsed={!showGenerated}></span>
+				<span class="i-lucide-cog tree-icon"></span>
+				<span class="node-name">Generated</span>
+				<span class="group-count"
+					>{generatedFiles.length}
+					{generatedFiles.length === 1 ? 'file' : 'files'}{showGenerated ? '' : ', collapsed'}</span>
+			</button>
+			{#if showGenerated}
+				{#each generatedFiles as generated (generated.id)}
+					<button
+						class:active={activeFile === generated.id}
+						class="file"
+						style:--tree-depth={1}
+						role="treeitem"
+						aria-level={2}
+						aria-selected={activeFile === generated.id}
+						onclick={() => onSelect(generated.id)}
+						aria-current={activeFile === generated.id ? 'page' : undefined}>
+						<span class="i-lucide-file-cog tree-icon"></span>
+						<span class="path" title={formatPath(generated.path)}>{formatPath(generated.path)}</span>
+						<span class="file-meta"
+							>{generated.status} · generated · {generated.openFindings} open{viewedLabels[
+								fileViewState(generated)
+							]}</span>
+					</button>
+				{/each}
+			{/if}
+		{/if}
 	</div>
 </aside>
 
@@ -193,6 +239,15 @@
 		background: transparent;
 		color: var(--ink);
 		text-align: left;
+	}
+	.generated-group {
+		border-top: 1px solid var(--line);
+	}
+	.group-count {
+		margin-left: auto;
+		color: var(--muted);
+		font-size: 0.68rem;
+		white-space: nowrap;
 	}
 	.directory:hover {
 		background: var(--paper);

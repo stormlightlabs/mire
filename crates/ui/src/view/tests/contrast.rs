@@ -46,6 +46,10 @@ fn every_drawn_cell_has_a_theme_background_and_readable_contrast() {
     )
     .unwrap();
     let markers = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
+    let mut generated = intraline.clone();
+    for index in 0..generated.files().len() {
+        generated.set_generated(index, true);
+    }
     let review = notes_review();
 
     let mut failures = Vec::new();
@@ -58,6 +62,13 @@ fn every_drawn_cell_has_a_theme_background_and_readable_contrast() {
                 ("unified", keys(App::ready(&intraline), &[KeyCode::Char('1')]), 100, 16),
                 ("markers", App::ready(&markers), 120, 12),
                 ("help", keys(App::ready(&intraline), &[KeyCode::Char('?')]), 90, 24),
+                ("generated", App::ready(&generated), 120, 16),
+                (
+                    "generated focus",
+                    keys(App::ready(&generated), &[KeyCode::Tab, KeyCode::Down]),
+                    120,
+                    16,
+                ),
                 (
                     "sidebar focus",
                     keys(App::ready(&intraline), &[KeyCode::Tab, KeyCode::Down]),

@@ -14,6 +14,7 @@ use mire_core::{
 };
 use thiserror::Error;
 
+mod attributes;
 mod consistency;
 
 /// Worktree captures taken before Mire keeps a capture with torn files.
@@ -204,7 +205,9 @@ pub fn load_show(request: ShowRequest) -> Result<Changeset> {
     push_paths(&mut arguments, &request.paths);
     let output = run_git(Some(&repository.root), &arguments, DEFAULT_MAX_PATCH_BYTES)?;
     ensure_success("show", &output, &[0])?;
-    parse_patch(&output.stdout, source, PatchLimits::default()).map_err(GitError::Patch)
+    let mut changeset = parse_patch(&output.stdout, source, PatchLimits::default()).map_err(GitError::Patch)?;
+    mark_generated(&repository.root, &mut changeset)?;
+    Ok(changeset)
 }
 
 /// Returns the ids among `objects` that the bound repository does not hold
@@ -421,7 +424,19 @@ fn capture_diff(
     {
         append_untracked_patches(repository, &request.paths, &mut patch, literal_pathspecs)?;
     }
-    parse_patch(&patch, source, PatchLimits::default()).map_err(GitError::Patch)
+    let mut changeset = parse_patch(&patch, source, PatchLimits::default()).map_err(GitError::Patch)?;
+    mark_generated(&repository.root, &mut changeset)?;
+    Ok(changeset)
+}
+
+/// Marks the files the repository's attributes call generated, reading the
+/// attributes of the comparison's new side.
+fn mark_generated(root: &Path, changeset: &mut Changeset) -> Result<()> {
+    let ChangesetSource::Git { operation } = changeset.source() else {
+        return Ok(());
+    };
+    let source = attributes::attribute_source(operation);
+    attributes::mark_generated(root, changeset, &source)
 }
 
 fn request_from_operation(operation: &GitOperation) -> Result<DiffRequest> {

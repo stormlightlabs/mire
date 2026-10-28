@@ -39,12 +39,19 @@ export function mireBinary(): string {
  * Playwright's `test` with a `mire` fixture. Each test gets its own repository
  * with two changed files, a review holding one finding on each, and a server.
  * The fixture stops the server and removes the directory even when the test or
- * the setup fails. Set `mireTheme` with `test.use` to pass `--theme`.
+ * the setup fails. Set `mireTheme` with `test.use` to pass `--theme`, and
+ * `mireAttributes` to write the repository's `.git/info/attributes`.
  */
-export const test = base.extend<{ mire: MireServer; mireTheme: string | undefined }>({
+export const test = base.extend<{
+	mire: MireServer;
+	mireTheme: string | undefined;
+	mireAttributes: string | undefined;
+}>({
 	/** The `--theme` family to start the server with, or none for the default. */
 	mireTheme: [undefined, { option: true }],
-	mire: async ({ mireTheme }, use) => {
+	/** Attribute lines for `.git/info/attributes`, which apply without changing the diff. */
+	mireAttributes: [undefined, { option: true }],
+	mire: async ({ mireTheme, mireAttributes }, use) => {
 		const directory = await mkdtemp(path.join(tmpdir(), 'mire-e2e-'));
 		let child: ChildProcess | null = null;
 		try {
@@ -52,6 +59,7 @@ export const test = base.extend<{ mire: MireServer; mireTheme: string | undefine
 			const root = path.join(directory, 'repository');
 			const review = path.join(directory, 'review.json');
 			await createRepository(root);
+			if (mireAttributes) await writeFile(path.join(root, '.git', 'info', 'attributes'), mireAttributes);
 			const mire = (...args: string[]) => execFileSync(binary, args, { cwd: root, stdio: 'pipe' });
 			mire('review', 'init', review);
 			addFinding(mire, review, 1, 'one.txt', 'medium', 'defect', 'The second line should stay lowercase.');

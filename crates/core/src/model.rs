@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize, Serializer};
 use thiserror::Error;
 
 /// The changeset JSON schema emitted by this version of Mire.
-pub const CURRENT_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 0 };
+pub const CURRENT_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 1 };
 
 /// A major/minor version for a serialized Mire schema.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -242,6 +242,14 @@ impl Changeset {
             side.object = None;
         }
     }
+
+    /// Marks the file at `index` in [`Self::files`] as generated, or clears
+    /// the mark. Does nothing when `index` is out of range.
+    pub fn set_generated(&mut self, index: usize, generated: bool) {
+        if let Some(file) = self.files.get_mut(index) {
+            file.generated = generated;
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -412,6 +420,8 @@ pub struct FileDiff {
     similarity: Option<u8>,
     content: FileContent,
     fingerprint: Fingerprint,
+    #[serde(skip_serializing_if = "is_false")]
+    generated: bool,
 }
 
 impl FileDiff {
@@ -426,7 +436,7 @@ impl FileDiff {
         {
             return Err(ModelError::InvalidSimilarity { status, value });
         }
-        Ok(Self { status, old, new, similarity, content, fingerprint })
+        Ok(Self { status, old, new, similarity, content, fingerprint, generated: false })
     }
 
     /// Returns the file status.
@@ -459,6 +469,13 @@ impl FileDiff {
         self.fingerprint
     }
 
+    /// Reports whether the source repository's attributes mark the file as
+    /// generated, through `linguist-generated` or `-diff`. The mark is not
+    /// part of the file fingerprint.
+    pub const fn is_generated(&self) -> bool {
+        self.generated
+    }
+
     /// Returns the file's canonical path: the new path, or the old path for a
     /// deleted file.
     pub fn canonical_path(&self) -> &BytePath {
@@ -484,6 +501,8 @@ struct FileDiffWire {
     similarity: Option<u8>,
     content: FileContent,
     fingerprint: Fingerprint,
+    #[serde(default)]
+    generated: bool,
 }
 
 impl<'de> Deserialize<'de> for FileDiff {
@@ -500,6 +519,7 @@ impl<'de> Deserialize<'de> for FileDiff {
             wire.content,
             wire.fingerprint,
         )
+        .map(|file| Self { generated: wire.generated, ..file })
         .map_err(de::Error::custom)
     }
 }
@@ -852,6 +872,10 @@ fn compare_files(left: &FileDiff, right: &FileDiff) -> Ordering {
     })
 }
 
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 const fn hex_digit(value: u8) -> u8 {
     match value {
         0..=9 => b'0' + value,
@@ -933,12 +957,35 @@ mod tests {
         let first = serde_json::to_string(&changeset).expect("changeset serializes");
         let second = serde_json::to_string(&changeset).expect("changeset serializes repeatedly");
         assert_eq!(first, second);
-        assert!(first.starts_with("{\"schema_version\":{\"major\":1,\"minor\":0}"));
+        assert!(first.starts_with("{\"schema_version\":{\"major\":1,\"minor\":1}"));
         assert!(first.find("[97,46,116,120,116]") < first.find("[122,46,116,120,116]"));
         assert!(first.find("[255,97]") < first.find("[108,97,116,101,114]"));
 
         let decoded: Changeset = serde_json::from_str(&first).expect("changeset round trips");
         assert_eq!(decoded, changeset);
+    }
+
+    #[test]
+    fn generated_mark_round_trips_and_is_omitted_when_unset() {
+        let mut changeset = Changeset::new(
+            ChangesetSource::DirectFiles,
+            vec![modified_file("a.txt", Vec::new()), modified_file("b.lock", Vec::new())],
+            FINGERPRINT,
+        );
+        let unmarked = serde_json::to_string(&changeset).expect("changeset serializes");
+        assert!(!unmarked.contains("generated"));
+
+        changeset.set_generated(1, true);
+        changeset.set_generated(9, true);
+        let json = serde_json::to_string(&changeset).expect("changeset serializes");
+        assert_eq!(json.matches("\"generated\":true").count(), 1);
+        let decoded: Changeset = serde_json::from_str(&json).expect("changeset round trips");
+        assert!(!decoded.files()[0].is_generated());
+        assert!(decoded.files()[1].is_generated());
+        assert_eq!(decoded.files()[1].fingerprint(), changeset.files()[1].fingerprint());
+
+        let older: Changeset = serde_json::from_str(&unmarked).expect("a changeset without marks reads");
+        assert!(older.files().iter().all(|file| !file.is_generated()));
     }
 
     #[test]

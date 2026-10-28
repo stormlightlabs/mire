@@ -19,6 +19,8 @@ export type FileSummary = {
 	path: PathText;
 	status: string;
 	contentKind: 'text' | 'binary';
+	/** Whether the repository's attributes mark the file as generated. Generated files start collapsed. */
+	generated: boolean;
 	openFindings: number;
 	/** The reader's viewed mark for this path, or `null`. */
 	viewed: ViewedState | null;
@@ -36,6 +38,11 @@ export function fileViewState(file: Pick<FileSummary, 'id' | 'viewed'>): FileVie
 	return file.viewed.fingerprint === file.id ? 'viewed' : 'changed';
 }
 
+/** Returns the file to open first: the first one not generated, or the first file when all are. */
+export function firstFile(files: FileSummary[]): FileSummary | null {
+	return files.find((file) => !file.generated) ?? files[0] ?? null;
+}
+
 /** The file to open after the review reloads, and a notice for the reader when it is not the one they had open. */
 export type ReopenedFile = { file: FileSummary | null; notice: string | null };
 
@@ -47,7 +54,7 @@ export type ReopenedFile = { file: FileSummary | null; notice: string | null };
  * is not silent.
  */
 export function reopenedFile(files: FileSummary[], previous: Pick<FileSummary, 'id' | 'path'> | null): ReopenedFile {
-	const first = files[0] ?? null;
+	const first = firstFile(files);
 	if (!previous) return { file: first, notice: null };
 	const same =
 		files.find((file) => file.id === previous.id) ?? files.find((file) => file.path.raw === previous.path.raw);
@@ -120,6 +127,8 @@ export type FileDetail = {
 	path: PathText;
 	oldPath: PathText | null;
 	status: string;
+	/** Whether the repository's attributes mark the file as generated. */
+	generated: boolean;
 	content: SemanticFileContent;
 	findings: FindingSummary[];
 };

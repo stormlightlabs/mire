@@ -11,6 +11,7 @@
 		completionSummary,
 		defaultFindingFilters,
 		filterFindings,
+		firstFile,
 		hasReviewMetadata,
 		isShownFile,
 		reopenedFile,
@@ -135,7 +136,8 @@
 			const overview = await request<ReviewOverview>('/api/v1/review');
 			if (!overviewLoads.settle(ticket).apply) return true;
 			review = overview;
-			if (review.files[0]) await selectFile(review.files[0].id);
+			const first = firstFile(review.files);
+			if (first) await selectFile(first.id);
 			else closeFile();
 			error = null;
 			return true;

@@ -47,6 +47,14 @@
 
 	let diffStyle = $state<'unified' | 'split'>('unified');
 	let expandContext = $state(false);
+	/** The raw path of the generated file whose diff the reader opened, if any. */
+	let openedGenerated = $state<string | null>(null);
+	const generatedCollapsed = $derived(file !== null && file.generated && openedGenerated !== file.path.raw);
+
+	// Another file closes the opened generated diff, so returning to it starts collapsed.
+	$effect(() => {
+		if (file && file.path.raw !== openedGenerated) openedGenerated = null;
+	});
 </script>
 
 <section class="diff-pane" aria-label="File diff" aria-busy={fileLoading}>
@@ -74,7 +82,7 @@
 	{:else}
 		<header class="diff-heading">
 			<div>
-				<span class="eyebrow">{file.status}</span>
+				<span class="eyebrow">{file.status}{file.generated ? ' · generated' : ''}</span>
 				<h1>{formatPath(file.path)}</h1>
 			</div>
 			{#if file.oldPath && file.oldPath.display !== file.path.display}
@@ -107,7 +115,13 @@
 		{/if}
 		{#if findingError}<p class="finding-error" role="alert">{findingError}</p>{/if}
 
-		{#if file.content.kind === 'binary'}
+		{#if generatedCollapsed}
+			<section class="diff-state">
+				<h2>Generated file</h2>
+				<p>The repository's attributes mark this file as generated, so its diff starts collapsed.</p>
+				<button class="show-diff" onclick={() => (openedGenerated = file.path.raw)}>Show diff</button>
+			</section>
+		{:else if file.content.kind === 'binary'}
 			<section class="diff-state">
 				<h2>Binary file</h2>
 				<p>Mire retained the file change but does not expose binary content.</p>
@@ -280,6 +294,20 @@
 			600 1.1rem 'Google Sans Variable',
 			'Google Sans',
 			sans-serif;
+	}
+	.show-diff {
+		justify-self: center;
+		min-height: 2rem;
+		margin-top: 0.75rem;
+		border: 1px solid var(--line-strong);
+		padding: 0.3rem 0.75rem;
+		background: var(--surface);
+		color: var(--ink);
+		font:
+			600 0.72rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
+		cursor: pointer;
 	}
 	.diff-state p,
 	.message p {

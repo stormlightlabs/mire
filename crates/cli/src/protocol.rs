@@ -12,7 +12,7 @@ use serde_json::json;
 use thiserror::Error;
 
 /// Protocol schema emitted by non-interactive review commands.
-pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 5 };
+pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 6 };
 
 /// The keys [`LocationFields`] reads, aliases included. Keep it in step with
 /// the struct: walkthrough steps reject any other key.
@@ -253,6 +253,10 @@ struct FileManifest<'a> {
     new_path: Option<&'a BytePath>,
     status: mire_core::FileStatus,
     fingerprint: mire_core::Fingerprint,
+    /// Present and `true` when the repository's attributes mark the file as
+    /// generated.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    generated: bool,
     hunks: Vec<HunkManifest>,
 }
 
@@ -276,6 +280,7 @@ impl<'a> From<&'a FileDiff> for FileManifest<'a> {
             new_path: file.new_side().map(|side| &side.path),
             status: file.status(),
             fingerprint: file.fingerprint(),
+            generated: file.is_generated(),
             hunks,
         }
     }

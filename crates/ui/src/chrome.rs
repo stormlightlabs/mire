@@ -18,6 +18,8 @@ const TITLE_MIN_WIDTH: usize = 16;
 const VIEWED_MARK: &str = "●";
 /// Sidebar mark for a file the reader viewed that has changed since.
 const CHANGED_SINCE_VIEWED_MARK: &str = "○";
+/// Sidebar tag for a file the repository's attributes mark as generated.
+const GENERATED_TAG: &str = "gen";
 const EDITOR_FOOTER: &[(&str, &str)] = &[
     ("Enter", "newline"),
     ("Ctrl-Enter", "save"),
@@ -389,7 +391,14 @@ fn sidebar_file_line(
             changes.push(Span::styled(format!("-{deletions}"), theme.deletion_meta));
         }
     }
-    let mut metadata = progress.clone();
+    let mut metadata = Vec::new();
+    if file.is_generated() {
+        metadata.push(Span::styled(GENERATED_TAG, theme.muted));
+        if !progress.is_empty() {
+            metadata.push(Span::raw(" "));
+        }
+    }
+    metadata.extend(progress);
     if let Some(severity) = findings.highest_open_severity
         && available >= spans_width(&metadata).saturating_add(22)
     {
@@ -430,7 +439,7 @@ fn sidebar_file_line(
         viewed,
         Span::styled(file_status_code(file.status()), theme.muted),
         Span::raw(" "),
-        Span::raw(path),
+        if file.is_generated() { Span::styled(path, theme.muted) } else { Span::raw(path) },
         Span::raw(" ".repeat(gap)),
     ];
     spans.extend(metadata);

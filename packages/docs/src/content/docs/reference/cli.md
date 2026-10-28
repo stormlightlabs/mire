@@ -136,7 +136,10 @@ says whether the review holds a walkthrough. Every context document carries
 `review_revision`, the revision a write must name. With `--reader`, the
 manifest also holds `viewed`: the reader id and that reader's marks, each with
 `path`, `fingerprint`, and `revision`. A file is viewed when its mark's
-fingerprint equals the file's `fingerprint` in the manifest.
+fingerprint equals the file's `fingerprint` in the manifest. A manifest file
+has `generated: true` when the repository's attributes mark it as
+[generated](/docs/guides/review-changes/#generated-files); the field is absent
+otherwise. It is new in protocol 1.6.
 
 ## File commands
 
@@ -168,7 +171,7 @@ Both commands print the reader's mark for the path, or `null` once cleared:
 
 ```json
 {
-	"schema_version": { "major": 1, "minor": 5 },
+	"schema_version": { "major": 1, "minor": 6 },
 	"status": "viewed",
 	"review_revision": 3,
 	"reader": "review-agent",
@@ -194,7 +197,7 @@ left out:
 
 ```json
 {
-	"schema_version": { "major": 1, "minor": 5 },
+	"schema_version": { "major": 1, "minor": 6 },
 	"review_revision": 4,
 	"path": [115, 114, 99, 47, 108, 105, 98, 46, 114, 115],
 	"history": [
@@ -262,7 +265,7 @@ and limits.
 
 ```json
 {
-	"schema_version": { "major": 1, "minor": 5 },
+	"schema_version": { "major": 1, "minor": 6 },
 	"review_revision": 3,
 	"overview": "Move parsing behind one entry point.",
 	"author": { "id": "review-agent", "display_name": null },
@@ -310,7 +313,7 @@ zero-based `step_index`:
 
 ```json
 {
-	"schema_version": { "major": 1, "minor": 5 },
+	"schema_version": { "major": 1, "minor": 6 },
 	"status": "rejected",
 	"failures": [
 		{ "step_index": 1, "code": "location_not_found", "error": "source location is not present on one changed hunk" }
@@ -370,6 +373,12 @@ without `--reader`. Each file in `GET /api/v1/review` has `viewed`: the
 reader's mark, with `fingerprint` and `revision`, or `null`. The file is viewed
 while the mark's fingerprint equals the file's `id`. A file that changed after
 it was marked shows as changed since viewed.
+
+Each file in `GET /api/v1/review` and `GET /api/v1/files/{file_id}` has
+`generated`, `true` for a
+[generated file](/docs/guides/review-changes/#generated-files). The browser
+lists generated files in a collapsed group and hides each diff until the
+reader asks for it.
 
 | Route                                       | Effect                                                                      |
 | ------------------------------------------- | --------------------------------------------------------------------------- |

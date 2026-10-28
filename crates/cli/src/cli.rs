@@ -115,7 +115,7 @@ pub enum SkillCommand {
 #[derive(Debug, Parser)]
 #[command(name = "mire", version, about = "Review code changes in the terminal.")]
 pub struct Cli {
-    /// Theme for the interactive viewer.
+    /// Theme for the interactive viewer and the browser review.
     #[arg(long, global = true, value_enum, default_value_t)]
     pub theme: ThemeArgument,
     #[command(subcommand)]

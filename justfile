@@ -14,6 +14,10 @@ e2e:
     cargo build -p mire
     pnpm --filter @stormlightlabs/mire-app test:e2e
 
+# Write the browser review's theme stylesheet from the terminal palettes
+web-themes:
+    cargo run -q -p mire-tui --example web_themes > packages/app/src/themes.css
+
 # Format Rust and frontend sources
 fmt:
     cargo fmt --all

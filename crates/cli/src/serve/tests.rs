@@ -58,6 +58,7 @@ impl Fixture {
             watch_status: Arc::new(Mutex::new(WatchStatus::Unavailable)),
             announced_viewed: Arc::new(Mutex::new(ViewedMap::new())),
             held_blobs: Arc::default(),
+            theme: ThemeFamily::Auto,
         };
         Self { directory, state }
     }
@@ -634,6 +635,19 @@ async fn the_static_application_is_public_with_a_script_hash_policy() {
             .and_then(|value| value.to_str().ok())
             .is_some_and(|policy| policy.contains("script-src 'self' 'sha256-"))
     );
+}
+
+#[tokio::test]
+async fn the_page_carries_the_theme_family_from_the_command_line() {
+    let mut fixture = Fixture::new();
+    fixture.state.theme = ThemeFamily::Catppuccin;
+    let mut request = api_request(Method::GET, "/", None);
+    request.headers_mut().remove(AUTHORIZATION);
+    let (status, _, body) = send(fixture.state(), request).await;
+    assert_eq!(status, StatusCode::OK);
+    let page = String::from_utf8(body).expect("the page is UTF-8");
+    assert!(page.contains("data-theme-family=\"catppuccin\""), "{page}");
+    assert!(!page.contains(DEFAULT_THEME_FAMILY_ATTRIBUTE));
 }
 
 #[tokio::test]

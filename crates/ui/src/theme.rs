@@ -4,6 +4,12 @@ use std::str::FromStr;
 use ratatui::style::{Color, Modifier, Style};
 use terminal_colorsaurus::{QueryOptions, ThemeMode, theme_mode};
 
+pub use web::web_stylesheet;
+
+#[cfg(test)]
+mod contrast;
+mod web;
+
 const ICEBERG_DARK: Palette = Palette {
     accent: rgb(132, 160, 198),
     panel_bg: rgb(22, 24, 33),
@@ -27,7 +33,7 @@ const ICEBERG_DARK: Palette = Palette {
 };
 
 const NORD_LIGHT: Palette = Palette {
-    accent: rgb(59, 110, 168),
+    accent: rgb(56, 104, 160),
     panel_bg: rgb(229, 233, 240),
     surface0: rgb(194, 208, 231),
     surface1: rgb(184, 197, 219),
@@ -35,7 +41,7 @@ const NORD_LIGHT: Palette = Palette {
     overlay0: rgb(174, 186, 207),
     overlay1: rgb(96, 114, 140),
     text: rgb(46, 52, 64),
-    subtext0: rgb(96, 114, 140),
+    subtext0: rgb(87, 104, 127),
     mauve: rgb(151, 54, 91),
     pink: rgb(153, 50, 75),
     green: rgb(79, 137, 76),
@@ -79,13 +85,13 @@ const ELDRITCH_DUSK: Palette = Palette {
     overlay0: rgb(201, 203, 205),
     overlay1: rgb(91, 115, 220),
     text: rgb(30, 32, 41),
-    subtext0: rgb(91, 115, 220),
-    mauve: rgb(138, 105, 247),
+    subtext0: rgb(81, 102, 196),
+    mauve: rgb(116, 88, 207),
     pink: rgb(251, 91, 182),
     green: rgb(56, 255, 159),
     addition_bg: rgb(212, 245, 230),
     yellow: rgb(255, 249, 82),
-    red: rgb(251, 91, 102),
+    red: rgb(188, 68, 76),
     deletion_bg: rgb(242, 220, 222),
     blue: rgb(10, 214, 255),
     teal: rgb(10, 214, 255),
@@ -115,7 +121,7 @@ const CATPPUCCIN_MOCHA: Palette = Palette {
 };
 
 const CATPPUCCIN_LATTE: Palette = Palette {
-    accent: rgb(136, 57, 239),
+    accent: rgb(133, 56, 234),
     panel_bg: rgb(239, 241, 245),
     surface0: rgb(204, 208, 218),
     surface1: rgb(188, 192, 204),
@@ -123,13 +129,13 @@ const CATPPUCCIN_LATTE: Palette = Palette {
     overlay0: rgb(156, 160, 176),
     overlay1: rgb(140, 143, 161),
     text: rgb(76, 79, 105),
-    subtext0: rgb(108, 111, 133),
+    subtext0: rgb(99, 102, 122),
     mauve: rgb(136, 57, 239),
     pink: rgb(234, 118, 203),
     green: rgb(64, 160, 43),
     addition_bg: rgb(213, 229, 220),
     yellow: rgb(223, 142, 29),
-    red: rgb(210, 15, 57),
+    red: rgb(206, 15, 56),
     deletion_bg: rgb(235, 207, 219),
     blue: rgb(30, 102, 245),
     teal: rgb(23, 146, 153),
@@ -330,15 +336,7 @@ impl Theme {
             Some(mode) => mode,
             None => ColorMode::Dark,
         };
-        let variant = match (family, mode) {
-            (ThemeFamily::Iceberg, ColorMode::Dark) => ThemeVariant::IcebergDark,
-            (ThemeFamily::Iceberg, ColorMode::Light) => ThemeVariant::NordLight,
-            (ThemeFamily::Auto | ThemeFamily::Eldritch, ColorMode::Dark) => ThemeVariant::EldritchMinimal,
-            (ThemeFamily::Auto | ThemeFamily::Eldritch, ColorMode::Light) => ThemeVariant::EldritchDusk,
-            (ThemeFamily::Catppuccin, ColorMode::Dark) => ThemeVariant::CatppuccinMocha,
-            (ThemeFamily::Catppuccin, ColorMode::Light) => ThemeVariant::CatppuccinLatte,
-        };
-        Self::from_palette(variant)
+        Self::from_palette(ThemeVariant::resolve(family, mode))
     }
 
     /// Returns the concrete RGB palette variant, or `None` for terminal-safety themes.
@@ -437,15 +435,9 @@ impl Theme {
         }
     }
 
-    const fn from_palette(variant: ThemeVariant) -> Self {
-        let palette = match variant {
-            ThemeVariant::IcebergDark => ICEBERG_DARK,
-            ThemeVariant::NordLight => NORD_LIGHT,
-            ThemeVariant::EldritchMinimal => ELDRITCH_MINIMAL,
-            ThemeVariant::EldritchDusk => ELDRITCH_DUSK,
-            ThemeVariant::CatppuccinMocha => CATPPUCCIN_MOCHA,
-            ThemeVariant::CatppuccinLatte => CATPPUCCIN_LATTE,
-        };
+    /// Maps a variant's palette to the semantic roles both the terminal and the browser use.
+    pub const fn from_palette(variant: ThemeVariant) -> Self {
+        let palette = variant.palette();
         let emphasis_text = match variant {
             ThemeVariant::NordLight => palette.surface_dim,
             ThemeVariant::EldritchDusk | ThemeVariant::CatppuccinLatte => palette.text,
@@ -453,17 +445,8 @@ impl Theme {
                 palette.surface_dim
             }
         };
-        let danger_text = match variant {
-            ThemeVariant::NordLight | ThemeVariant::CatppuccinLatte => palette.surface_dim,
-            ThemeVariant::EldritchDusk => palette.text,
-            ThemeVariant::IcebergDark | ThemeVariant::EldritchMinimal | ThemeVariant::CatppuccinMocha => {
-                palette.surface_dim
-            }
-        };
-        let light_variant = matches!(
-            variant,
-            ThemeVariant::NordLight | ThemeVariant::EldritchDusk | ThemeVariant::CatppuccinLatte
-        );
+        let danger_text = palette.surface_dim;
+        let light_variant = variant.is_light();
         let interface_accent =
             if matches!(variant, ThemeVariant::EldritchDusk) { palette.mauve } else { palette.accent };
         let (addition_meta, deletion_meta) = if light_variant {
@@ -546,6 +529,70 @@ impl Theme {
     }
 }
 
+impl ThemeVariant {
+    /// Every built-in palette, dark and light variants of each family in turn.
+    pub const ALL: [Self; 6] = [
+        Self::IcebergDark,
+        Self::NordLight,
+        Self::EldritchMinimal,
+        Self::EldritchDusk,
+        Self::CatppuccinMocha,
+        Self::CatppuccinLatte,
+    ];
+
+    /// Picks the terminal palette for a family in a color mode.
+    ///
+    /// `auto` follows Eldritch: Eldritch Minimal on dark backgrounds and Eldritch Dusk on light ones.
+    pub const fn resolve(family: ThemeFamily, mode: ColorMode) -> Self {
+        match (family, mode) {
+            (ThemeFamily::Iceberg, ColorMode::Dark) => Self::IcebergDark,
+            (ThemeFamily::Iceberg, ColorMode::Light) => Self::NordLight,
+            (ThemeFamily::Auto | ThemeFamily::Eldritch, ColorMode::Dark) => Self::EldritchMinimal,
+            (ThemeFamily::Auto | ThemeFamily::Eldritch, ColorMode::Light) => Self::EldritchDusk,
+            (ThemeFamily::Catppuccin, ColorMode::Dark) => Self::CatppuccinMocha,
+            (ThemeFamily::Catppuccin, ColorMode::Light) => Self::CatppuccinLatte,
+        }
+    }
+
+    /// Picks the browser review's palette for a family in a color mode.
+    ///
+    /// Matches [`ThemeVariant::resolve`], except that `auto` uses Nord Light in light mode.
+    pub const fn resolve_browser(family: ThemeFamily, mode: ColorMode) -> Self {
+        match (family, mode) {
+            (ThemeFamily::Auto, ColorMode::Light) => Self::NordLight,
+            _ => Self::resolve(family, mode),
+        }
+    }
+
+    /// Returns the stable kebab-case name of this palette.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::IcebergDark => "iceberg-dark",
+            Self::NordLight => "nord-light",
+            Self::EldritchMinimal => "eldritch-minimal",
+            Self::EldritchDusk => "eldritch-dusk",
+            Self::CatppuccinMocha => "catppuccin-mocha",
+            Self::CatppuccinLatte => "catppuccin-latte",
+        }
+    }
+
+    /// Reports whether this palette is meant for a light background.
+    pub const fn is_light(self) -> bool {
+        matches!(self, Self::NordLight | Self::EldritchDusk | Self::CatppuccinLatte)
+    }
+
+    const fn palette(self) -> Palette {
+        match self {
+            Self::IcebergDark => ICEBERG_DARK,
+            Self::NordLight => NORD_LIGHT,
+            Self::EldritchMinimal => ELDRITCH_MINIMAL,
+            Self::EldritchDusk => ELDRITCH_DUSK,
+            Self::CatppuccinMocha => CATPPUCCIN_MOCHA,
+            Self::CatppuccinLatte => CATPPUCCIN_LATTE,
+        }
+    }
+}
+
 impl Default for Theme {
     fn default() -> Self {
         Self::dark()
@@ -610,14 +657,14 @@ mod tests {
             (ICEBERG_DARK, rgb(22, 24, 33), rgb(180, 190, 130), rgb(226, 120, 120)),
             (NORD_LIGHT, rgb(229, 233, 240), rgb(79, 137, 76), rgb(153, 50, 75)),
             (ELDRITCH_MINIMAL, rgb(23, 25, 40), rgb(55, 244, 153), rgb(241, 108, 117)),
-            (ELDRITCH_DUSK, rgb(240, 243, 244), rgb(56, 255, 159), rgb(251, 91, 102)),
+            (ELDRITCH_DUSK, rgb(240, 243, 244), rgb(56, 255, 159), rgb(188, 68, 76)),
             (
                 CATPPUCCIN_MOCHA,
                 rgb(30, 30, 46),
                 rgb(166, 227, 161),
                 rgb(243, 139, 168),
             ),
-            (CATPPUCCIN_LATTE, rgb(239, 241, 245), rgb(64, 160, 43), rgb(210, 15, 57)),
+            (CATPPUCCIN_LATTE, rgb(239, 241, 245), rgb(64, 160, 43), rgb(206, 15, 56)),
         ];
         for (palette, background, addition, deletion) in cases {
             assert_eq!(palette.panel_bg, background);
@@ -692,6 +739,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn text_muted_and_accent_reach_aa_contrast_on_their_backgrounds() {
+        for variant in ThemeVariant::ALL {
+            let theme = Theme::from_palette(variant);
+            for (background_role, background) in [("application", theme.application), ("panel", theme.panel)] {
+                for (foreground_role, foreground) in [
+                    ("text", theme.application),
+                    ("muted", theme.muted),
+                    ("accent", theme.accent),
+                ] {
+                    let style = Style::new()
+                        .fg(foreground.fg.expect("palette roles set a foreground"))
+                        .bg(background.bg.expect("palette roles set a background"));
+                    let ratio = contrast(style);
+                    assert!(
+                        ratio >= 4.5,
+                        "{}: {foreground_role} on {background_role} is {ratio:.2}:1",
+                        variant.as_str()
+                    );
+                }
+            }
+        }
+    }
+
     fn semantic_styles(theme: Theme) -> [Style; 19] {
         [
             theme.application,
@@ -717,23 +788,9 @@ mod tests {
     }
 
     fn contrast(style: Style) -> f64 {
-        let (
-            Some(Color::Rgb(foreground_red, foreground_green, foreground_blue)),
-            Some(Color::Rgb(background_red, background_green, background_blue)),
-        ) = (style.fg, style.bg)
-        else {
+        let (Some(foreground), Some(background)) = (style.fg, style.bg) else {
             panic!("contrast test requires controlled RGB pairs");
         };
-        let foreground = luminance(foreground_red, foreground_green, foreground_blue);
-        let background = luminance(background_red, background_green, background_blue);
-        (foreground.max(background) + 0.05) / (foreground.min(background) + 0.05)
-    }
-
-    fn luminance(red: u8, green: u8, blue: u8) -> f64 {
-        let channel = |value: u8| {
-            let value = f64::from(value) / 255.0;
-            if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
-        };
-        0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue)
+        contrast::contrast_ratio(foreground, background)
     }
 }

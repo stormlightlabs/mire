@@ -25,6 +25,7 @@ use mire_core::{
     AnnotationKind, Author, ChangesetSource, FileContent, FileDiff, Hunk, NoteId, NoteSeverity, NoteStatus, Review,
     ReviewNote, ReviewRevision, ViewedMap,
 };
+use mire_tui::ThemeFamily;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -48,6 +49,9 @@ mod viewed;
 static ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/web");
 
 const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024;
+/// The root element attribute `app.html` ships with. The server swaps in the
+/// family from `--theme` so the page picks the matching palettes.
+const DEFAULT_THEME_FAMILY_ATTRIBUTE: &str = "data-theme-family=\"auto\"";
 /// Byte limit on the browser's agent context export. A maximum description
 /// serializes to at most 256 KiB (65,536 four-byte characters; escaped
 /// characters take two bytes) and a maximum title to 2 KiB, so 1 MiB leaves
@@ -81,6 +85,8 @@ struct AppState {
     announced_viewed: Arc<Mutex<ViewedMap>>,
     /// The blobs the bound repository held at the last check, per revision.
     held_blobs: Arc<history::HeldBlobCache>,
+    /// The palette family from `--theme`, written into served HTML.
+    theme: ThemeFamily,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -413,7 +419,10 @@ enum FindingMutationError {
 struct ApiDocument;
 
 /// Starts a loopback-only browser review server until the process receives Ctrl-C.
-pub async fn run(arguments: ServeArgs) -> Result<(), ServeError> {
+///
+/// The page uses the palettes of `theme`, in the light or dark variant the
+/// browser prefers.
+pub async fn run(arguments: ServeArgs, theme: ThemeFamily) -> Result<(), ServeError> {
     let review_path = PathBuf::from(arguments.review);
     read_review(&review_path).map_err(ServeError::Review)?;
 
@@ -444,6 +453,7 @@ pub async fn run(arguments: ServeArgs) -> Result<(), ServeError> {
         watch_status: Arc::new(Mutex::new(initial_watch_status)),
         announced_viewed: Arc::new(Mutex::new(initial_review.viewed().clone())),
         held_blobs: Arc::default(),
+        theme,
     };
     let (shutdown, shutdown_receiver) = watch::channel(false);
     let watcher = start_watcher(state.clone(), initial_revision, shutdown_receiver);
@@ -1183,7 +1193,7 @@ async fn get_openapi() -> Json<utoipa::openapi::OpenApi> {
     Json(ApiDocument::openapi())
 }
 
-async fn static_asset(uri: Uri) -> Response<Body> {
+async fn static_asset(State(state): State<AppState>, uri: Uri) -> Response<Body> {
     if uri.path().starts_with("/api/") {
         return problem(StatusCode::NOT_FOUND, "not_found", "This API resource does not exist.");
     }
@@ -1207,14 +1217,20 @@ async fn static_asset(uri: Uri) -> Response<Body> {
     } else {
         "no-cache"
     };
+    let extension = file.path().extension().and_then(|extension| extension.to_str());
+    let body = match (extension, file.contents_utf8()) {
+        (Some("html"), Some(document)) => Body::from(document.replacen(
+            DEFAULT_THEME_FAMILY_ATTRIBUTE,
+            &format!("data-theme-family=\"{}\"", state.theme),
+            1,
+        )),
+        _ => Body::from(file.contents()),
+    };
     let mut response = Response::builder()
         .status(StatusCode::OK)
-        .header(
-            CONTENT_TYPE,
-            content_type(file.path().extension().and_then(|extension| extension.to_str())),
-        )
+        .header(CONTENT_TYPE, content_type(extension))
         .header(CACHE_CONTROL, cache_control)
-        .body(Body::from(file.contents()))
+        .body(body)
         .unwrap_or_else(|_| Response::new(Body::empty()));
     if let Some(hash) = inline_script_hash(file.contents()) {
         response.headers_mut().insert(

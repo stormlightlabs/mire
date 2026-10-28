@@ -112,6 +112,22 @@ short aliases are accepted.
 
 ## Select a theme
 
-Use `--theme auto`, `iceberg`, `eldritch`, or `catppuccin`. Mire adapts each
-family to the terminal's color support. Set
-[`NO_COLOR`](https://github.com/jcs/no_color) to disable color output.
+Use `--theme auto`, `iceberg`, `eldritch`, or `catppuccin`. Each family has a
+dark and a light palette:
+
+| Theme        | Dark             | Light            |
+| ------------ | ---------------- | ---------------- |
+| `iceberg`    | Iceberg Dark     | Nord Light       |
+| `eldritch`   | Eldritch Minimal | Eldritch Dusk    |
+| `catppuccin` | Catppuccin Mocha | Catppuccin Latte |
+| `auto`       | Eldritch Minimal | see below        |
+
+The terminal picks the palette that matches its background, and uses the dark
+one when it cannot tell. With `auto`, a light terminal gets Eldritch Dusk.
+
+`mire serve` takes the same flag. The browser review follows the browser's
+light or dark color scheme, and the header button switches between the two.
+With `auto`, a light browser gets Nord Light.
+
+Set [`NO_COLOR`](https://github.com/jcs/no_color) to disable terminal color.
+A terminal with `TERM=dumb` gets a basic ANSI theme.

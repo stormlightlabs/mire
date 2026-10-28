@@ -7,8 +7,10 @@ order: 8
 ---
 
 Run `mire` with no subcommand to open the current worktree diff. Pass `--theme`
-before a subcommand, or on its own with the default diff, to select `auto`,
-`iceberg`, `eldritch`, or `catppuccin`.
+before or after a subcommand, or on its own with the default diff, to select
+`auto`, `iceberg`, `eldritch`, or `catppuccin`. It applies to the terminal and
+to the browser review that `mire serve` opens. See
+[Select a theme](/docs/guides/review-changes/#select-a-theme) for the palettes.
 
 ## Git commands
 
@@ -347,6 +349,14 @@ mire serve REVIEW.json [--port PORT] [--open]
 Starts a loopback HTTP server that serves the review in a local browser. The
 server prints a session URL containing a random secret. Open that URL in a
 browser to view the review, or pass `--open` to launch automatically.
+
+The page uses the `--theme` family, in its light or dark palette as the
+browser's color scheme asks; the button in the header switches between them.
+Pass the flag before or after `serve`:
+
+```sh
+mire --theme catppuccin serve review.json
+```
 
 The server proxies the embedded frontend and exposes a REST API at `/api/v1/*`.
 Frontend changes during development are proxied through Vite when using

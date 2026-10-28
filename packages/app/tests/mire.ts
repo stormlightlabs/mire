@@ -39,12 +39,12 @@ export function mireBinary(): string {
  * Playwright's `test` with a `mire` fixture. Each test gets its own repository
  * with two changed files, a review holding one finding on each, and a server.
  * The fixture stops the server and removes the directory even when the test or
- * the setup fails.
+ * the setup fails. Set `mireTheme` with `test.use` to pass `--theme`.
  */
-export const test = base.extend<{ mire: MireServer }>({
-	// Playwright reads the fixture's parameters from this destructuring pattern.
-	// eslint-disable-next-line no-empty-pattern
-	mire: async ({}, use) => {
+export const test = base.extend<{ mire: MireServer; mireTheme: string | undefined }>({
+	/** The `--theme` family to start the server with, or none for the default. */
+	mireTheme: [undefined, { option: true }],
+	mire: async ({ mireTheme }, use) => {
 		const directory = await mkdtemp(path.join(tmpdir(), 'mire-e2e-'));
 		let child: ChildProcess | null = null;
 		try {
@@ -57,7 +57,8 @@ export const test = base.extend<{ mire: MireServer }>({
 			addFinding(mire, review, 1, 'one.txt', 'medium', 'defect', 'The second line should stay lowercase.');
 			addFinding(mire, review, 2, 'two.txt', 'low', 'question', 'Is the capital Y intended?');
 
-			child = spawn(binary, ['serve', review], { cwd: root, stdio: ['ignore', 'pipe', 'inherit'] });
+			const theme = mireTheme ? ['--theme', mireTheme] : [];
+			child = spawn(binary, [...theme, 'serve', review], { cwd: root, stdio: ['ignore', 'pipe', 'inherit'] });
 			const url = await readBanner(child);
 			await use({
 				url,

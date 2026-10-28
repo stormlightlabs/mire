@@ -1,0 +1,118 @@
+/* Generated from crates/ui/src/theme.rs by `just web-themes`. Do not edit. */
+
+/* iceberg-dark */
+:root[data-theme-family='iceberg'][data-theme='dark'] {
+	color-scheme: dark;
+	--paper: #161821;
+	--ink: #c6c8d1;
+	--muted: #818596;
+	--focus: #84a0c6;
+	--surface: #0f1117;
+	--paper-deep: #1e2132;
+	--button-hover: #272c42;
+	--line: #444b71;
+	--line-strong: #818596;
+	--faint: #444b71;
+	--selected: #c6c8d1;
+	--selected-ink: #161821;
+	--danger: #e27878;
+	--success: #b4be82;
+}
+
+/* nord-light */
+:root,
+:root[data-theme-family='auto'],
+:root[data-theme-family='iceberg'] {
+	color-scheme: light;
+	--paper: #e5e9f0;
+	--ink: #2e3440;
+	--muted: #57687f;
+	--focus: #3868a0;
+	--surface: #e5e9f0;
+	--paper-deep: #c2d0e7;
+	--button-hover: #b8c5db;
+	--line: #aebacf;
+	--line-strong: #57687f;
+	--faint: #aebacf;
+	--selected: #2e3440;
+	--selected-ink: #e5e9f0;
+	--danger: #99324b;
+	--success: #4f894c;
+}
+
+/* eldritch-minimal */
+:root[data-theme-family='auto'][data-theme='dark'],
+:root[data-theme-family='eldritch'][data-theme='dark'] {
+	color-scheme: dark;
+	--paper: #171928;
+	--ink: #ebfafa;
+	--muted: #abb4da;
+	--focus: #37f499;
+	--surface: #171928;
+	--paper-deep: #212337;
+	--button-hover: #292e42;
+	--line: #3b4261;
+	--line-strong: #abb4da;
+	--faint: #3b4261;
+	--selected: #ebfafa;
+	--selected-ink: #171928;
+	--danger: #f16c75;
+	--success: #37f499;
+}
+
+/* eldritch-dusk */
+:root[data-theme-family='eldritch'] {
+	color-scheme: light;
+	--paper: #f0f3f4;
+	--ink: #1e2029;
+	--muted: #5166c4;
+	--focus: #7458cf;
+	--surface: #f0f3f4;
+	--paper-deep: #e2e6e8;
+	--button-hover: #d5d9db;
+	--line: #c9cbcd;
+	--line-strong: #5166c4;
+	--faint: #c9cbcd;
+	--selected: #1e2029;
+	--selected-ink: #f0f3f4;
+	--danger: #bc444c;
+	--success: #38ff9f;
+}
+
+/* catppuccin-mocha */
+:root[data-theme-family='catppuccin'][data-theme='dark'] {
+	color-scheme: dark;
+	--paper: #1e1e2e;
+	--ink: #cdd6f4;
+	--muted: #a6adc8;
+	--focus: #cba6f7;
+	--surface: #181825;
+	--paper-deep: #313244;
+	--button-hover: #45475a;
+	--line: #6c7086;
+	--line-strong: #a6adc8;
+	--faint: #6c7086;
+	--selected: #cdd6f4;
+	--selected-ink: #1e1e2e;
+	--danger: #f38ba8;
+	--success: #a6e3a1;
+}
+
+/* catppuccin-latte */
+:root[data-theme-family='catppuccin'] {
+	color-scheme: light;
+	--paper: #eff1f5;
+	--ink: #4c4f69;
+	--muted: #63667a;
+	--focus: #8538ea;
+	--surface: #e6e9ef;
+	--paper-deep: #ccd0da;
+	--button-hover: #bcc0cc;
+	--line: #9ca0b0;
+	--line-strong: #63667a;
+	--faint: #9ca0b0;
+	--selected: #4c4f69;
+	--selected-ink: #eff1f5;
+	--danger: #ce0f38;
+	--success: #40a02b;
+}

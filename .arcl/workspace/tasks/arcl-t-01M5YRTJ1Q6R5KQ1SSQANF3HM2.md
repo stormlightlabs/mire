@@ -2,7 +2,7 @@
 id = "arcl-t-01M5YRTJ1Q6R5KQ1SSQANF3HM2"
 plan = "arcl-pl-01M5YRTHS95J67NZ6THREDG33F"
 title = "Use the TUI themes in the web app"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 1
 blocked-by = ["arcl-t-01M5SXDG7QJM6Y67FCJ8ZPNASW"]

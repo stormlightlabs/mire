@@ -2,9 +2,10 @@
 id = "arcl-t-01M5SXD54ZDX8WPC9Z4XA549WH"
 plan = "arcl-pl-01M5SXBH6FB0R59YSEPYTNFTV4"
 title = "Release workflow and GitHub releases"
-status = "in_progress"
+status = "completed"
 priority = "normal"
 position = 12
+evidence = "Done in #21 at 04516ea: Release PR, Release tag, dist Release and Homebrew publish workflows; scripts/release.sh writes the git-cliff section; binstall metadata; install docs."
 +++
 
 Release Mire the way fabrial releases: prebuilt binaries on GitHub releases and a Homebrew formula. Mire is not published to crates.io.

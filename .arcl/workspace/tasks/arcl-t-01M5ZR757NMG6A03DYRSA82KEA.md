@@ -1,10 +1,11 @@
 +++
 id = "arcl-t-01M5ZR757NMG6A03DYRSA82KEA"
 plan = "arcl-pl-01M5YRTHSYB0P33XC2VD8FFK2D"
-title = "Reject torn git diff captures"
-status = "in_progress"
+title = "Never store blob ids from torn git diff captures"
+status = "completed"
 priority = "high"
 position = 0
+evidence = "Done in #19 at e206073: worktree captures verify each new blob id by rebuilding and hashing; still-torn, over-cap or binary-turned files keep their capture without the id; no captures fail."
 +++
 
 `reload_review` in `crates/cli/src/refresh.rs` trusts one `git diff` run. Git reads a changed worktree file twice, once to hash it for the `index` line and once for the hunks, so a write between the two reads gives a patch whose `index` line names the new content while its hunks show the old. Mire then records a revision whose fingerprint changed with unchanged hunks, and the checkpoint row stores a blob id that does not match its hunks, so rebuilding that revision from Git shows the wrong text.

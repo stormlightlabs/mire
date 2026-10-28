@@ -206,6 +206,35 @@ To use a Chromium that is already installed, set `MIRE_E2E_CHROMIUM` to its
 executable. `just check` leaves these tests out to stay fast; CI runs them in
 the `e2e` job of the Check workflow.
 
+## Release Mire
+
+Run the Release PR workflow from the Actions tab with the new version, such as
+`0.2.0`. It sets the workspace version, writes the version's section of
+`CHANGELOG.md` with `scripts/release.sh`, and pushes `storm/release-<version>`
+for review. Edit the changelog lines in that pull request before merging it.
+The first release, before any `v*` tag exists, can keep the current version.
+
+The merge tags `v<version>`. The tag runs dist's Release workflow, which builds
+the archives for each target, publishes the GitHub release with the changelog
+section and the shell installer, and commits the `mire` formula to
+`stormlightlabs/homebrew-tap`.
+
+Merge the release pull request before any other pull request that lands while
+it is open. The section lists `main` as it was when the workflow ran, and the
+tag goes on `main` as it is at the merge. When a change with a changelog line,
+such as a `feat:` or `fix:` pull request, merged in between, the Release tag
+workflow refuses to tag and names the missing lines. Run the Release PR
+workflow again with the same version: it rewrites the section, since the
+version is still untagged, and its merge tags the release. Make your edits to
+the lines again in that pull request.
+
+`just release <version>` runs the changelog script locally. It needs
+[git-cliff](https://git-cliff.org), replaces the version's section when
+`CHANGELOG.md` has one, and fails when `v<version>` is already tagged or the
+version differs from the one in `Cargo.toml`. After changing
+`dist-workspace.toml` or `.github/build-setup.yml`, run `dist generate` to
+rewrite `.github/workflows/release.yml`.
+
 ## Troubleshooting
 
 ### "This review URL is missing its session secret"

@@ -6,6 +6,9 @@ members = ["crates/cli", "crates/core", "crates/ui"]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/stormlightlabs/mire"
+homepage = "https://github.com/stormlightlabs/mire"
 
 [workspace.dependencies]
 serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
@@ -14,3 +17,8 @@ thiserror = { version = "2.0.12", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

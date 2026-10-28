@@ -1,0 +1,28 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.32.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = ["shell", "homebrew"]
+# The Homebrew tap the formula goes to, and its name there
+tap = "stormlightlabs/homebrew-tap"
+formula = "mire"
+# Publish the formula with a thunderbot token minted for the tap
+# (.github/workflows/publish-homebrew.yml), not a stored personal token
+publish-jobs = ["./publish-homebrew"]
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Whether to install an updater program
+install-updater = false
+# Run the release workflow only on release tags, not on pull requests
+pr-run-mode = "skip"
+# Steps run before each build: the binary embeds the web app, so build it first
+# (.github/build-setup.yml)
+github-build-setup = "../build-setup.yml"

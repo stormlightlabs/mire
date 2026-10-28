@@ -18,16 +18,33 @@ Mire is a terminal-based diffing and collaborative code review tool for humans a
 
 ## Installation
 
-Mire requires Git and Rust 1.88 or newer.
+Prebuilt binaries cover Apple silicon macOS and x86-64 Linux. Install the
+latest release with one of these:
+
+```sh
+# Shell installer, into ~/.cargo/bin
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/stormlightlabs/mire/releases/latest/download/mire-installer.sh | sh
+
+# Homebrew
+brew install stormlightlabs/tap/mire
+
+# cargo-binstall; Mire is not on crates.io
+cargo binstall --git https://github.com/stormlightlabs/mire mire
+```
+
+Other platforms build from source, which needs Rust 1.88 or newer, Node 22
+and pnpm. The binary embeds the web app, so build that first:
 
 ```sh
 git clone https://github.com/stormlightlabs/mire.git
 cd mire
+pnpm install
+pnpm --filter @stormlightlabs/mire-app build
 cargo install --path crates/cli --locked
 ```
 
 See the [installation guide](packages/docs/src/content/docs/getting-started/installation.md)
-for verification, updates, and uninstall instructions.
+for updates and uninstall instructions.
 
 ## Quick start
 

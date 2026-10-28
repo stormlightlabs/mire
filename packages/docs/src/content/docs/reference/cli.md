@@ -24,6 +24,22 @@ mire diff [--staged] [REVISION]... [--format json] [--language LANGUAGE] [--watc
 arguments. One or more revision arguments are passed to Git as a comparison.
 Paths after `--` are repository-relative filters.
 
+Git reads a changed worktree file twice: once to hash it for the patch's
+`index` line, and once for the hunks. A write between the two reads gives a
+torn patch, whose hunks do not match its blob id. For a comparison that reads
+the worktree, Mire rebuilds each text file's new side from the old blob and
+the hunks and checks it against the blob id. A text file that comes back
+binary is also suspect, since a read cut short pads it with zeros, unless a
+`diff` attribute such as `binary` marks it binary. On a torn file Mire
+captures again, up to five captures in total, and it does the same when Git
+fails with a short read because a file shrank while Git hashed it. If a file is still torn after
+the fifth, Mire keeps that capture and drops the file's new blob id. It also
+drops the id, without capturing again, when the old blob is missing or the
+old or rebuilt file is larger than 64 MiB, which Mire does not read to check.
+The capture succeeds either way, and checkpoints treat a file without an id as
+one Git does not hold. Staged and revision-to-revision comparisons read only
+stored objects, so Mire does not check them.
+
 ### `mire show`
 
 Review one commit. The revision defaults to `HEAD`.

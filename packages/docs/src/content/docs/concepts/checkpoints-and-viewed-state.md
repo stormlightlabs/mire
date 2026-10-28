@@ -78,6 +78,16 @@ can match more than one object, so the parser keeps only ids of 40 hex
 characters (SHA-1) or 64 (SHA-256) and drops the rest. It also drops the
 all-zero id Git prints for a missing side.
 
+In a worktree comparison Mire keeps a new-side id only when it could check
+it against the hunks. Git reads a changed file once to hash it and again for
+the hunks, so a write between the reads gives an id for other content. Mire
+captures again while that happens. After five captures it drops the id of a
+file still torn, or of a text file that still reads as binary, and at once
+drops the id of a file whose old blob Git does not hold or that is larger
+than 64 MiB. The hunks come from a single read, so they are right without the
+id, and the file gets a patch copy as described below. `mire diff` documents
+the check.
+
 The existing `FileSide.fingerprint` does not fit. It is a `Fingerprint`, a
 fixed 32-byte value, while a SHA-1 id is 20 bytes. It is also documented as a
 fingerprint of the side's content, not a Git object id.

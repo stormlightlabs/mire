@@ -233,6 +233,15 @@ impl Changeset {
     pub const fn fingerprint(&self) -> Fingerprint {
         self.fingerprint
     }
+
+    /// Drops the new-side blob id of the file at `index` in [`Self::files`],
+    /// for a capture whose id could not be checked against its hunks. Does
+    /// nothing when `index` is out of range or the file has no new side.
+    pub fn clear_new_object(&mut self, index: usize) {
+        if let Some(side) = self.files.get_mut(index).and_then(|file| file.new.as_mut()) {
+            side.object = None;
+        }
+    }
 }
 
 #[derive(Deserialize)]

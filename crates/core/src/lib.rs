@@ -10,7 +10,8 @@ pub use model::{
     ModelError, ObjectId, SchemaVersion,
 };
 pub use patch::{
-    DEFAULT_MAX_PATCH_BYTES, PatchError, PatchInput, PatchLimits, PatchWriteError, parse_patch, write_patch,
+    DEFAULT_MAX_PATCH_BYTES, PatchError, PatchInput, PatchLimits, PatchWriteError, blob_matches, parse_patch,
+    rebuild_new_side, write_patch,
 };
 pub use review::{
     Anchor, AnchorSide, AnnotationKind, Author, AuthorKind, CURRENT_REVIEW_SCHEMA_VERSION, Checkpoint, CheckpointRef,

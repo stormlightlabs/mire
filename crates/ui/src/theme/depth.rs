@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// Longest wait for tmux to report its client's features. A stopped or busy
+/// Longest wait for tmux to report its clients' features. A stopped or busy
 /// tmux server would otherwise hang startup.
 const TMUX_TIMEOUT: Duration = Duration::from_millis(200);
 
@@ -26,13 +26,15 @@ pub enum ColorDepth {
 /// What the environment says about the color depth, strongest first.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DepthSignals<'a> {
-    /// `MIRE_COLOR_DEPTH`: `truecolor`, `24bit` or `256`. Other values are ignored.
+    /// `MIRE_COLOR_DEPTH`: `truecolor`, `24bit` or `256`, ignoring case and
+    /// surrounding whitespace. Other values are ignored.
     pub forced: Option<&'a OsStr>,
-    /// The attached tmux client's `client_termfeatures`, when tmux reported them.
+    /// `client_termfeatures` of each tmux client attached to this pane's
+    /// session, one client per line, when tmux reported them.
     pub tmux_features: Option<&'a str>,
     /// Whether the process runs inside GNU screen (`STY` is set).
     pub screen: bool,
-    /// `COLORTERM`.
+    /// `COLORTERM`, ignoring case and surrounding whitespace.
     pub colorterm: Option<&'a OsStr>,
 }
 
@@ -40,9 +42,11 @@ impl ColorDepth {
     /// Detects the color depth from the environment.
     ///
     /// `MIRE_COLOR_DEPTH=truecolor` or `256` forces the depth. Inside tmux,
-    /// tmux decides: it rounds to 256 colors unless the attached client has
-    /// the `RGB` feature, so its `client_termfeatures` wins when tmux reports
-    /// them within 200 ms. GNU screen 4.x rounds to 256 colors while passing
+    /// tmux decides: it rounds to 256 colors for each attached client that
+    /// lacks the `RGB` feature, so truecolor needs every client attached to
+    /// this pane's session to have it. tmux's answer wins when it arrives
+    /// within 200 ms; a slower tmux falls through to the checks below.
+    /// GNU screen 4.x rounds to 256 colors while passing
     /// `COLORTERM` through, so `STY` means 256 colors. Otherwise
     /// `COLORTERM=truecolor` or `24bit` means truecolor, and anything else
     /// means 256 colors.
@@ -53,7 +57,13 @@ impl ColorDepth {
         }
         let tmux = if std::env::var_os("TMUX").is_some() {
             let mut command = Command::new("tmux");
-            command.args(["display-message", "-p", "#{client_termfeatures}"]);
+            command.args(["list-clients", "-F", "#{client_termfeatures}"]);
+            // `-t` takes this pane's id and lists the clients on its session.
+            // Without it, tmux lists every client on the server, which can
+            // only pick 256 colors more often.
+            if let Some(pane) = std::env::var_os("TMUX_PANE") {
+                command.arg("-t").arg(pane);
+            }
             query_features(command, TMUX_TIMEOUT)
         } else {
             None
@@ -73,30 +83,45 @@ impl ColorDepth {
         if let Some(depth) = signals.forced.and_then(Self::parse_forced) {
             return depth;
         }
-        if let Some(features) = signals.tmux_features {
-            return if features.split(',').any(|feature| feature.trim() == "RGB") {
-                Self::Truecolor
-            } else {
-                Self::Xterm256
-            };
+        if let Some(rgb) = signals.tmux_features.and_then(every_client_has_rgb) {
+            return if rgb { Self::Truecolor } else { Self::Xterm256 };
         }
         if signals.screen {
             return Self::Xterm256;
         }
-        match signals.colorterm {
-            Some(value) if value == "truecolor" || value == "24bit" => Self::Truecolor,
+        match signals.colorterm.and_then(normalize).as_deref() {
+            Some("truecolor" | "24bit") => Self::Truecolor,
             _ => Self::Xterm256,
         }
     }
 
     /// Reads a `MIRE_COLOR_DEPTH` value, or `None` for one it does not know.
     fn parse_forced(value: &OsStr) -> Option<Self> {
-        match value.to_str()? {
+        match normalize(value)?.as_str() {
             "truecolor" | "24bit" => Some(Self::Truecolor),
             "256" => Some(Self::Xterm256),
             _ => None,
         }
     }
+}
+
+/// Whether every tmux client in a `client_termfeatures` listing, one client
+/// per line, has the `RGB` feature. Returns `None` for a listing with no
+/// clients.
+fn every_client_has_rgb(listing: &str) -> Option<bool> {
+    let mut clients = listing
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .peekable();
+    clients.peek()?;
+    Some(clients.all(|features| features.split(',').any(|feature| feature.trim() == "RGB")))
+}
+
+/// Trims an environment value and lowercases it, or returns `None` when it is
+/// not UTF-8.
+fn normalize(value: &OsStr) -> Option<String> {
+    value.to_str().map(|value| value.trim().to_ascii_lowercase())
 }
 
 /// Runs a terminal-features query and returns its trimmed output. Returns
@@ -167,6 +192,65 @@ mod tests {
     }
 
     #[test]
+    fn colorterm_ignores_case_and_whitespace() {
+        for value in ["TrueColor", " truecolor\n", "24BIT", "\t24bit "] {
+            assert_eq!(
+                depth(None, None, false, Some(value)),
+                ColorDepth::Truecolor,
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn forced_depth_ignores_case_and_whitespace() {
+        for value in ["TrueColor", " truecolor ", "24BIT\n"] {
+            assert_eq!(depth(Some(value), None, true, None), ColorDepth::Truecolor, "{value:?}");
+        }
+        assert_eq!(
+            depth(Some(" 256\n"), None, false, Some("truecolor")),
+            ColorDepth::Xterm256
+        );
+    }
+
+    #[test]
+    fn tmux_truecolor_needs_every_client_to_have_rgb() {
+        assert_eq!(
+            depth(None, Some("bpaste,RGB,title\nRGB,focus\n"), false, None),
+            ColorDepth::Truecolor
+        );
+        assert_eq!(
+            depth(
+                None,
+                Some("bpaste,RGB,title\nbpaste,focus,title"),
+                false,
+                Some("truecolor")
+            ),
+            ColorDepth::Xterm256
+        );
+        assert_eq!(
+            depth(
+                None,
+                Some("bpaste,focus,title\nbpaste,RGB,title"),
+                false,
+                Some("truecolor")
+            ),
+            ColorDepth::Xterm256
+        );
+    }
+
+    #[test]
+    fn empty_tmux_listing_falls_back() {
+        for listing in ["", "\n", " \n \n"] {
+            assert_eq!(
+                depth(None, Some(listing), false, Some("truecolor")),
+                ColorDepth::Truecolor
+            );
+            assert_eq!(depth(None, Some(listing), false, None), ColorDepth::Xterm256);
+        }
+    }
+
+    #[test]
     fn screen_rounds_despite_colorterm() {
         assert_eq!(depth(None, None, true, Some("truecolor")), ColorDepth::Xterm256);
     }
@@ -191,7 +275,7 @@ mod tests {
 
     #[test]
     fn unknown_forced_depth_is_ignored() {
-        for value in ["", "auto", "TrueColor", "16"] {
+        for value in ["", "auto", "truecolour", "16"] {
             assert_eq!(
                 depth(Some(value), None, false, Some("truecolor")),
                 ColorDepth::Truecolor,

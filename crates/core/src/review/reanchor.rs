@@ -22,7 +22,7 @@ struct AnchorSnapshot {
 
 pub fn reanchor_review(review: &Review, changeset: Changeset) -> Result<Review> {
     if review.changeset.fingerprint() == changeset.fingerprint() {
-        return Ok(review.clone());
+        return Ok(with_generated_from(review, &changeset));
     }
 
     let mut notes = review.notes.clone();
@@ -109,6 +109,22 @@ pub fn stale_outcome(anchor: &Anchor, outcome: Option<&ReanchorOutcome>, current
         original_anchor: anchor.clone(),
         evidence: stale_evidence(current, &source_anchors(anchor, outcome)),
     }
+}
+
+/// Takes the generated marks of `fresh`, a capture with the review's
+/// fingerprint, without a new revision. The mark is outside every
+/// fingerprint, so an attribute change alone, or a review captured before
+/// marks existed, reaches the review only this way.
+fn with_generated_from(review: &Review, fresh: &Changeset) -> Review {
+    let mut carried = review.clone();
+    let files = review.changeset.files().iter().zip(fresh.files());
+    for (index, (file, fresh)) in files.enumerate() {
+        let generated = fresh.is_generated() && fresh.fingerprint() == file.fingerprint();
+        if generated != file.is_generated() {
+            carried.changeset.set_generated(index, generated);
+        }
+    }
+    carried
 }
 
 fn stale_evidence(changeset: &Changeset, source_anchors: &[Anchor]) -> ReanchorEvidence {

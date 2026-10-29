@@ -11,6 +11,7 @@
 		completionSummary,
 		defaultFindingFilters,
 		filterFindings,
+		firstFile,
 		hasReviewMetadata,
 		isShownFile,
 		reopenedFile,
@@ -54,6 +55,8 @@
 	let themeReady = $state(false);
 	let isNarrow = $state(false);
 	let mobilePane = $state<'files' | 'findings' | null>(null);
+	/** The raw path of the generated file whose diff is open, if any. */
+	let openedGenerated = $state<string | null>(null);
 
 	let streamAbort: AbortController | null = null;
 	let secret = '';
@@ -135,7 +138,8 @@
 			const overview = await request<ReviewOverview>('/api/v1/review');
 			if (!overviewLoads.settle(ticket).apply) return true;
 			review = overview;
-			if (review.files[0]) await selectFile(review.files[0].id);
+			const first = firstFile(review.files);
+			if (first) await selectFile(first.id);
 			else closeFile();
 			error = null;
 			return true;
@@ -304,7 +308,11 @@
 			file = detail;
 			fileRevision = revision;
 			viewedError = null;
-			if (finding) window.setTimeout(() => scrollToFinding(finding.id));
+			if (finding) {
+				// A finding's line is inside the diff, so a collapsed generated diff opens first.
+				if (detail.generated) openedGenerated = detail.path.raw;
+				window.setTimeout(() => scrollToFinding(finding.id));
+			}
 		} catch (cause) {
 			if (ticket !== fileLoads) return;
 			file = null;
@@ -541,6 +549,7 @@
 				{theme}
 				viewState={shownView}
 				{viewedError}
+				bind:openedGenerated
 				onDismissNotice={() => (notice = null)}
 				onToggleViewed={toggleViewed}
 				onFindingClick={selectFinding}
@@ -558,6 +567,7 @@
 				{theme}
 				viewState={shownView}
 				{viewedError}
+				bind:openedGenerated
 				onDismissNotice={() => (notice = null)}
 				onToggleViewed={toggleViewed}
 				onFindingClick={selectFinding}

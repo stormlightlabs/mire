@@ -14,6 +14,7 @@ use mire_core::{
 };
 use thiserror::Error;
 
+mod attributes;
 mod consistency;
 
 /// Worktree captures taken before Mire keeps a capture with torn files.
@@ -204,7 +205,9 @@ pub fn load_show(request: ShowRequest) -> Result<Changeset> {
     push_paths(&mut arguments, &request.paths);
     let output = run_git(Some(&repository.root), &arguments, DEFAULT_MAX_PATCH_BYTES)?;
     ensure_success("show", &output, &[0])?;
-    parse_patch(&output.stdout, source, PatchLimits::default()).map_err(GitError::Patch)
+    let mut changeset = parse_patch(&output.stdout, source, PatchLimits::default()).map_err(GitError::Patch)?;
+    mark_generated(&repository.root, &mut changeset);
+    Ok(changeset)
 }
 
 /// Returns the ids among `objects` that the bound repository does not hold
@@ -421,7 +424,19 @@ fn capture_diff(
     {
         append_untracked_patches(repository, &request.paths, &mut patch, literal_pathspecs)?;
     }
-    parse_patch(&patch, source, PatchLimits::default()).map_err(GitError::Patch)
+    let mut changeset = parse_patch(&patch, source, PatchLimits::default()).map_err(GitError::Patch)?;
+    mark_generated(&repository.root, &mut changeset);
+    Ok(changeset)
+}
+
+/// Marks the files the repository's attributes call generated, reading the
+/// attributes of the comparison's new side.
+fn mark_generated(root: &Path, changeset: &mut Changeset) {
+    let ChangesetSource::Git { operation } = changeset.source() else {
+        return;
+    };
+    let source = attributes::attribute_source(operation);
+    attributes::mark_generated(root, changeset, &source);
 }
 
 fn request_from_operation(operation: &GitOperation) -> Result<DiffRequest> {
@@ -650,13 +665,15 @@ fn spawn_git(
     let stderr = child.stderr.take().expect("piped Git stderr is available");
     let stdout_reader = thread::spawn(move || read_stream(stdout, stdout_limit));
     let stderr_reader = thread::spawn(move || read_stream(stderr, MAX_GIT_STDERR_BYTES));
-    if let Some(writer) = writer {
-        writer
-            .join()
-            .expect("Git stdin writer does not panic")
-            .map_err(GitError::Spawn)?;
-    }
+    let write_result = writer.map(|writer| writer.join().expect("Git stdin writer does not panic"));
     let status = child.wait().map_err(GitError::Spawn)?;
+    if let Some(Err(error)) = write_result {
+        // Git closing its stdin early means it stopped; a failed exit status
+        // carries its diagnostic on stderr, which `ensure_success` reports.
+        if error.kind() != io::ErrorKind::BrokenPipe || status.success() {
+            return Err(GitError::Spawn(error));
+        }
+    }
     let stdout = stdout_reader
         .join()
         .expect("Git stdout reader does not panic")
@@ -948,6 +965,19 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
         assert_eq!(missing, absent);
         assert!(!missing.contains(&held));
+    }
+
+    #[test]
+    fn git_that_stops_reading_input_reports_its_stderr() {
+        // More input than a pipe buffers, so the write fails once Git exits.
+        let input = vec![b'a'; 1024 * 1024];
+        let arguments = [OsString::from("check-attr"), OsString::from("--no-such-option")];
+
+        let output = run_git_with_input(None, &arguments, input, 1024).unwrap();
+        let error = ensure_success("check attributes", &output, &[0]).unwrap_err();
+
+        assert!(matches!(error, GitError::CommandFailed { .. }), "{error}");
+        assert!(error.to_string().contains("no-such-option"), "{error}");
     }
 
     #[test]

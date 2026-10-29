@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	completionSummary,
 	fileViewState,
+	firstFile,
 	hasReviewMetadata,
 	isShownFile,
 	reopenedFile,
@@ -26,6 +27,7 @@ function review(): ReviewOverview {
 				path: { display: 'first.rs', lossy: false, raw: '66697273742e7273' },
 				status: 'modified',
 				contentKind: 'text',
+				generated: false,
 				openFindings: 0,
 				viewed: { fingerprint: 'first', revision: 1 }
 			},
@@ -34,6 +36,7 @@ function review(): ReviewOverview {
 				path: { display: 'second.rs', lossy: false, raw: '7365636f6e642e7273' },
 				status: 'modified',
 				contentKind: 'text',
+				generated: false,
 				openFindings: 1,
 				viewed: null
 			}
@@ -75,6 +78,17 @@ describe('viewed state', () => {
 
 	it('addresses a path by its raw hex bytes', () => {
 		expect(viewedRoute({ display: 'a�', lossy: true, raw: '61ff' })).toBe('/api/v1/viewed?path=61ff');
+	});
+});
+
+describe('firstFile', () => {
+	it('skips generated files unless every file is generated', () => {
+		const files = review().files;
+		files[0].generated = true;
+		expect(firstFile(files)).toBe(files[1]);
+		files[1].generated = true;
+		expect(firstFile(files)).toBe(files[0]);
+		expect(firstFile([])).toBeNull();
 	});
 });
 

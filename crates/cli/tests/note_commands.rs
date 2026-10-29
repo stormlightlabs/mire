@@ -59,7 +59,7 @@ fn location_batches_are_atomic_and_mire_assigns_anchors_and_ids() {
     assert_eq!(report["failures"][0]["expected"], 1);
     assert_eq!(report["failures"][0]["actual"], 2);
     assert_eq!(report["schema_version"], result["schema_version"]);
-    assert_eq!(report["schema_version"], json!({ "major": 1, "minor": 5 }));
+    assert_eq!(report["schema_version"], json!({ "major": 1, "minor": 6 }));
     assert_eq!(fs::read(&fixture.review_path).unwrap(), before_stale);
 
     let review = read_review(&fixture.review_path).unwrap();
@@ -128,7 +128,7 @@ fn hunk_context_is_bounded_and_mutations_require_the_observed_revision() {
     assert_eq!(stale.status.code(), Some(8));
     let report: Value = serde_json::from_slice(&stale.stderr).unwrap();
     assert_eq!(report["failures"][0]["code"], "revision_conflict");
-    assert_eq!(report["schema_version"], json!({ "major": 1, "minor": 5 }));
+    assert_eq!(report["schema_version"], json!({ "major": 1, "minor": 6 }));
     assert_eq!(fs::read(&fixture.review_path).unwrap(), before_stale);
 
     let resolved = mire(&[

@@ -115,6 +115,9 @@ struct FileSummary {
     path: PathText,
     status: String,
     content_kind: String,
+    /// Whether the repository's attributes mark the file as generated. The
+    /// browser collapses generated files.
+    generated: bool,
     open_findings: usize,
     /// The local reader's viewed mark for this path, or `null`. The file is
     /// viewed while the mark's fingerprint equals `id`.
@@ -130,6 +133,8 @@ struct FileDetail {
     path: PathText,
     old_path: Option<PathText>,
     status: String,
+    /// Whether the repository's attributes mark the file as generated.
+    generated: bool,
     content: SemanticFileContent,
     findings: Vec<FindingSummary>,
 }
@@ -1340,6 +1345,7 @@ impl FileSummary {
                 FileContent::Text { .. } => "text".to_owned(),
                 FileContent::Binary => "binary".to_owned(),
             },
+            generated: file.is_generated(),
             open_findings,
             viewed: review
                 .viewed_mark(reader, file.canonical_path())
@@ -1357,6 +1363,7 @@ impl FileDetail {
             path: PathText::from_bytes(file_path(file)),
             old_path: file.old_side().map(|side| PathText::from_bytes(side.path.as_bytes())),
             status: format!("{:?}", file.status()).to_lowercase(),
+            generated: file.is_generated(),
             content,
             findings: review
                 .notes()

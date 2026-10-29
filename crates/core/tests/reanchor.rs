@@ -117,6 +117,24 @@ fn reanchor_unchanged_capture_is_a_noop_and_overflow_leaves_the_review_unchanged
     assert_eq!(overflow.revision().get(), u64::MAX);
 }
 
+#[test]
+fn reanchor_unchanged_capture_takes_its_generated_marks_without_a_revision() {
+    let original = changeset(b"--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+bug\n");
+    let note = note(&original, "file.txt", 1);
+    let review = review(original.clone(), note);
+    let mut marked = original.clone();
+    marked.set_generated(0, true);
+
+    let refreshed = review.reanchor(marked.clone()).unwrap();
+    assert_eq!(refreshed.revision(), review.revision());
+    assert!(refreshed.changeset().files()[0].is_generated());
+    assert_eq!(refreshed.notes(), review.notes());
+    assert_eq!(refreshed.reanchor(marked).unwrap(), refreshed);
+
+    let cleared = refreshed.reanchor(original).unwrap();
+    assert_eq!(cleared, review);
+}
+
 fn changeset(patch: &[u8]) -> Changeset {
     parse_patch(patch, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap()
 }

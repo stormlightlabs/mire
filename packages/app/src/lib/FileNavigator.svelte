@@ -24,7 +24,23 @@
 	const visibleFiles = $derived(
 		files.filter((file) => file.path.display.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
 	);
-	const treeRows = $derived(buildTreeRows(visibleFiles));
+	const treeRows = $derived(buildTreeRows(visibleFiles.filter((file) => !file.generated)));
+	const generatedFiles = $derived(visibleFiles.filter((file) => file.generated));
+	let generatedOpen = $state(false);
+	/** A filter lists every matching generated file, and the group cannot collapse while it is active. */
+	const filtering = $derived(query.trim() !== '');
+	/** Generated files start collapsed, and show while a filter is active. */
+	const showGenerated = $derived(generatedOpen || filtering);
+
+	/** The raw path of the last active file, so a reload of the same file leaves the group as the reader set it. */
+	let expandedFor: string | null = null;
+	// Opening a generated file from elsewhere, such as the review queue, expands the group.
+	$effect(() => {
+		const active = files.find((file) => file.id === activeFile);
+		if (!active || active.path.raw === expandedFor) return;
+		expandedFor = active.path.raw;
+		if (active.generated) generatedOpen = true;
+	});
 	let collapsed = new SvelteSet<string>();
 	const visibleRows = $derived(
 		treeRows.filter((row) => query.trim() || row.ancestors.every((ancestor) => !collapsed.has(ancestor)))
@@ -115,8 +131,50 @@
 				</button>
 			{/if}
 		{:else}
-			<p class="empty">No changed files match this filter.</p>
+			{#if generatedFiles.length === 0}<p class="empty">No changed files match this filter.</p>{/if}
 		{/each}
+		{#if generatedFiles.length > 0}
+			<button
+				class="directory generated-group"
+				style:--tree-depth={0}
+				role="treeitem"
+				aria-level={1}
+				aria-selected="false"
+				aria-expanded={showGenerated}
+				disabled={filtering}
+				onclick={() => (generatedOpen = !generatedOpen)}>
+				<span class="i-lucide-chevron-down disclosure" class:collapsed={!showGenerated}></span>
+				<span class="i-lucide-cog tree-icon"></span>
+				<span class="node-name">Generated</span>
+				<span class="group-count"
+					>{generatedFiles.length}
+					{generatedFiles.length === 1 ? 'file' : 'files'}{filtering
+						? ', shown by filter'
+						: showGenerated
+							? ''
+							: ', collapsed'}</span>
+			</button>
+			{#if showGenerated}
+				{#each generatedFiles as generated (generated.id)}
+					<button
+						class:active={activeFile === generated.id}
+						class="file"
+						style:--tree-depth={1}
+						role="treeitem"
+						aria-level={2}
+						aria-selected={activeFile === generated.id}
+						onclick={() => onSelect(generated.id)}
+						aria-current={activeFile === generated.id ? 'page' : undefined}>
+						<span class="i-lucide-file-cog tree-icon"></span>
+						<span class="path" title={formatPath(generated.path)}>{formatPath(generated.path)}</span>
+						<span class="file-meta"
+							>{generated.status} · generated · {generated.openFindings} open{viewedLabels[
+								fileViewState(generated)
+							]}</span>
+					</button>
+				{/each}
+			{/if}
+		{/if}
 	</div>
 </aside>
 
@@ -194,8 +252,20 @@
 		color: var(--ink);
 		text-align: left;
 	}
-	.directory:hover {
+	.generated-group {
+		border-top: 1px solid var(--line);
+	}
+	.group-count {
+		margin-left: auto;
+		color: var(--muted);
+		font-size: 0.68rem;
+		white-space: nowrap;
+	}
+	.directory:not(:disabled):hover {
 		background: var(--paper);
+	}
+	.generated-group:disabled {
+		cursor: default;
 	}
 	.disclosure {
 		width: 0.7rem;

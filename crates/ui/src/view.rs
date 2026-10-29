@@ -1005,6 +1005,22 @@ new file mode 100644
     }
 
     #[test]
+    fn generated_snapshot_marks_generated_files_in_the_file_list() {
+        let mut changeset = nested_changeset();
+        let guide = changeset
+            .files()
+            .iter()
+            .position(|file| file.canonical_path().as_bytes() == b"docs/guide.md")
+            .unwrap();
+        changeset.set_generated(guide, true);
+        let mut app = App::ready(&changeset);
+        app.resize(120, 16);
+        press(&mut app, KeyCode::Tab);
+        press(&mut app, KeyCode::Down);
+        insta::assert_snapshot!("sidebar_generated_120x16", snapshot(app, 120, 16));
+    }
+
+    #[test]
     fn walkthrough_snapshot_shows_progress_in_the_header() {
         let review = notes_review();
         let mut app = App::review_with_options(&review, crate::AppOptions::default());

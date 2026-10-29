@@ -53,3 +53,9 @@ mire review review.json --format json
 Redirecting output selects JSON automatically where the command supports it.
 The schema includes an explicit version so consumers can reject unsupported
 major versions.
+
+Schema 1.1 adds `generated` to a file. It is present and `true` when the
+repository's attributes mark the file as generated, and absent otherwise. See
+[generated files](/docs/guides/review-changes/#generated-files). The mark is
+not part of the file's fingerprint, so a viewed mark or note anchor does not
+change with it. Readers of 1.0 can ignore the field.

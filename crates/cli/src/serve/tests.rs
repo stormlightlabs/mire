@@ -321,6 +321,7 @@ async fn overview_file_and_finding_resources_describe_the_review() {
     assert_eq!(overview["files"][0]["path"]["raw"], "66696c652e7273");
     assert_eq!(overview["files"][0]["viewed"], serde_json::Value::Null);
     assert_eq!(overview["files"][0]["openFindings"], 1);
+    assert_eq!(overview["files"][0]["generated"], false);
     assert_eq!(overview["findings"][0]["body"], "A finding");
 
     let file_id = overview["files"][0]["id"].as_str().expect("file id").to_owned();
@@ -411,6 +412,42 @@ async fn finding_edits_and_decisions_over_http_persist_and_advance_the_revision(
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(problem["code"], "finding_not_found");
+}
+
+#[tokio::test]
+async fn generated_files_are_marked_in_the_overview_and_the_file() {
+    let fixture = Fixture::new();
+    let mut changeset = parse_patch(
+        b"--- a/Cargo.lock\n+++ b/Cargo.lock\n@@ -1 +1 @@\n-old\n+new\n--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-a\n+b\n",
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .expect("changeset");
+    changeset.set_generated(0, true);
+    let review = Review::new(
+        ReviewRevision::new(1).expect("positive revision"),
+        changeset,
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("review");
+    crate::write_review_atomic(fixture.path(), &review).expect("review is written");
+
+    let (status, overview) = send_json(fixture.state(), api_request(Method::GET, "/api/v1/review", None)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(overview["files"][0]["path"]["display"], "Cargo.lock");
+    assert_eq!(overview["files"][0]["generated"], true);
+    assert_eq!(overview["files"][1]["generated"], false);
+
+    let file_id = overview["files"][0]["id"].as_str().expect("file id").to_owned();
+    let (status, file) = send_json(
+        fixture.state(),
+        api_request(Method::GET, &format!("/api/v1/files/{file_id}"), None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(file["generated"], true);
+    assert_eq!(file["content"]["hunks"][0]["lines"][1]["content"]["display"], "new");
 }
 
 #[tokio::test]

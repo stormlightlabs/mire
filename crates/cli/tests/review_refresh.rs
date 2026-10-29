@@ -118,6 +118,38 @@ fn refresh_reanchors_notes_and_does_not_rewrite_unchanged_captures() {
 }
 
 #[test]
+fn refresh_takes_attribute_changes_that_leave_the_diff_alone() {
+    let fixture = Fixture::new();
+    let refresh = || {
+        let output = run_mire(
+            &fixture.root,
+            [
+                OsString::from("review"),
+                OsString::from("refresh"),
+                fixture.review.as_os_str().to_owned(),
+            ],
+        );
+        assert_success(&output);
+        read_review(&fixture.review).unwrap()
+    };
+    let before = read_review(&fixture.review).unwrap();
+    assert!(!before.changeset().files()[0].is_generated());
+
+    let info = fixture.root.join(".git/info");
+    fs::create_dir_all(&info).unwrap();
+    fs::write(info.join("attributes"), b"file.txt linguist-generated\n").unwrap();
+    let marked = refresh();
+    assert_eq!(marked.revision(), before.revision());
+    assert!(marked.changeset().files()[0].is_generated());
+    assert_eq!(marked.notes(), before.notes());
+
+    fs::write(info.join("attributes"), b"").unwrap();
+    let cleared = refresh();
+    assert_eq!(cleared.revision(), before.revision());
+    assert!(!cleared.changeset().files()[0].is_generated());
+}
+
+#[test]
 fn refresh_preserves_external_note_decisions_and_rejects_unbound_reviews() {
     let fixture = Fixture::new();
     assert_success(&run_mire(

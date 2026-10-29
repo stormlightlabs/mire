@@ -243,6 +243,61 @@ fn missing_git_invalid_revisions_bare_repositories_and_non_repositories_have_sta
     assert!(stderr(&bare_output).contains("bare Git repositories"));
 }
 
+#[test]
+fn generated_files_follow_the_attributes_of_the_compared_tree() {
+    let repository = FixtureRepository::new();
+    write(&repository.path, ".gitattributes", b"*.txt linguist-generated\n");
+    write(
+        &repository.path,
+        "nested/.gitattributes",
+        b"*.txt -linguist-generated\n",
+    );
+    write(&repository.path, "nested/kept.txt", b"kept\n");
+    write(&repository.path, "icon.svg", b"<svg/>\n");
+    write(&repository.path, "image/.gitattributes", b"*.svg -diff\n");
+    write(&repository.path, "image/icon.svg", b"<svg/>\n");
+
+    let worktree = run_mire(&repository.path, [OsString::from("diff")]);
+    assert_success(&worktree);
+    let generated = |files: &BTreeMap<String, Value>, path: &str| files[path]["generated"] == Value::Bool(true);
+    let worktree = files(&worktree);
+    assert!(generated(&worktree, "tracked.txt"));
+    assert!(generated(&worktree, "untracked.txt"));
+    assert!(!generated(&worktree, "nested/kept.txt"));
+    assert!(!generated(&worktree, "icon.svg"));
+    assert!(generated(&worktree, "image/icon.svg"));
+    assert!(
+        worktree["tracked.txt"]["content"]["hunks"]
+            .as_array()
+            .is_some_and(|hunks| !hunks.is_empty())
+    );
+
+    if !git_reads_tree_attributes() {
+        eprintln!("skipped the revision check: reading a revision's attributes needs Git 2.40 or later");
+        return;
+    }
+    // The topic commit carries no attributes, so its own diff marks nothing.
+    let show = run_mire(
+        &repository.path,
+        [OsString::from("show"), OsString::from(&repository.topic)],
+    );
+    assert_success(&show);
+    assert!(files(&show).values().all(|file| file.get("generated").is_none()));
+}
+
+/// Reports whether the installed Git has `check-attr --source`, added in Git
+/// 2.40.
+fn git_reads_tree_attributes() -> bool {
+    let output = Command::new("git").arg("--version").output().expect("git runs");
+    let version = String::from_utf8_lossy(&output.stdout);
+    let mut numbers = version
+        .trim()
+        .trim_start_matches("git version ")
+        .split('.')
+        .map(|part| part.parse::<u32>().unwrap_or(0));
+    (numbers.next().unwrap_or(0), numbers.next().unwrap_or(0)) >= (2, 40)
+}
+
 fn files(output: &Output) -> BTreeMap<String, Value> {
     let json: Value = serde_json::from_slice(&output.stdout).expect("mire output is JSON");
     json["files"]

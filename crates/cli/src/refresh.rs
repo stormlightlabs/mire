@@ -53,7 +53,7 @@ pub enum RefreshError {
 /// A new revision records a checkpoint for each file whose fingerprint
 /// changed, and keeps a patch copy for each such file whose blobs the
 /// repository does not hold, such as an unstaged worktree file. An unchanged
-/// capture returns the review as it was.
+/// capture keeps the revision and takes only the fresh generated marks.
 pub fn reload_review(review: &Review) -> Result<Review, RefreshError> {
     let binding = review.source_binding().ok_or(RefreshError::UnavailableSource)?;
     let changeset = git::load_bound_diff(binding)?;

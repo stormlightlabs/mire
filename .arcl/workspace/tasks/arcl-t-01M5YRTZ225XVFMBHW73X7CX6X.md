@@ -2,10 +2,11 @@
 id = "arcl-t-01M5YRTZ225XVFMBHW73X7CX6X"
 plan = "arcl-pl-01M5YRTHS95J67NZ6THREDG33F"
 title = "Mark generated files from .gitattributes"
-status = "pending"
+status = "completed"
 priority = "normal"
 position = 2
 blocked-by = ["arcl-t-01M5SXDG7QJM6Y67FCJ8ZPNASW"]
+evidence = "Done in #22 at c2fdd2d: generated files from linguist-generated and -diff marked in the changeset, API, terminal file list and browser (collapsed group)."
 +++
 
 Read `linguist-generated` (and `-diff`) from the reviewed repository's `.gitattributes` when building the changeset. Mark those files in the API and the terminal file list, and collapse them in the browser by default. Mire's own rules can come later if `.gitattributes` is not enough.

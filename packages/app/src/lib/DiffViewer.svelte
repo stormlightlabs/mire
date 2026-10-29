@@ -23,10 +23,12 @@
 
 	/**
 	 * Rows have fractional heights, so each row's gutter bar can leave a
-	 * one-pixel seam below it. Running each bar one pixel into the next row
-	 * draws a run of changed rows as one continuous bar.
+	 * one-pixel seam below it. Running a bar one pixel into the next row draws
+	 * a run of changed rows as one continuous bar; the next row's own bar paints
+	 * over the overlap. The last row of a run stops at its own edge, so the bar
+	 * does not reach into the unchanged row below.
 	 */
-	const GUTTER_CSS = `[data-indicators='bars'] [data-column-number]::before { height: calc(100% + 1px); }`;
+	const GUTTER_CSS = `[data-indicators='bars'] [data-column-number]:has(+ [data-column-number][data-line-type^='change-'])::before { height: calc(100% + 1px); }`;
 
 	let host = $state<HTMLElement>();
 	let viewer: FileDiff<FindingSummary> | undefined;

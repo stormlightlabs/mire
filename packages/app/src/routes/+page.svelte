@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import DiffPane from '$lib/DiffPane.svelte';
 	import FileNavigator from '$lib/FileNavigator.svelte';
 	import FindingQueue from '$lib/FindingQueue.svelte';
@@ -62,6 +62,10 @@
 	let openedGenerated = $state<string | null>(null);
 	/** Whether focus mode shows the open file alone. It lasts for this tab and is never saved. */
 	let focused = $state(false);
+	/** The topbar's Focus button, which takes keyboard focus back when focus mode ends. */
+	let focusButton = $state<HTMLButtonElement>();
+	/** The focus bar, which takes keyboard focus when focus mode starts. */
+	let focusBar = $state<FocusBar>();
 
 	let streamAbort: AbortController | null = null;
 	let secret = '';
@@ -417,6 +421,18 @@
 		if (target) chooseFile(target.id);
 	}
 
+	/**
+	 * Enters or leaves focus mode. Either way the control that had keyboard
+	 * focus is removed from the page, so focus moves to the Leave focus button
+	 * on entering and back to the Focus button on leaving, not to the body.
+	 */
+	async function setFocused(next: boolean) {
+		focused = next;
+		await tick();
+		if (next) focusBar?.focusLeave();
+		else focusButton?.focus();
+	}
+
 	function onKeydown(event: KeyboardEvent) {
 		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
 		const target = event.target;
@@ -440,10 +456,10 @@
 			moveFile(-1);
 		} else if (event.key === 'b') {
 			event.preventDefault();
-			focused = !focused;
+			void setFocused(!focused);
 		} else if (event.key === 'Escape' && focused) {
 			event.preventDefault();
-			focused = false;
+			void setFocused(false);
 		}
 	}
 
@@ -484,13 +500,14 @@
 <div class="app-shell" class:focused={inFocus}>
 	{#if inFocus}
 		<FocusBar
+			bind:this={focusBar}
 			{file}
 			{position}
 			viewState={shownView}
 			onPrevious={() => moveFile(-1)}
 			onNext={() => moveFile(1)}
 			onToggleViewed={toggleViewed}
-			onLeave={() => (focused = false)} />
+			onLeave={() => void setFocused(false)} />
 	{:else}
 		<header class="topbar">
 			<div class="brand" aria-label="Mire">
@@ -516,7 +533,11 @@
 					</button>
 				{/if}
 				{#if review}
-					<button class="topbar-button" aria-keyshortcuts="b" onclick={() => (focused = true)}>
+					<button
+						bind:this={focusButton}
+						class="topbar-button"
+						aria-keyshortcuts="b"
+						onclick={() => void setFocused(true)}>
 						<span class="i-lucide-maximize-2 icon" aria-hidden="true"></span>Focus
 						<kbd class="key-hint" aria-hidden="true">b</kbd>
 					</button>

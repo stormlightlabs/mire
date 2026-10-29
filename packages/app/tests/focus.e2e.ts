@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { expect, test } from './mire';
 
 test('focus mode shows one file and leaves by key or button', async ({ page, mire }) => {
@@ -137,4 +140,80 @@ test.describe('with a generated added file', () => {
 		await expect(diff.locator('pre[data-indicators="bars"]')).toHaveCount(1);
 		await expect(diff.locator('pre[data-background]')).toHaveCount(0);
 	});
+});
+
+test('keyboard focus follows the bar in and out of focus mode', async ({ page, mire }) => {
+	await page.goto(mire.url);
+	const header = page.getByRole('banner');
+	await expect(header).toContainText('revision 3');
+	const focusButton = header.getByRole('button', { name: 'Focus' });
+	const leave = header.getByRole('button', { name: 'Leave focus' });
+	const previous = header.getByRole('button', { name: 'Previous file' });
+	const next = header.getByRole('button', { name: 'Next file' });
+
+	// Entering moves focus to Leave focus and leaving moves it back to Focus, by button or by key.
+	await focusButton.click();
+	await expect(leave).toBeFocused();
+	await page.keyboard.press('Escape');
+	await expect(focusButton).toBeFocused();
+	await page.keyboard.press('b');
+	await expect(leave).toBeFocused();
+	await leave.click();
+	await expect(focusButton).toBeFocused();
+
+	// An arrow that reaches the last or first file hands focus to the other arrow.
+	await page.keyboard.press('b');
+	await next.click();
+	await expect(header.getByRole('heading', { level: 1 })).toHaveText('two.txt');
+	await expect(next).toBeDisabled();
+	await expect(previous).toBeFocused();
+	await page.keyboard.press('Enter');
+	await expect(header.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+	await expect(next).toBeFocused();
+});
+
+test('shortcuts leave the page alone while a dialog is open', async ({ page, mire }) => {
+	await page.goto(mire.url);
+	const header = page.getByRole('banner');
+	const files = page.getByRole('tree', { name: 'Changed file tree' });
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await expect(header).toContainText('revision 3');
+
+	await header.getByRole('button', { name: 'Finish review' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Finish review' });
+	await expect(dialog).toBeVisible();
+	// Clicking the dialog's text sends keys to the dialog itself, not a control inside it.
+	await dialog.getByRole('heading', { name: 'Finish review' }).click();
+	for (const key of ['b', ']', '[']) await page.keyboard.press(key);
+	await expect(dialog).toBeVisible();
+	await expect(files).toBeVisible();
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+
+	// Esc closes the dialog and does nothing else.
+	await page.keyboard.press('Escape');
+	await expect(dialog).toBeHidden();
+	await expect(files).toBeVisible();
+	await expect(header.getByRole('button', { name: 'Leave focus' })).toHaveCount(0);
+});
+
+test('a renamed file in focus mode shows its old path', async ({ page, mire }) => {
+	// Rename two.txt with its committed content, and mark the new path intent-to-add
+	// so the working tree diff pairs the two as a rename.
+	await writeFile(path.join(mire.root, 'two-moved.txt'), 'x\ny\n');
+	await rm(path.join(mire.root, 'two.txt'));
+	execFileSync('git', ['add', '--intent-to-add', 'two-moved.txt'], { cwd: mire.root, stdio: 'pipe' });
+
+	await page.goto(mire.url);
+	const header = page.getByRole('banner');
+	await header.getByRole('button', { name: 'Refresh source' }).click();
+	const files = page.getByRole('tree', { name: 'Changed file tree' });
+	await files.getByRole('treeitem', { name: /two-moved\.txt/ }).click();
+
+	await page.keyboard.press('b');
+	await expect(header.getByRole('heading', { level: 1 })).toHaveText('two-moved.txt');
+	await expect(header).toContainText('from two.txt');
+	await expect(header.getByRole('heading', { level: 1 })).toHaveAttribute(
+		'title',
+		'two-moved.txt, renamed from two.txt'
+	);
 });

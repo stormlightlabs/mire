@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
 	import { fileViewState, formatPath, type FileSummary } from './review';
+	import { comparePaths, treeGroups } from './tree';
 
 	type TreeRow =
 		| { kind: 'directory'; path: string; name: string; depth: number; ancestors: string[] }
@@ -24,8 +25,9 @@
 	const visibleFiles = $derived(
 		files.filter((file) => file.path.display.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
 	);
-	const treeRows = $derived(buildTreeRows(visibleFiles.filter((file) => !file.generated)));
-	const generatedFiles = $derived(visibleFiles.filter((file) => file.generated));
+	const groups = $derived(treeGroups(visibleFiles));
+	const treeRows = $derived(buildTreeRows(groups.source));
+	const generatedFiles = $derived(groups.generated);
 	let generatedOpen = $state(false);
 	/** A filter lists every matching generated file, and the group cannot collapse while it is active. */
 	const filtering = $derived(query.trim() !== '');
@@ -60,7 +62,7 @@
 			for (let index = 1; index < parts.length; index += 1) directories.add(parts.slice(0, index).join('/'));
 		}
 
-		for (const path of [...directories].sort((left, right) => left.localeCompare(right))) {
+		for (const path of [...directories].sort(comparePaths)) {
 			const parts = path.split('/');
 			rows.push({
 				kind: 'directory',
@@ -85,7 +87,7 @@
 		return rows.sort((left, right) => {
 			const leftPath = left.kind === 'directory' ? `${left.path}/` : left.file.path.display;
 			const rightPath = right.kind === 'directory' ? `${right.path}/` : right.file.path.display;
-			return leftPath.localeCompare(rightPath);
+			return comparePaths(leftPath, rightPath);
 		});
 	}
 </script>

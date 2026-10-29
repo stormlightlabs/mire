@@ -1,4 +1,5 @@
 import type { FileDetail, FileSummary } from './review';
+import { treeGroups } from './tree';
 
 /** Input types that take no typed text, so single-key shortcuts still apply while one has focus. */
 const NON_TEXT_INPUTS = ['checkbox', 'radio', 'button', 'submit', 'reset'];
@@ -16,8 +17,8 @@ export type FilePosition = { index: number; total: number; previous: FileSummary
  * shows.
  */
 export function fileOrder(files: FileSummary[]): FileSummary[] {
-	const byPath = (left: FileSummary, right: FileSummary) => left.path.display.localeCompare(right.path.display);
-	return [...files.filter((file) => !file.generated).sort(byPath), ...files.filter((file) => file.generated)];
+	const { source, generated } = treeGroups(files);
+	return [...source, ...generated];
 }
 
 /**

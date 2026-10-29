@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { changeSummary, splitPath, type FilePosition } from './focus';
 	import { formatPath, type FileDetail, type FileViewState } from './review';
 
@@ -23,6 +24,33 @@
 	} = $props();
 
 	const path = $derived(file ? splitPath(formatPath(file.path)) : null);
+	/** The path a renamed file had before, or `null` when the path did not change. */
+	const oldPath = $derived(
+		file?.oldPath && file.oldPath.display !== file.path.display ? formatPath(file.oldPath) : null
+	);
+
+	let previousButton = $state<HTMLButtonElement>();
+	let nextButton = $state<HTMLButtonElement>();
+	let leaveButton = $state<HTMLButtonElement>();
+
+	/** Moves keyboard focus to the Leave focus button, which is always in the bar. */
+	export function focusLeave() {
+		leaveButton?.focus();
+	}
+
+	// Reaching the first or last file disables the arrow that got there. A
+	// disabled button drops keyboard focus to the body, so hand it to the other
+	// arrow, or to Leave focus when there is only one file. This runs before
+	// the DOM update, while the arrow still holds focus.
+	$effect.pre(() => {
+		const atStart = !position?.previous;
+		const atEnd = !position?.next;
+		const active = document.activeElement;
+		let target: HTMLButtonElement | undefined;
+		if (atStart && active === previousButton) target = atEnd ? leaveButton : nextButton;
+		else if (atEnd && active === nextButton) target = atStart ? leaveButton : previousButton;
+		if (target) void tick().then(() => target.focus());
+	});
 
 	/** Asks for the other mark, and leaves the box as it is until the saved mark comes back. */
 	function toggleViewed(event: MouseEvent) {
@@ -34,6 +62,7 @@
 <header class="focus-bar">
 	<strong class="brand">mire</strong>
 	<button
+		bind:this={previousButton}
 		class="step"
 		aria-label="Previous file"
 		title="Previous file ["
@@ -43,12 +72,16 @@
 		<span class="i-lucide-chevron-left icon" aria-hidden="true"></span>
 	</button>
 	{#if file && path}
-		<h1 class="path" title={formatPath(file.path)}>
+		<h1 class="path" title={oldPath ? `${formatPath(file.path)}, renamed from ${oldPath}` : formatPath(file.path)}>
 			<span class="directory">{path.directory}</span><span class="name">{path.name}</span>
 		</h1>
+		{#if oldPath}
+			<span class="meta renamed" title={oldPath}>from {oldPath}</span>
+		{/if}
 		<span class="meta">{changeSummary(file)}</span>
 	{/if}
 	<button
+		bind:this={nextButton}
 		class="step"
 		aria-label="Next file"
 		title="Next file ]"
@@ -67,7 +100,7 @@
 			{viewState === 'changed' ? 'Changed since viewed' : 'Viewed'}
 		</label>
 	{/if}
-	<button class="leave" aria-keyshortcuts="Escape" onclick={onLeave}>
+	<button bind:this={leaveButton} class="leave" aria-keyshortcuts="Escape" onclick={onLeave}>
 		Leave focus <kbd aria-hidden="true">Esc</kbd>
 	</button>
 </header>
@@ -150,6 +183,12 @@
 	}
 	.meta {
 		flex: none;
+	}
+	.meta.renamed {
+		flex: 0 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 	.spacer {
 		flex: 1;

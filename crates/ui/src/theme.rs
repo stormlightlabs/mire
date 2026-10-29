@@ -280,6 +280,12 @@ pub struct Theme {
 /// `annotation` sets a finding apart from the source rows around it, and
 /// `warning` marks medium severity in a color that reads as text on every
 /// surface.
+///
+/// `warning` is its own role rather than `peach` because the light palettes'
+/// peach fails as medium text: Eldritch Dusk's and Catppuccin Latte's are too
+/// pale for the 4.5:1 text contrast on their light surfaces, and Nord Light's
+/// sits too close to `red`, which marks high. The dark palettes set `warning`
+/// to the same color as `peach`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Palette {
     accent: Color,

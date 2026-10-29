@@ -77,7 +77,10 @@
 		button.className = 'finding-line';
 		button.dataset.mireFinding = finding.id;
 		button.dataset.severity = finding.severity;
-		button.setAttribute('aria-label', `Open ${finding.severity} finding: ${finding.body}`);
+		button.setAttribute(
+			'aria-label',
+			`Open ${finding.severity} ${finding.annotationKind}, ${finding.status}: ${finding.body}`
+		);
 		const head = document.createElement('span');
 		head.className = 'finding-head';
 		const mark = document.createElement('span');

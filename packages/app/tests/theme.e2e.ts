@@ -26,7 +26,7 @@ test.describe('with a light browser and --theme iceberg', () => {
 		mire
 	}) => {
 		await open(page, mire.url);
-		const line = page.getByRole('button', { name: /Open medium finding/ });
+		const line = page.getByRole('button', { name: /Open medium defect, open: / });
 		await expect(line).toContainText('medium');
 		await expect(line).toContainText('defect · open');
 		const style = await line.evaluate((element) => {

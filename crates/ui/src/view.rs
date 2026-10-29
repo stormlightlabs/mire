@@ -200,23 +200,43 @@ fn note_line(app: &App<'_>, note_index: usize, width: u16, selected: bool, theme
     let severity = theme.severity(note.severity());
     let author = note.author().display_name().unwrap_or_else(|| note.author().id());
     let label = format!("{RULE}{MARK}{}", note.severity());
-    let details = format!(" · {} · {} · {author}  ", note.annotation_kind(), note.status());
+    let kind = note.annotation_kind().to_string();
+    let status = note.status().to_string();
     let action_width = if selected { Span::raw(ACTIONS).width() } else { 0 };
-    let mut room = usize::from(width).saturating_sub(action_width);
-    let mut spans = Vec::new();
-    for (text, style) in [
-        (label.as_str(), severity),
-        (details.as_str(), theme.muted),
-        (note.body(), Style::new().add_modifier(Modifier::ITALIC)),
-    ] {
-        let text = truncate_text(text, room);
-        room = room.saturating_sub(Span::raw(&text).width());
-        spans.push(Span::styled(text, style));
-    }
+    let room = usize::from(width).saturating_sub(action_width);
+    let label = truncate_text(&label, room);
+    let room = room.saturating_sub(Span::raw(&label).width());
+    let details = note_details(&[&kind, &status, author], note.body(), room);
+    let room = room.saturating_sub(Span::raw(&details).width());
+    let body = truncate_text(note.body(), room);
+    let mut spans = vec![
+        Span::styled(label, severity),
+        Span::styled(details, theme.muted),
+        Span::styled(body, Style::new().add_modifier(Modifier::ITALIC)),
+    ];
     if selected {
         spans.push(Span::styled(ACTIONS, theme.accent));
     }
     fit_line(spans, usize::from(width), theme.finding)
+}
+
+/// Picks the finding metadata that fits beside the body in `room` cells.
+///
+/// The body keeps at least 20 cells, or its whole width when
+/// shorter. Metadata gives way first: the last part (the author) goes, then the
+/// rest (kind and status), and only then does the body shrink.
+fn note_details(parts: &[&str], body: &str, room: usize) -> String {
+    const NOTE_BODY_MIN: usize = 20;
+    const GAP: &str = "  ";
+
+    let body_need = Span::raw(body).width().min(NOTE_BODY_MIN);
+    let candidates = [parts, &parts[..parts.len().saturating_sub(1)]];
+    candidates
+        .into_iter()
+        .filter(|kept| !kept.is_empty())
+        .map(|kept| format!(" · {}{GAP}", kept.join(" · ")))
+        .find(|details| Span::raw(details).width() + body_need <= room)
+        .unwrap_or_else(|| truncate_text(GAP, room))
 }
 
 fn render_note_editor(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Theme) {
@@ -1016,6 +1036,30 @@ new file mode 100644
         let mut filters = App::review_with_options(&review, crate::AppOptions::default());
         press(&mut filters, KeyCode::Char('f'));
         insta::assert_snapshot!("notes_filters_120x18", snapshot(filters, 120, 18));
+    }
+
+    #[test]
+    fn narrow_finding_lines_drop_metadata_before_the_body() {
+        let review = notes_review();
+        insta::assert_snapshot!(
+            "notes_inline_60x18",
+            snapshot(App::review_with_options(&review, crate::AppOptions::default()), 60, 18)
+        );
+        insta::assert_snapshot!(
+            "notes_inline_40x18",
+            snapshot(App::review_with_options(&review, crate::AppOptions::default()), 40, 18)
+        );
+    }
+
+    #[test]
+    fn finding_details_drop_author_then_kind_and_status() {
+        let parts = ["defect", "open", "reviewer"];
+        let body = "Port 8080 collides with the dev server.";
+        assert_eq!(note_details(&parts, body, 49), " · defect · open · reviewer  ");
+        assert_eq!(note_details(&parts, body, 48), " · defect · open  ");
+        assert_eq!(note_details(&parts, body, 38), " · defect · open  ");
+        assert_eq!(note_details(&parts, body, 37), "  ");
+        assert_eq!(note_details(&parts, "Short", 23), " · defect · open  ");
     }
 
     #[test]

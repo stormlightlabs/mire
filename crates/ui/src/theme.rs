@@ -34,8 +34,8 @@ const ICEBERG_DARK: Palette = Palette {
     addition_emphasis: rgb(80, 85, 70),
     yellow: rgb(226, 164, 120),
     red: rgb(226, 120, 120),
-    deletion_bg: rgb(50, 35, 43),
-    deletion_emphasis: rgb(88, 54, 61),
+    deletion_bg: rgb(83, 52, 59),
+    deletion_emphasis: rgb(110, 64, 74),
     blue: rgb(132, 160, 198),
     teal: rgb(137, 184, 194),
     peach: rgb(226, 164, 120),
@@ -47,13 +47,14 @@ const ICEBERG_DARK: Palette = Palette {
 
 /// Iceberg Dark for terminals that round to 256 colors.
 ///
-/// Iceberg's own header and added-row colors round to greys a step or two from
-/// the diff background and the removed rows. These round to a navy header and
-/// grey rows that stay apart.
+/// Iceberg's own header and diff row colors round to greys that land on one
+/// another. These round to a navy header and grey rows that stay apart.
 const ICEBERG_DARK_256: Palette = Palette {
     header: rgb(17, 20, 66),
     addition_bg: rgb(46, 49, 48),
     addition_emphasis: rgb(73, 77, 64),
+    deletion_bg: rgb(50, 35, 43),
+    deletion_emphasis: rgb(88, 54, 61),
     ..ICEBERG_DARK
 };
 
@@ -810,8 +811,10 @@ mod tests {
         assert_eq!(truecolor.addition.bg, Some(rgb(69, 73, 62)));
         assert_eq!(reduced.file.bg, Some(rgb(17, 20, 66)));
         assert_eq!(reduced.addition.bg, Some(rgb(46, 49, 48)));
+        assert_eq!(truecolor.deletion.bg, Some(rgb(83, 52, 59)));
+        assert_eq!(reduced.deletion.bg, Some(rgb(50, 35, 43)));
         assert_eq!(reduced.application, truecolor.application);
-        assert_eq!(reduced.deletion, truecolor.deletion);
+        assert_eq!(reduced.finding, truecolor.finding);
         for variant in ThemeVariant::ALL {
             if variant != ThemeVariant::IcebergDark {
                 assert_eq!(

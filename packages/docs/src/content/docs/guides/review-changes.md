@@ -184,8 +184,8 @@ dark and a light palette:
 The terminal picks the palette that matches its background, and uses the dark
 one when it cannot tell.
 
-Iceberg Dark draws a navy file heading and grey added rows in a terminal
-limited to 256 colors, where its own colors would blur together. Mire treats a
+Iceberg Dark draws a navy file heading and grey added and removed rows in a
+terminal limited to 256 colors, where its own colors would blur together. Mire treats a
 terminal as truecolor when `COLORTERM` is `truecolor` or `24bit`. Inside tmux,
 it asks tmux instead, which shows truecolor only when the outer terminal has
 the `RGB` feature.

@@ -42,7 +42,7 @@
 		viewedError: string | null;
 		/** The raw path of the generated file whose diff is open, if any. Selecting a finding opens its file. */
 		openedGenerated?: string | null;
-		/** Whether to show the path and Viewed control above the diff. Focus mode shows them in its own bar. */
+		/** Whether to show the path, the Viewed control and the diff's file header. Focus mode shows them in its own bar. */
 		showHeading?: boolean;
 		onDismissNotice?: () => void;
 		onToggleViewed: () => void;
@@ -148,7 +148,7 @@
 				</button>
 			</div>
 			<p class="diff-help">Show or collapse all available context around the captured changes.</p>
-			<DiffViewer {file} {diffStyle} {expandContext} {theme} {onFindingClick} />
+			<DiffViewer {file} {diffStyle} {expandContext} {theme} showHeader={showHeading} {onFindingClick} />
 		{/if}
 	{/if}
 </section>

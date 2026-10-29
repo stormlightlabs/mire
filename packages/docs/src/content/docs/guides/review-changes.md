@@ -162,6 +162,9 @@ reports how many lines it has; any other file reports the lines added and
 removed. Press `[` and `]`, or use the arrows beside the path, to open the
 previous or next file. A generated file keeps its Show diff button.
 
+In both views, an added or deleted file shows as plain code with one bar in
+the gutter, without tinted rows.
+
 Focus mode lasts until you leave it or reload the page. The server stores
 nothing about it, so each tab has its own.
 

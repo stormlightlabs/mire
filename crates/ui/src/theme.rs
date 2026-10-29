@@ -5,7 +5,7 @@ use mire_core::NoteSeverity;
 use ratatui::style::{Color, Modifier, Style};
 use terminal_colorsaurus::{QueryOptions, ThemeMode, theme_mode};
 
-pub use depth::ColorDepth;
+pub use depth::{ColorDepth, DepthSignals};
 pub use web::web_stylesheet;
 
 #[cfg(test)]

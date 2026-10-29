@@ -29,7 +29,7 @@ pub use live::{
 };
 pub use notes::{EditorField, EditorTarget, LineSelection, NoteEditor};
 pub use stream::{CollapseState, LayoutMode, ReviewStream, RowKind};
-pub use theme::{ColorMode, ParseThemeFamilyError, Theme, ThemeFamily, ThemeVariant, web_stylesheet};
+pub use theme::{ColorDepth, ColorMode, ParseThemeFamilyError, Theme, ThemeFamily, ThemeVariant, web_stylesheet};
 pub use view::render;
 pub use viewed::{FileViewed, ReviewWrite, ViewedChange};
 pub use walkthrough::WalkthroughPosition;

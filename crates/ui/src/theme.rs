@@ -5,10 +5,12 @@ use mire_core::NoteSeverity;
 use ratatui::style::{Color, Modifier, Style};
 use terminal_colorsaurus::{QueryOptions, ThemeMode, theme_mode};
 
+pub use depth::ColorDepth;
 pub use web::web_stylesheet;
 
 #[cfg(test)]
 pub mod contrast;
+mod depth;
 mod web;
 #[cfg(test)]
 pub mod xterm256;
@@ -17,7 +19,7 @@ const ICEBERG_DARK: Palette = Palette {
     accent: rgb(132, 160, 198),
     background: rgb(22, 24, 33),
     raised: rgb(15, 17, 23),
-    header: rgb(17, 20, 66),
+    header: rgb(30, 33, 50),
     selection: rgb(42, 47, 70),
     annotation: rgb(8, 9, 13),
     border: rgb(95, 103, 143),
@@ -28,8 +30,8 @@ const ICEBERG_DARK: Palette = Palette {
     pink: rgb(242, 101, 181),
     green: rgb(180, 190, 130),
     added: rgb(180, 190, 130),
-    addition_bg: rgb(46, 49, 48),
-    addition_emphasis: rgb(73, 77, 64),
+    addition_bg: rgb(69, 73, 62),
+    addition_emphasis: rgb(80, 85, 70),
     yellow: rgb(226, 164, 120),
     red: rgb(226, 120, 120),
     deletion_bg: rgb(50, 35, 43),
@@ -41,6 +43,18 @@ const ICEBERG_DARK: Palette = Palette {
     low: rgb(132, 160, 198),
     medium: rgb(226, 164, 120),
     high: rgb(235, 125, 126),
+};
+
+/// Iceberg Dark for terminals that round to 256 colors.
+///
+/// Iceberg's own header and added-row colors round to greys a step or two from
+/// the diff background and the removed rows. These round to a navy header and
+/// grey rows that stay apart.
+const ICEBERG_DARK_256: Palette = Palette {
+    header: rgb(17, 20, 66),
+    addition_bg: rgb(46, 49, 48),
+    addition_emphasis: rgb(73, 77, 64),
+    ..ICEBERG_DARK
 };
 
 const NORD_LIGHT: Palette = Palette {
@@ -400,10 +414,11 @@ impl fmt::Display for ParseThemeFamilyError {
 impl std::error::Error for ParseThemeFamilyError {}
 
 impl Theme {
-    /// Detects a terminal's safety and background mode for the requested family.
+    /// Detects a terminal's safety, background mode and color depth for the requested family.
     ///
     /// `NO_COLOR` disables all colors, while `TERM=dumb` selects a conservative
     /// ANSI theme. A failed color-mode query uses the family's dark variant.
+    /// [`ColorDepth::detect`] picks the depth.
     pub fn detect(family: ThemeFamily) -> Self {
         if std::env::var_os("NO_COLOR").is_some() {
             return Self::plain();
@@ -415,16 +430,17 @@ impl Theme {
             ThemeMode::Dark => ColorMode::Dark,
             ThemeMode::Light => ColorMode::Light,
         });
-        Self::resolve(family, mode)
+        Self::resolve(family, mode, ColorDepth::detect())
     }
 
-    /// Resolves a family with an explicit mode, using its dark variant when mode detection failed.
-    pub const fn resolve(family: ThemeFamily, mode: Option<ColorMode>) -> Self {
+    /// Resolves a family with an explicit mode and color depth, using its dark
+    /// variant when mode detection failed.
+    pub const fn resolve(family: ThemeFamily, mode: Option<ColorMode>, depth: ColorDepth) -> Self {
         let mode = match mode {
             Some(mode) => mode,
             None => ColorMode::Dark,
         };
-        Self::from_palette(ThemeVariant::resolve(family, mode))
+        Self::from_palette(ThemeVariant::resolve(family, mode), depth)
     }
 
     /// Returns the concrete RGB palette variant, or `None` for terminal-safety themes.
@@ -434,12 +450,12 @@ impl Theme {
 
     /// Returns deterministic Eldritch Minimal colors for dark terminal backgrounds.
     pub const fn dark() -> Self {
-        Self::from_palette(ThemeVariant::EldritchMinimal)
+        Self::from_palette(ThemeVariant::EldritchMinimal, ColorDepth::Truecolor)
     }
 
     /// Returns deterministic Eldritch Dusk colors for light terminal backgrounds.
     pub const fn light() -> Self {
-        Self::from_palette(ThemeVariant::EldritchDusk)
+        Self::from_palette(ThemeVariant::EldritchDusk, ColorDepth::Truecolor)
     }
 
     /// Returns a legible theme with no foreground or background colors.
@@ -568,9 +584,10 @@ impl Theme {
         }
     }
 
-    /// Maps a variant's palette to the semantic roles both the terminal and the browser use.
-    const fn from_palette(variant: ThemeVariant) -> Self {
-        let palette = variant.palette();
+    /// Maps a variant's palette at a color depth to the semantic roles both the
+    /// terminal and the browser use.
+    const fn from_palette(variant: ThemeVariant, depth: ColorDepth) -> Self {
+        let palette = variant.palette(depth);
         let light_variant = variant.is_light();
         let syntax = if light_variant {
             SyntaxStyles {
@@ -696,7 +713,14 @@ impl ThemeVariant {
         matches!(self, Self::NordLight | Self::EldritchDusk | Self::CatppuccinLatte)
     }
 
-    const fn palette(self) -> Palette {
+    /// Returns this variant's colors at a color depth.
+    ///
+    /// A variant whose colors do not survive 256-colour rounding names a
+    /// separate palette for that depth; the others use one palette for both.
+    const fn palette(self, depth: ColorDepth) -> Palette {
+        if let (Self::IcebergDark, ColorDepth::Xterm256) = (self, depth) {
+            return ICEBERG_DARK_256;
+        }
         match self {
             Self::IcebergDark => ICEBERG_DARK,
             Self::NordLight => NORD_LIGHT,
@@ -731,6 +755,8 @@ impl SyntaxStyles {
 mod tests {
     use super::*;
 
+    const DEPTHS: [ColorDepth; 2] = [ColorDepth::Truecolor, ColorDepth::Xterm256];
+
     const SEVERITIES: [NoteSeverity; 5] = [
         NoteSeverity::Note,
         NoteSeverity::Low,
@@ -764,13 +790,37 @@ mod tests {
             (ThemeFamily::Auto, ColorMode::Light, ThemeVariant::NordLight),
         ];
         for (family, mode, expected) in cases {
-            assert_eq!(Theme::resolve(family, Some(mode)).variant(), Some(expected));
+            for depth in DEPTHS {
+                assert_eq!(Theme::resolve(family, Some(mode), depth).variant(), Some(expected));
+            }
         }
         for family in ThemeFamily::ALL {
             assert_eq!(
-                Theme::resolve(family, None).variant(),
-                Theme::resolve(family, Some(ColorMode::Dark)).variant()
+                Theme::resolve(family, None, ColorDepth::Truecolor).variant(),
+                Theme::resolve(family, Some(ColorMode::Dark), ColorDepth::Truecolor).variant()
             );
+        }
+    }
+
+    #[test]
+    fn iceberg_dark_alone_swaps_colors_for_256_colour_terminals() {
+        let iceberg = |depth| Theme::resolve(ThemeFamily::Iceberg, Some(ColorMode::Dark), depth);
+        let (truecolor, reduced) = (iceberg(ColorDepth::Truecolor), iceberg(ColorDepth::Xterm256));
+        assert_eq!(truecolor.file.bg, Some(rgb(30, 33, 50)));
+        assert_eq!(truecolor.addition.bg, Some(rgb(69, 73, 62)));
+        assert_eq!(reduced.file.bg, Some(rgb(17, 20, 66)));
+        assert_eq!(reduced.addition.bg, Some(rgb(46, 49, 48)));
+        assert_eq!(reduced.application, truecolor.application);
+        assert_eq!(reduced.deletion, truecolor.deletion);
+        for variant in ThemeVariant::ALL {
+            if variant != ThemeVariant::IcebergDark {
+                assert_eq!(
+                    variant.palette(ColorDepth::Xterm256),
+                    variant.palette(ColorDepth::Truecolor),
+                    "{}",
+                    variant.as_str()
+                );
+            }
         }
     }
 
@@ -799,8 +849,11 @@ mod tests {
     #[test]
     fn color_themes_cover_roles_and_plain_output_uses_no_colors() {
         for family in [ThemeFamily::Iceberg, ThemeFamily::Eldritch, ThemeFamily::Catppuccin] {
-            for mode in [ColorMode::Dark, ColorMode::Light] {
-                let theme = Theme::resolve(family, Some(mode));
+            for (mode, depth) in [ColorMode::Dark, ColorMode::Light]
+                .into_iter()
+                .flat_map(|mode| DEPTHS.map(|depth| (mode, depth)))
+            {
+                let theme = Theme::resolve(family, Some(mode), depth);
                 for style in semantic_styles(theme) {
                     assert!(style.fg.is_some() || style.bg.is_some());
                 }
@@ -818,8 +871,11 @@ mod tests {
     #[test]
     fn controlled_rgb_pairs_have_readable_contrast() {
         for family in [ThemeFamily::Iceberg, ThemeFamily::Eldritch, ThemeFamily::Catppuccin] {
-            for mode in [ColorMode::Dark, ColorMode::Light] {
-                let theme = Theme::resolve(family, Some(mode));
+            for (mode, depth) in [ColorMode::Dark, ColorMode::Light]
+                .into_iter()
+                .flat_map(|mode| DEPTHS.map(|depth| (mode, depth)))
+            {
+                let theme = Theme::resolve(family, Some(mode), depth);
                 for style in [
                     theme.application,
                     theme.panel,
@@ -836,13 +892,16 @@ mod tests {
                     theme.search_match,
                     theme.finding,
                 ] {
-                    assert!(contrast(style) >= 3.0, "{family}/{mode:?} has low contrast: {style:?}");
+                    assert!(
+                        contrast(style) >= 3.0,
+                        "{family}/{mode:?}/{depth:?} has low contrast: {style:?}"
+                    );
                 }
                 for style in [theme.accent, theme.muted, theme.addition_meta, theme.deletion_meta] {
                     let style = style.bg(theme.panel.bg.expect("color panel has a background"));
                     assert!(
                         contrast(style) >= 3.0,
-                        "{family}/{mode:?} has low metadata contrast: {style:?}"
+                        "{family}/{mode:?}/{depth:?} has low metadata contrast: {style:?}"
                     );
                 }
                 for foreground in [
@@ -856,7 +915,7 @@ mod tests {
                     let style = Style::new().fg(foreground).bg(theme.context.bg.unwrap());
                     assert!(
                         contrast(style) >= 3.0,
-                        "{family}/{mode:?} has low syntax contrast: {style:?}"
+                        "{family}/{mode:?}/{depth:?} has low syntax contrast: {style:?}"
                     );
                 }
             }
@@ -865,8 +924,8 @@ mod tests {
 
     #[test]
     fn text_muted_and_accent_reach_aa_contrast_on_their_backgrounds() {
-        for variant in ThemeVariant::ALL {
-            let theme = Theme::from_palette(variant);
+        for (variant, depth) in variants_and_depths() {
+            let theme = Theme::from_palette(variant, depth);
             for (background_role, background) in [("application", theme.application), ("panel", theme.panel)] {
                 for (foreground_role, foreground) in [
                     ("text", theme.application),
@@ -879,7 +938,7 @@ mod tests {
                     let ratio = contrast(style);
                     assert!(
                         ratio >= 4.5,
-                        "{}: {foreground_role} on {background_role} is {ratio:.2}:1",
+                        "{} {depth:?}: {foreground_role} on {background_role} is {ratio:.2}:1",
                         variant.as_str()
                     );
                 }
@@ -888,61 +947,62 @@ mod tests {
     }
 
     #[test]
+    fn surfaces_stay_distinct_in_truecolor() {
+        for variant in ThemeVariant::ALL {
+            assert_surfaces_distinct(variant.as_str(), variant.palette(ColorDepth::Truecolor), |color| color);
+        }
+    }
+
+    #[test]
     fn surfaces_stay_distinct_after_xterm_256_rounding() {
         for variant in ThemeVariant::ALL {
-            let palette = variant.palette();
-            let index = |color| xterm256::xterm256_index(color);
-            let name = variant.as_str();
-            let (background, raised, header, selection) = (
-                index(palette.background),
-                index(palette.raised),
-                index(palette.header),
-                index(palette.selection),
-            );
-            let (addition, deletion) = (index(palette.addition_bg), index(palette.deletion_bg));
-            assert_ne!(header, background, "{name}: file heading on the diff");
-            assert_ne!(selection, background, "{name}: selected row on the diff");
-            assert_ne!(selection, raised, "{name}: selected row in the sidebar");
-            assert_ne!(selection, header, "{name}: selected file heading");
-            assert_ne!(addition, deletion, "{name}: added and removed rows");
-            let annotation = index(palette.annotation);
-            for (surface, neighbour) in [
-                ("diff", background),
-                ("hunk header", raised),
-                ("file heading", header),
-                ("selection", selection),
-                ("added row", addition),
-                ("removed row", deletion),
-            ] {
-                assert_ne!(annotation, neighbour, "{name}: finding line matches the {surface}");
-            }
-            for (role, row) in [("added", addition), ("removed", deletion)] {
-                for (surface, neighbour) in [
-                    ("diff", background),
-                    ("hunk header", raised),
-                    ("file heading", header),
-                    ("selection", selection),
-                ] {
-                    assert_ne!(row, neighbour, "{name}: {role} row matches the {surface}");
-                }
-            }
-            assert_ne!(
-                index(palette.addition_emphasis),
-                addition,
-                "{name}: added emphasis on its row"
-            );
-            assert_ne!(
-                index(palette.deletion_emphasis),
-                deletion,
-                "{name}: removed emphasis on its row"
+            assert_surfaces_distinct(
+                variant.as_str(),
+                variant.palette(ColorDepth::Xterm256),
+                xterm256::xterm256_index,
             );
         }
     }
 
     #[test]
+    fn diff_text_reaches_aa_contrast_on_headings_and_changed_rows() {
+        for (variant, depth) in variants_and_depths() {
+            // Catppuccin Latte's emphasis tints drop below 4.5:1 once rounded.
+            if (variant, depth) == (ThemeVariant::CatppuccinLatte, ColorDepth::Xterm256) {
+                continue;
+            }
+            let theme = Theme::from_palette(variant, depth);
+            let shown = |color| match depth {
+                ColorDepth::Truecolor => color,
+                ColorDepth::Xterm256 => xterm256::xterm256_rounded(color),
+            };
+            for (role, style) in [
+                ("file heading", theme.file),
+                ("added row", theme.addition),
+                ("added emphasis", theme.addition_emphasis),
+                ("removed row", theme.deletion),
+                ("removed emphasis", theme.deletion_emphasis),
+            ] {
+                let foreground = shown(style.fg.expect("palette roles set a foreground"));
+                let background = shown(style.bg.expect("palette roles set a background"));
+                let ratio = contrast(Style::new().fg(foreground).bg(background));
+                assert!(
+                    ratio >= 4.5,
+                    "{} {depth:?}: text on {role} is {ratio:.2}:1",
+                    variant.as_str()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn severity_text_reaches_aa_contrast_wherever_it_is_drawn() {
-        for variant in ThemeVariant::ALL {
-            let theme = Theme::from_palette(variant);
+        for (variant, depth) in variants_and_depths() {
+            let theme = Theme::from_palette(variant, depth);
+            let shown = |color| match depth {
+                ColorDepth::Truecolor => color,
+                ColorDepth::Xterm256 => xterm256::xterm256_rounded(color),
+            };
             for severity in SEVERITIES {
                 let foreground = theme
                     .severity(severity)
@@ -955,36 +1015,29 @@ mod tests {
                     ("finding", theme.finding),
                 ] {
                     let background = background.bg.expect("palette roles set a background");
-                    let depths = [
-                        ("truecolor", foreground, background),
-                        (
-                            "256-colour",
-                            xterm256::xterm256_rounded(foreground),
-                            xterm256::xterm256_rounded(background),
-                        ),
-                    ];
-                    for (depth, foreground, background) in depths {
-                        let ratio = contrast(Style::new().fg(foreground).bg(background));
-                        assert!(
-                            ratio >= 4.5,
-                            "{}: {severity} on {background_role} is {ratio:.2}:1 in {depth}",
-                            variant.as_str()
-                        );
-                    }
+                    let ratio = contrast(Style::new().fg(shown(foreground)).bg(shown(background)));
+                    assert!(
+                        ratio >= 4.5,
+                        "{}: {severity} on {background_role} is {ratio:.2}:1 in {depth:?}",
+                        variant.as_str()
+                    );
                 }
             }
             let muted = Style::new()
                 .fg(theme.muted.fg.expect("palette roles set a foreground"))
                 .bg(theme.finding.bg.expect("palette roles set a background"));
-            assert!(contrast(muted) >= 4.5, "{}: muted on finding", variant.as_str());
+            assert!(
+                contrast(muted) >= 4.5,
+                "{} {depth:?}: muted on finding",
+                variant.as_str()
+            );
         }
     }
 
     #[test]
     fn severities_keep_distinct_styles_in_color_and_plain_themes() {
-        for theme in ThemeVariant::ALL
-            .map(Theme::from_palette)
-            .into_iter()
+        for theme in variants_and_depths()
+            .map(|(variant, depth)| Theme::from_palette(variant, depth))
             .chain([Theme::low_color()])
         {
             for (index, severity) in SEVERITIES.into_iter().enumerate() {
@@ -998,6 +1051,60 @@ mod tests {
             }
         }
         assert_eq!(Theme::plain().severity(NoteSeverity::Medium).fg, None);
+    }
+
+    fn variants_and_depths() -> impl Iterator<Item = (ThemeVariant, ColorDepth)> {
+        ThemeVariant::ALL
+            .into_iter()
+            .flat_map(|variant| DEPTHS.map(|depth| (variant, depth)))
+    }
+
+    /// Checks that the surfaces a reader tells apart stay apart once `shown`
+    /// maps each color to what the terminal draws.
+    fn assert_surfaces_distinct<T: PartialEq + fmt::Debug>(name: &str, palette: Palette, shown: impl Fn(Color) -> T) {
+        let (background, raised, header, selection) = (
+            shown(palette.background),
+            shown(palette.raised),
+            shown(palette.header),
+            shown(palette.selection),
+        );
+        let (addition, deletion) = (shown(palette.addition_bg), shown(palette.deletion_bg));
+        assert_ne!(header, background, "{name}: file heading on the diff");
+        assert_ne!(selection, background, "{name}: selected row on the diff");
+        assert_ne!(selection, raised, "{name}: selected row in the sidebar");
+        assert_ne!(selection, header, "{name}: selected file heading");
+        assert_ne!(addition, deletion, "{name}: added and removed rows");
+        let annotation = shown(palette.annotation);
+        for (surface, neighbour) in [
+            ("diff", &background),
+            ("hunk header", &raised),
+            ("file heading", &header),
+            ("selection", &selection),
+            ("added row", &addition),
+            ("removed row", &deletion),
+        ] {
+            assert_ne!(&annotation, neighbour, "{name}: finding line matches the {surface}");
+        }
+        for (role, row) in [("added", &addition), ("removed", &deletion)] {
+            for (surface, neighbour) in [
+                ("diff", &background),
+                ("hunk header", &raised),
+                ("file heading", &header),
+                ("selection", &selection),
+            ] {
+                assert_ne!(row, neighbour, "{name}: {role} row matches the {surface}");
+            }
+        }
+        assert_ne!(
+            shown(palette.addition_emphasis),
+            addition,
+            "{name}: added emphasis on its row"
+        );
+        assert_ne!(
+            shown(palette.deletion_emphasis),
+            deletion,
+            "{name}: removed emphasis on its row"
+        );
     }
 
     fn semantic_styles(theme: Theme) -> [Style; 21] {

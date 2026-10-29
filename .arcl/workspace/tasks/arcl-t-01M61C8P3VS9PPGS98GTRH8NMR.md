@@ -2,7 +2,7 @@
 id = "arcl-t-01M61C8P3VS9PPGS98GTRH8NMR"
 plan = "arcl-pl-01M5YRTHS95J67NZ6THREDG33F"
 title = "Separate truecolor and 256-colour colours for Iceberg Dark"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 0
 +++

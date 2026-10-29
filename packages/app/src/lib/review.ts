@@ -84,6 +84,14 @@ export function shownViewState(files: FileSummary[], shown: Pick<FileDetail, 'id
 	return summary ? fileViewState({ id: shown.id, viewed: summary.viewed }) : 'unviewed';
 }
 
+/**
+ * Reports whether a file was added or deleted whole. Such a diff reads as plain
+ * code, with the gutter bar marking every line, rather than as tinted rows.
+ */
+export function isWholeFileChange(status: string): boolean {
+	return status === 'added' || status === 'deleted';
+}
+
 /** Returns the viewed route for a path. */
 export function viewedRoute(path: PathText): string {
 	return `/api/v1/viewed?path=${path.raw}`;

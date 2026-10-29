@@ -6,6 +6,7 @@ import {
 	firstFile,
 	hasReviewMetadata,
 	isShownFile,
+	isWholeFileChange,
 	reopenedFile,
 	reviewDescription,
 	reviewTitle,
@@ -192,5 +193,14 @@ describe('review metadata', () => {
 		expect(hasReviewMetadata({ title: '  ', description: '\n' })).toBe(false);
 		expect(hasReviewMetadata({ title: 'Add caching', description: null })).toBe(true);
 		expect(hasReviewMetadata({ title: null, description: 'Body' })).toBe(true);
+	});
+});
+
+describe('isWholeFileChange', () => {
+	it('holds for added and deleted files only', () => {
+		expect(isWholeFileChange('added')).toBe(true);
+		expect(isWholeFileChange('deleted')).toBe(true);
+		expect(isWholeFileChange('modified')).toBe(false);
+		expect(isWholeFileChange('renamed')).toBe(false);
 	});
 });

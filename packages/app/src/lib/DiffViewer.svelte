@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { FileDiff, type DiffLineAnnotation, type FileDiffMetadata, type Hunk } from '@pierre/diffs';
 	import { onMount } from 'svelte';
-	import type { FileDetail, FindingSummary, SemanticHunk } from './review';
+	import { isWholeFileChange, type FileDetail, type FindingSummary, type SemanticHunk } from './review';
 	import type { Theme } from './theme';
 
 	let {
@@ -9,14 +9,26 @@
 		diffStyle,
 		expandContext,
 		theme,
+		showHeader = true,
 		onFindingClick
 	}: {
 		file: FileDetail;
 		diffStyle: 'unified' | 'split';
 		expandContext: boolean;
 		theme: Theme;
+		/** Whether to draw the file name and line counts above the diff. Focus mode names the file in its own bar. */
+		showHeader?: boolean;
 		onFindingClick: (finding: FindingSummary) => void;
 	} = $props();
+
+	/**
+	 * Rows have fractional heights, so each row's gutter bar can leave a
+	 * one-pixel seam below it. Running a bar one pixel into the next row draws
+	 * a run of changed rows as one continuous bar; the next row's own bar paints
+	 * over the overlap. The last row of a run stops at its own edge, so the bar
+	 * does not reach into the unchanged row below.
+	 */
+	const GUTTER_CSS = `[data-indicators='bars'] [data-column-number]:has(+ [data-column-number][data-line-type^='change-'])::before { height: calc(100% + 1px); }`;
 
 	let host = $state<HTMLElement>();
 	let viewer: FileDiff<FindingSummary> | undefined;
@@ -38,6 +50,10 @@
 			theme: { light: 'github-light', dark: 'github-dark' },
 			themeType: theme,
 			diffStyle,
+			disableFileHeader: !showHeader,
+			unsafeCSS: GUTTER_CSS,
+			// A whole-file addition or deletion reads as plain code, with only the gutter bar marking it.
+			disableBackground: isWholeFileChange(file.status),
 			hunkSeparators: 'line-info' as const,
 			overflow: 'scroll' as const,
 			expandUnchanged: expandContext,

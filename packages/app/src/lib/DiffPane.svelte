@@ -22,6 +22,7 @@
 		viewState,
 		viewedError,
 		openedGenerated = $bindable(null),
+		showHeading = true,
 		onDismissNotice = () => {},
 		onToggleViewed,
 		onFindingClick,
@@ -41,6 +42,8 @@
 		viewedError: string | null;
 		/** The raw path of the generated file whose diff is open, if any. Selecting a finding opens its file. */
 		openedGenerated?: string | null;
+		/** Whether to show the path, the Viewed control and the diff's file header. Focus mode shows them in its own bar. */
+		showHeading?: boolean;
 		onDismissNotice?: () => void;
 		onToggleViewed: () => void;
 		onFindingClick: (finding: FindingSummary) => void;
@@ -81,23 +84,25 @@
 			<p>The review has no file diffs to show.</p>
 		</section>
 	{:else}
-		<header class="diff-heading">
-			<div>
-				<span class="eyebrow">{file.status}{file.generated ? ' · generated' : ''}</span>
-				<h1>{formatPath(file.path)}</h1>
-			</div>
-			{#if file.oldPath && file.oldPath.display !== file.path.display}
-				<span class="renamed">from {formatPath(file.oldPath)}</span>
-			{/if}
-			<button
-				class="viewed-toggle"
-				class:viewed={viewState === 'viewed'}
-				aria-pressed={viewState === 'viewed'}
-				onclick={onToggleViewed}>
-				<span class={viewState === 'viewed' ? 'i-lucide-square-check' : 'i-lucide-square'}></span>
-				{viewState === 'changed' ? 'Changed since viewed' : 'Viewed'}
-			</button>
-		</header>
+		{#if showHeading}
+			<header class="diff-heading">
+				<div>
+					<span class="eyebrow">{file.status}{file.generated ? ' · generated' : ''}</span>
+					<h1>{formatPath(file.path)}</h1>
+				</div>
+				{#if file.oldPath && file.oldPath.display !== file.path.display}
+					<span class="renamed">from {formatPath(file.oldPath)}</span>
+				{/if}
+				<button
+					class="viewed-toggle"
+					class:viewed={viewState === 'viewed'}
+					aria-pressed={viewState === 'viewed'}
+					onclick={onToggleViewed}>
+					<span class={viewState === 'viewed' ? 'i-lucide-square-check' : 'i-lucide-square'}></span>
+					{viewState === 'changed' ? 'Changed since viewed' : 'Viewed'}
+				</button>
+			</header>
+		{/if}
 		{#if viewedError}<p class="finding-error" role="alert">{viewedError}</p>{/if}
 
 		{#if activeFinding}
@@ -143,7 +148,7 @@
 				</button>
 			</div>
 			<p class="diff-help">Show or collapse all available context around the captured changes.</p>
-			<DiffViewer {file} {diffStyle} {expandContext} {theme} {onFindingClick} />
+			<DiffViewer {file} {diffStyle} {expandContext} {theme} showHeader={showHeading} {onFindingClick} />
 		{/if}
 	{/if}
 </section>

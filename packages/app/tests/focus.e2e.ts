@@ -196,6 +196,122 @@ test('shortcuts leave the page alone while a dialog is open', async ({ page, mir
 	await expect(header.getByRole('button', { name: 'Leave focus' })).toHaveCount(0);
 });
 
+test('in focus mode a dialog keeps its keys and Esc only closes it', async ({ page, mire }) => {
+	await page.goto(mire.url);
+	const header = page.getByRole('banner');
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await expect(header).toContainText('revision 3');
+
+	// A save that loses a revision race opens the Review changed dialog, which focus mode can reach.
+	await page.route('**/api/v1/findings/*', (route) =>
+		route.request().method() === 'PATCH'
+			? route.fulfill({
+					status: 409,
+					contentType: 'application/json',
+					body: JSON.stringify({ code: 'revision_conflict', actualRevision: 4, detail: 'The review changed.' })
+				})
+			: route.continue()
+	);
+	await page.keyboard.press('b');
+	const leave = header.getByRole('button', { name: 'Leave focus' });
+	await expect(leave).toBeVisible();
+	await page.keyboard.press('j');
+	await diff.getByRole('button', { name: 'Save edit' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Review changed' });
+	await expect(dialog).toBeVisible();
+	const heading = await header.getByRole('heading', { level: 1 }).textContent();
+
+	await dialog.getByRole('heading', { name: 'Review changed' }).click();
+	for (const key of ['b', ']', '[']) await page.keyboard.press(key);
+	await expect(dialog).toBeVisible();
+	await expect(leave).toBeVisible();
+	await expect(header.getByRole('heading', { level: 1 })).toHaveText(heading ?? '');
+
+	await page.keyboard.press('Escape');
+	await expect(dialog).toBeHidden();
+	await expect(leave).toBeVisible();
+});
+
+test('focus mode keeps the diff layout and an unsaved draft', async ({ page, mire }) => {
+	await page.goto(mire.url);
+	const header = page.getByRole('banner');
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await expect(header).toContainText('revision 3');
+
+	const split = diff.getByRole('button', { name: 'Split' });
+	await split.click();
+	await expect(split).toHaveAttribute('aria-pressed', 'true');
+	await page.keyboard.press('j');
+	const draft = diff.getByRole('textbox', { name: 'Finding' });
+	await draft.fill('unsaved draft');
+	await diff.getByRole('button', { name: 'Unified' }).focus();
+
+	await page.keyboard.press('b');
+	await expect(header.getByRole('button', { name: 'Leave focus' })).toBeVisible();
+	await expect(split).toHaveAttribute('aria-pressed', 'true');
+	await expect(draft).toHaveValue('unsaved draft');
+
+	await page.keyboard.press('Escape');
+	await expect(page.getByRole('tree', { name: 'Changed file tree' })).toBeVisible();
+	await expect(split).toHaveAttribute('aria-pressed', 'true');
+	await expect(draft).toHaveValue('unsaved draft');
+});
+
+test('[ and ] work with AltGr and Option but not with Ctrl', async ({ page, mire }) => {
+	await page.goto(mire.url);
+	const header = page.getByRole('banner');
+	await expect(header).toContainText('revision 3');
+	await page.keyboard.press('b');
+	const heading = header.getByRole('heading', { level: 1 });
+	await expect(heading).toHaveText('one.txt');
+
+	// Windows reports AltGr as Ctrl+Alt; macOS Option layouts report Alt.
+	await page.keyboard.press('Control+Alt+]');
+	await expect(heading).toHaveText('two.txt');
+	await page.keyboard.press('Alt+[');
+	await expect(heading).toHaveText('one.txt');
+	await page.keyboard.press('Alt+]');
+	await expect(heading).toHaveText('two.txt');
+
+	// Ctrl alone and held keys leave the page alone.
+	await page.keyboard.press('Control+[');
+	await expect(heading).toHaveText('two.txt');
+	await page.evaluate(() =>
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', repeat: true, bubbles: true }))
+	);
+	await page.evaluate(() =>
+		window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', repeat: true, bubbles: true }))
+	);
+	await expect(header.getByRole('button', { name: 'Leave focus' })).toBeVisible();
+});
+
+test('a second Viewed click waits for the first to land', async ({ page, mire }) => {
+	await page.goto(mire.url);
+	const header = page.getByRole('banner');
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await expect(header).toContainText('revision 3');
+
+	const marks: string[] = [];
+	await page.route('**/api/v1/viewed**', async (route) => {
+		marks.push(route.request().method());
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		await route.continue();
+	});
+	await page.keyboard.press('b');
+	await expect(diff).toHaveAttribute('aria-busy', 'false');
+	const viewed = header.getByRole('checkbox', { name: 'Viewed' });
+	await viewed.click();
+	await viewed.click();
+	await expect(viewed).toBeChecked();
+	await page.waitForTimeout(500);
+	expect(marks).toEqual(['PUT']);
+
+	// Once the mark lands, the box takes clicks again.
+	await viewed.click();
+	await expect(viewed).not.toBeChecked();
+	expect(marks).toEqual(['PUT', 'DELETE']);
+});
+
 test('a renamed file in focus mode shows its old path', async ({ page, mire }) => {
 	// Rename two.txt with its committed content, and mark the new path intent-to-add
 	// so the working tree diff pairs the two as a rename.

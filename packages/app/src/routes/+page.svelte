@@ -73,6 +73,11 @@
 	let fileRevision = 0;
 	/** Counts file loads, so only the newest one replaces the shown file. */
 	let fileLoads = 0;
+	/**
+	 * Whether a viewed mark is being saved. Clicks wait for the reload that
+	 * follows it, so a second click acts on the saved state, not a stale one.
+	 */
+	let viewedPending = false;
 	/** Orders overview loads, so a slow response cannot overwrite a newer one. */
 	const overviewLoads = new OverviewLoads();
 
@@ -280,7 +285,8 @@
 	 * overview has moved on while a reload of the file is in flight.
 	 */
 	async function toggleViewed() {
-		if (!review || !file) return;
+		if (!review || !file || viewedPending) return;
+		viewedPending = true;
 		viewedError = null;
 		const shown = file;
 		const route = viewedRoute(shown.path);
@@ -298,7 +304,11 @@
 		} catch (cause) {
 			viewedError = handleErr(cause, 'The viewed mark could not be saved.');
 		}
-		await reloadReview(false);
+		try {
+			await reloadReview(false);
+		} finally {
+			viewedPending = false;
+		}
 	}
 
 	/**
@@ -434,9 +444,19 @@
 	}
 
 	function onKeydown(event: KeyboardEvent) {
-		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+		if (event.defaultPrevented || event.metaKey) return;
 		const target = event.target;
 		if (takesText(target)) return;
+		// [ and ] need AltGr or Option on many layouts, so only those two keys accept Alt.
+		// Windows reports AltGr as Ctrl+Alt, so Ctrl counts only without Alt.
+		if (event.key === '[' || event.key === ']') {
+			if (event.ctrlKey && !event.altKey && !event.getModifierState('AltGraph')) return;
+			if (!review || inDialog(target)) return;
+			event.preventDefault();
+			moveFile(event.key === ']' ? 1 : -1);
+			return;
+		}
+		if (event.ctrlKey || event.altKey) return;
 		if (event.key === 'j') {
 			event.preventDefault();
 			navigateQueue(1);
@@ -447,20 +467,20 @@
 			return;
 		}
 		// An open dialog takes Esc for itself, and the page behind it stays as it is.
-		if (!review || (target instanceof Element && target.closest('dialog'))) return;
-		if (event.key === ']') {
+		if (!review || inDialog(target)) return;
+		if (event.key === 'b') {
 			event.preventDefault();
-			moveFile(1);
-		} else if (event.key === '[') {
-			event.preventDefault();
-			moveFile(-1);
-		} else if (event.key === 'b') {
-			event.preventDefault();
-			void setFocused(!focused);
+			// A held key would flip focus mode on every repeat.
+			if (!event.repeat) void setFocused(!focused);
 		} else if (event.key === 'Escape' && focused) {
 			event.preventDefault();
-			void setFocused(false);
+			if (!event.repeat) void setFocused(false);
 		}
+	}
+
+	/** Whether a key event started inside an open dialog, which owns its keys. */
+	function inDialog(target: EventTarget | null) {
+		return target instanceof Element && target.closest('dialog') !== null;
 	}
 
 	function scrollToFinding(id: string) {
@@ -603,7 +623,11 @@
 				<h1>Loading review</h1>
 				<p>Reading the local review file.</p>
 			</section>
-		{:else if isNarrow || inFocus}
+		{:else}
+			<!-- One DiffPane stays mounted across layouts, so its Split, Expand, scroll and draft state survive focus mode. -->
+			{#if !isNarrow && !inFocus}
+				<FileNavigator files={review.files} {activeFile} onSelect={chooseFile} />
+			{/if}
 			<DiffPane
 				{file}
 				{fileError}
@@ -621,30 +645,14 @@
 				onFindingClick={selectFinding}
 				onEditFinding={editFinding}
 				onDecideFinding={decideFinding} />
-		{:else}
-			<FileNavigator files={review.files} {activeFile} onSelect={chooseFile} />
-			<DiffPane
-				{file}
-				{fileError}
-				{fileLoading}
-				{notice}
-				{activeFinding}
-				{findingError}
-				{theme}
-				viewState={shownView}
-				{viewedError}
-				bind:openedGenerated
-				onDismissNotice={() => (notice = null)}
-				onToggleViewed={toggleViewed}
-				onFindingClick={selectFinding}
-				onEditFinding={editFinding}
-				onDecideFinding={decideFinding} />
-			<FindingQueue
-				findings={visibleFindings}
-				activeFindingId={activeFinding?.id ?? null}
-				openCount={review.totals.open}
-				bind:filters
-				onSelect={selectFinding} />
+			{#if !isNarrow && !inFocus}
+				<FindingQueue
+					findings={visibleFindings}
+					activeFindingId={activeFinding?.id ?? null}
+					openCount={review.totals.open}
+					bind:filters
+					onSelect={selectFinding} />
+			{/if}
 		{/if}
 	</main>
 	{#if inFocus}

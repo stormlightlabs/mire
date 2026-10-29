@@ -184,6 +184,18 @@ dark and a light palette:
 The terminal picks the palette that matches its background, and uses the dark
 one when it cannot tell.
 
+Iceberg Dark draws a navy file heading and grey added and removed rows in a
+terminal limited to 256 colors, where its own colors would blur together.
+Mire treats a terminal as truecolor when `COLORTERM` is `truecolor` or
+`24bit`. Inside tmux, it asks tmux instead, and uses truecolor only when every
+terminal attached to the session has the `RGB` feature, since tmux rounds
+colors for each one that lacks it. If tmux takes longer than 200 ms to answer,
+Mire goes on without it and does not say so. Inside GNU screen (`STY` is
+set), it uses 256 colors, since screen 4.x rounds colors and still passes
+`COLORTERM` through. Set `MIRE_COLOR_DEPTH` to `truecolor` or `256` to skip
+detection, for example when a slow tmux leaves the wrong palette. Mire ignores
+any other value.
+
 `mire serve` takes the same flag. The browser review follows the browser's
 light or dark color scheme, and the header button switches between the two.
 The browser saves the button's choice for the server's address and stops

@@ -13,10 +13,17 @@ use crate::chrome::{
     diff_stats, file_path, fit_line, render_footer, render_help, render_sidebar, render_sidebar_divider, render_title,
     truncate_text,
 };
+use crate::description::single_line;
 use crate::stream::TextRange;
 use crate::stream::{ReviewStream, RowKey};
 use crate::theme::Theme;
 use crate::walkthrough::render_walkthrough;
+
+/// Cells a finding's body keeps before its metadata or actions, or its whole
+/// width when shorter.
+const NOTE_BODY_MIN: usize = 20;
+/// Space between a finding's metadata and its body.
+const NOTE_GAP: &str = "  ";
 
 #[derive(Clone, Copy)]
 struct SourcePosition {
@@ -190,7 +197,6 @@ fn row_line<'a>(
 }
 
 fn note_line(app: &App<'_>, note_index: usize, width: u16, selected: bool, theme: &Theme) -> Line<'static> {
-    const ACTIONS: &str = " [e][o][r][d][a]";
     const RULE: &str = "▌ ";
     const MARK: &str = "● ";
 
@@ -198,26 +204,41 @@ fn note_line(app: &App<'_>, note_index: usize, width: u16, selected: bool, theme
         return Line::styled("  unavailable finding", theme.error);
     };
     let severity = theme.severity(note.severity());
-    let author = note.author().display_name().unwrap_or_else(|| note.author().id());
+    let author = single_line(note.author().display_name().unwrap_or_else(|| note.author().id()));
+    let body = single_line(note.body());
     let label = format!("{RULE}{MARK}{}", note.severity());
-    let kind = note.annotation_kind().to_string();
+    let kind = single_line(&note.annotation_kind().to_string());
     let status = note.status().to_string();
-    let action_width = if selected { Span::raw(ACTIONS).width() } else { 0 };
-    let room = usize::from(width).saturating_sub(action_width);
-    let label = truncate_text(&label, room);
-    let room = room.saturating_sub(Span::raw(&label).width());
-    let details = note_details(&[&kind, &status, author], note.body(), room);
+    let label = truncate_text(&label, usize::from(width));
+    let room = usize::from(width).saturating_sub(Span::raw(&label).width());
+    let actions = if selected { note_actions(&body, room) } else { "" };
+    let room = room.saturating_sub(Span::raw(actions).width());
+    let details = note_details(&[&kind, &status, &author], &body, room);
     let room = room.saturating_sub(Span::raw(&details).width());
-    let body = truncate_text(note.body(), room);
+    let body = truncate_text(&body, room);
     let mut spans = vec![
         Span::styled(label, severity),
         Span::styled(details, theme.muted),
         Span::styled(body, Style::new().add_modifier(Modifier::ITALIC)),
     ];
-    if selected {
-        spans.push(Span::styled(ACTIONS, theme.accent));
+    if !actions.is_empty() {
+        spans.push(Span::styled(actions, theme.accent));
     }
     fit_line(spans, usize::from(width), theme.finding)
+}
+
+/// Picks the action hint a focused finding shows in `room` cells.
+///
+/// The hint gives way to the body's minimum width: the full key list
+/// shortens to its first key, then goes. The key bar lists the same keys.
+fn note_actions(body: &str, room: usize) -> &'static str {
+    const ACTIONS: [&str; 2] = [" [e][o][r][d][a]", " [e]…"];
+
+    let body_need = NOTE_GAP.len() + Span::raw(body).width().min(NOTE_BODY_MIN);
+    ACTIONS
+        .into_iter()
+        .find(|actions| Span::raw(*actions).width() + body_need <= room)
+        .unwrap_or("")
 }
 
 /// Picks the finding metadata that fits beside the body in `room` cells.
@@ -226,17 +247,14 @@ fn note_line(app: &App<'_>, note_index: usize, width: u16, selected: bool, theme
 /// shorter. Metadata gives way first: the last part (the author) goes, then the
 /// rest (kind and status), and only then does the body shrink.
 fn note_details(parts: &[&str], body: &str, room: usize) -> String {
-    const NOTE_BODY_MIN: usize = 20;
-    const GAP: &str = "  ";
-
     let body_need = Span::raw(body).width().min(NOTE_BODY_MIN);
     let candidates = [parts, &parts[..parts.len().saturating_sub(1)]];
     candidates
         .into_iter()
         .filter(|kept| !kept.is_empty())
-        .map(|kept| format!(" · {}{GAP}", kept.join(" · ")))
+        .map(|kept| format!(" · {}{NOTE_GAP}", kept.join(" · ")))
         .find(|details| Span::raw(details).width() + body_need <= room)
-        .unwrap_or_else(|| truncate_text(GAP, room))
+        .unwrap_or_else(|| truncate_text(NOTE_GAP, room))
 }
 
 fn render_note_editor(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Theme) {
@@ -1049,6 +1067,52 @@ new file mode 100644
             "notes_inline_40x18",
             snapshot(App::review_with_options(&review, crate::AppOptions::default()), 40, 18)
         );
+    }
+
+    #[test]
+    fn narrow_focused_findings_keep_the_severity_word_and_body() {
+        let review = notes_review();
+        for width in [40, 60] {
+            let mut focused = App::review_with_options(&review, crate::AppOptions::default());
+            press(&mut focused, KeyCode::Char('p'));
+            let screen = snapshot(focused, width, 18);
+            assert!(screen.contains("● Medium  Port"), "{width} columns:\n{screen}");
+            insta::assert_snapshot!(format!("notes_focused_{width}x18"), screen);
+        }
+    }
+
+    #[test]
+    fn finding_actions_give_way_to_the_body() {
+        let body = "Port 8080 collides with the dev server.";
+        assert_eq!(note_actions(body, 38), " [e][o][r][d][a]");
+        assert_eq!(note_actions(body, 37), " [e]…");
+        assert_eq!(note_actions(body, 27), " [e]…");
+        assert_eq!(note_actions(body, 26), "");
+        assert_eq!(note_actions("Short.", 24), " [e][o][r][d][a]");
+    }
+
+    #[test]
+    fn finding_lines_draw_control_characters_as_spaces() {
+        use mire_core::{AnnotationKind, NoteSeverity};
+
+        let review = review_with_notes(&[(
+            "src/lib.rs",
+            2,
+            "port",
+            NoteSeverity::Medium,
+            AnnotationKind::Defect,
+            "First line.\nSecond\tparagraph \u{1b}[2J end",
+        )]);
+        let screen = snapshot(App::review_with_options(&review, crate::AppOptions::default()), 120, 18);
+        assert!(screen.contains("First line. Second paragraph  [2J end"), "{screen}");
+        insta::assert_snapshot!("notes_control_characters_120x18", screen);
+
+        let theme = Theme::plain();
+        let app = App::review_with_options(&review, crate::AppOptions::default());
+        let line = note_line(&app, 0, 80, false, &theme);
+        let text = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+        assert!(!text.chars().any(char::is_control), "{text:?}");
+        assert_eq!(line.width(), 80);
     }
 
     #[test]

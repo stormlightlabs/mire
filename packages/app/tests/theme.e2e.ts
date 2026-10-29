@@ -34,7 +34,7 @@ test.describe('with a light browser and --theme iceberg', () => {
 			return { background: computed.backgroundColor, rule: computed.borderLeftColor };
 		});
 		// --annotation and --severity-medium in Nord Light.
-		expect(style).toEqual({ background: 'rgb(248, 249, 251)', rule: 'rgb(120, 82, 14)' });
+		expect(style).toEqual({ background: 'rgb(248, 249, 251)', rule: 'rgb(114, 78, 9)' });
 	});
 });
 

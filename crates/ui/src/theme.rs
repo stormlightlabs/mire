@@ -37,7 +37,10 @@ const ICEBERG_DARK: Palette = Palette {
     blue: rgb(132, 160, 198),
     teal: rgb(137, 184, 194),
     peach: rgb(226, 164, 120),
-    warning: rgb(226, 164, 120),
+    note: rgb(155, 159, 175),
+    low: rgb(132, 160, 198),
+    medium: rgb(226, 164, 120),
+    high: rgb(235, 125, 126),
 };
 
 const NORD_LIGHT: Palette = Palette {
@@ -64,7 +67,10 @@ const NORD_LIGHT: Palette = Palette {
     blue: rgb(59, 110, 168),
     teal: rgb(57, 142, 172),
     peach: rgb(172, 68, 38),
-    warning: rgb(120, 82, 14),
+    note: rgb(76, 86, 106),
+    low: rgb(46, 90, 145),
+    medium: rgb(114, 78, 9),
+    high: rgb(150, 47, 72),
 };
 
 const ELDRITCH_MINIMAL: Palette = Palette {
@@ -91,7 +97,10 @@ const ELDRITCH_MINIMAL: Palette = Palette {
     blue: rgb(4, 209, 249),
     teal: rgb(4, 209, 249),
     peach: rgb(247, 198, 127),
-    warning: rgb(247, 198, 127),
+    note: rgb(171, 180, 218),
+    low: rgb(4, 209, 249),
+    medium: rgb(247, 198, 127),
+    high: rgb(247, 115, 123),
 };
 
 const ELDRITCH_DUSK: Palette = Palette {
@@ -118,7 +127,10 @@ const ELDRITCH_DUSK: Palette = Palette {
     blue: rgb(10, 214, 255),
     teal: rgb(10, 214, 255),
     peach: rgb(255, 175, 77),
-    warning: rgb(138, 76, 0),
+    note: rgb(63, 73, 118),
+    low: rgb(86, 47, 168),
+    medium: rgb(114, 65, 0),
+    high: rgb(160, 45, 55),
 };
 
 const CATPPUCCIN_MOCHA: Palette = Palette {
@@ -145,7 +157,10 @@ const CATPPUCCIN_MOCHA: Palette = Palette {
     blue: rgb(137, 180, 250),
     teal: rgb(148, 226, 213),
     peach: rgb(250, 179, 135),
-    warning: rgb(250, 179, 135),
+    note: rgb(166, 173, 200),
+    low: rgb(155, 185, 253),
+    medium: rgb(250, 179, 135),
+    high: rgb(255, 155, 183),
 };
 
 const CATPPUCCIN_LATTE: Palette = Palette {
@@ -172,7 +187,10 @@ const CATPPUCCIN_LATTE: Palette = Palette {
     blue: rgb(24, 88, 215),
     teal: rgb(23, 146, 153),
     peach: rgb(254, 100, 11),
-    warning: rgb(156, 68, 0),
+    note: rgb(86, 89, 112),
+    low: rgb(114, 40, 210),
+    medium: rgb(114, 65, 0),
+    high: rgb(186, 12, 50),
 };
 
 /// A stable built-in theme identifier selected by users.
@@ -277,15 +295,14 @@ pub struct Theme {
 /// The four surfaces step from `background` (the diff) through `raised` (the
 /// sidebar, title bar, footer and dialogs) and `header` (file and help
 /// headings) to `selection`, an accent-tinted step for the selected row.
-/// `annotation` sets a finding apart from the source rows around it, and
-/// `warning` marks medium severity in a color that reads as text on every
-/// surface.
+/// `annotation` sets a finding apart from the source rows around it.
 ///
-/// `warning` is its own role rather than `peach` because the light palettes'
-/// peach fails as medium text: Eldritch Dusk's and Catppuccin Latte's are too
-/// pale for the 4.5:1 text contrast on their light surfaces, and Nord Light's
-/// sits too close to `red`, which marks high. The dark palettes set `warning`
-/// to the same color as `peach`.
+/// `note`, `low`, `medium` and `high` color the finding severities. Each reads
+/// as text at 4.5:1 on every surface a finding is drawn on, in truecolor and
+/// after xterm 256-colour rounding. They are their own roles so the palette's
+/// source colors stay as published: where a source color such as `red`,
+/// `blue` or `peach` passes, the severity reuses it, and where it does not,
+/// the severity takes the nearest color that does.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Palette {
     accent: Color,
@@ -311,7 +328,10 @@ struct Palette {
     blue: Color,
     teal: Color,
     peach: Color,
-    warning: Color,
+    note: Color,
+    low: Color,
+    medium: Color,
+    high: Color,
 }
 
 /// Foreground styles for each finding severity. The severity's word always
@@ -576,11 +596,11 @@ impl Theme {
             syntax_colors: true,
             syntax,
             severity: SeverityStyles {
-                note: Style::new().fg(palette.subtext0),
-                low: Style::new().fg(if light_variant { palette.accent } else { palette.blue }),
-                medium: Style::new().fg(palette.warning),
-                high: Style::new().fg(palette.red),
-                critical: Style::new().fg(palette.red).add_modifier(Modifier::BOLD),
+                note: Style::new().fg(palette.note),
+                low: Style::new().fg(palette.low),
+                medium: Style::new().fg(palette.medium),
+                high: Style::new().fg(palette.high),
+                critical: Style::new().fg(palette.high).add_modifier(Modifier::BOLD),
             },
             application: Style::new().fg(palette.text).bg(palette.background),
             panel: Style::new().fg(palette.text).bg(palette.raised),
@@ -934,15 +954,23 @@ mod tests {
                     ("selected", theme.selected),
                     ("finding", theme.finding),
                 ] {
-                    let style = Style::new()
-                        .fg(foreground)
-                        .bg(background.bg.expect("palette roles set a background"));
-                    let ratio = contrast(style);
-                    assert!(
-                        ratio >= 4.5,
-                        "{}: {severity} on {background_role} is {ratio:.2}:1",
-                        variant.as_str()
-                    );
+                    let background = background.bg.expect("palette roles set a background");
+                    let depths = [
+                        ("truecolor", foreground, background),
+                        (
+                            "256-colour",
+                            xterm256::xterm256_rounded(foreground),
+                            xterm256::xterm256_rounded(background),
+                        ),
+                    ];
+                    for (depth, foreground, background) in depths {
+                        let ratio = contrast(Style::new().fg(foreground).bg(background));
+                        assert!(
+                            ratio >= 4.5,
+                            "{}: {severity} on {background_role} is {ratio:.2}:1 in {depth}",
+                            variant.as_str()
+                        );
+                    }
                 }
             }
             let muted = Style::new()

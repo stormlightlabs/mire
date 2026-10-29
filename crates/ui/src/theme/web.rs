@@ -5,6 +5,7 @@
 
 use std::fmt::Write as _;
 
+use mire_core::NoteSeverity;
 use ratatui::style::{Color, Style};
 
 use super::{ColorMode, Theme, ThemeFamily, ThemeVariant};
@@ -33,7 +34,7 @@ pub fn web_stylesheet() -> String {
 }
 
 /// The CSS custom properties the browser reads, paired with their colors.
-fn properties(variant: ThemeVariant) -> [(&'static str, Color); 14] {
+fn properties(variant: ThemeVariant) -> [(&'static str, Color); 20] {
     let theme = Theme::from_palette(variant);
     let fg = |style: Style| style.fg.expect("palette roles set a foreground");
     let bg = |style: Style| style.bg.expect("palette roles set a background");
@@ -52,6 +53,12 @@ fn properties(variant: ThemeVariant) -> [(&'static str, Color); 14] {
         ("selected-ink", bg(theme.application)),
         ("danger", bg(theme.error)),
         ("success", fg(theme.addition_meta)),
+        ("annotation", bg(theme.finding)),
+        ("severity-note", fg(theme.severity(NoteSeverity::Note))),
+        ("severity-low", fg(theme.severity(NoteSeverity::Low))),
+        ("severity-medium", fg(theme.severity(NoteSeverity::Medium))),
+        ("severity-high", fg(theme.severity(NoteSeverity::High))),
+        ("severity-critical", fg(theme.severity(NoteSeverity::Critical))),
     ]
 }
 
@@ -108,8 +115,18 @@ mod tests {
                     .map(|(_, color)| *color)
                     .expect("property exists")
             };
-            for background in ["paper", "surface"] {
-                for foreground in ["ink", "muted", "focus", "danger"] {
+            for background in ["paper", "surface", "annotation"] {
+                for foreground in [
+                    "ink",
+                    "muted",
+                    "focus",
+                    "danger",
+                    "severity-note",
+                    "severity-low",
+                    "severity-medium",
+                    "severity-high",
+                    "severity-critical",
+                ] {
                     let ratio = contrast_ratio(color(foreground), color(background));
                     assert!(
                         ratio >= 4.5,

@@ -47,7 +47,7 @@ test('collapses generated files until the reader opens them', async ({ page, mir
 	await expect(generated).toHaveCount(0);
 
 	// Selecting its finding from the review queue expands the group and opens the diff at the finding.
-	const marker = diff.getByRole('button', { name: /Open low finding: Is the capital Y/ });
+	const marker = diff.getByRole('button', { name: /Open low question, open: Is the capital Y/ });
 	await files.getByRole('treeitem', { name: /one\.txt/ }).click();
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
 	await page

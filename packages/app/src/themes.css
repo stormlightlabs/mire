@@ -17,6 +17,12 @@
 	--selected-ink: #161821;
 	--danger: #e27878;
 	--success: #b4be82;
+	--annotation: #08090d;
+	--severity-note: #9b9faf;
+	--severity-low: #84a0c6;
+	--severity-medium: #e2a478;
+	--severity-high: #eb7d7e;
+	--severity-critical: #eb7d7e;
 }
 
 /* nord-light */
@@ -38,6 +44,12 @@
 	--selected-ink: #eceff4;
 	--danger: #99324b;
 	--success: #386435;
+	--annotation: #f8f9fb;
+	--severity-note: #4c566a;
+	--severity-low: #2e5a91;
+	--severity-medium: #724e09;
+	--severity-high: #962f48;
+	--severity-critical: #962f48;
 }
 
 /* eldritch-minimal */
@@ -58,6 +70,12 @@
 	--selected-ink: #171928;
 	--danger: #f16c75;
 	--success: #37f499;
+	--annotation: #0e0f18;
+	--severity-note: #abb4da;
+	--severity-low: #04d1f9;
+	--severity-medium: #f7c67f;
+	--severity-high: #f7737b;
+	--severity-critical: #f7737b;
 }
 
 /* eldritch-dusk */
@@ -77,6 +95,12 @@
 	--selected-ink: #f0f3f4;
 	--danger: #a02d37;
 	--success: #106c40;
+	--annotation: #fafbfb;
+	--severity-note: #3f4976;
+	--severity-low: #562fa8;
+	--severity-medium: #724100;
+	--severity-high: #a02d37;
+	--severity-critical: #a02d37;
 }
 
 /* catppuccin-mocha */
@@ -96,6 +120,12 @@
 	--selected-ink: #1e1e2e;
 	--danger: #f38ba8;
 	--success: #a6e3a1;
+	--annotation: #11111b;
+	--severity-note: #a6adc8;
+	--severity-low: #9bb9fd;
+	--severity-medium: #fab387;
+	--severity-high: #ff9bb7;
+	--severity-critical: #ff9bb7;
 }
 
 /* catppuccin-latte */
@@ -115,4 +145,10 @@
 	--selected-ink: #eff1f5;
 	--danger: #ba0c32;
 	--success: #28691a;
+	--annotation: #f9fafc;
+	--severity-note: #565970;
+	--severity-low: #7228d2;
+	--severity-medium: #724100;
+	--severity-high: #ba0c32;
+	--severity-critical: #ba0c32;
 }

@@ -35,6 +35,54 @@ pub fn xterm256_index(color: Color) -> u8 {
     }
 }
 
+/// Returns the RGB color an xterm 256-colour terminal shows for `index`.
+///
+/// Indices 0 to 15 follow xterm's default system colors.
+pub fn xterm256_rgb(index: u8) -> Color {
+    const SYSTEM: [(u8, u8, u8); 16] = [
+        (0, 0, 0),
+        (205, 0, 0),
+        (0, 205, 0),
+        (205, 205, 0),
+        (0, 0, 238),
+        (205, 0, 205),
+        (0, 205, 205),
+        (229, 229, 229),
+        (127, 127, 127),
+        (255, 0, 0),
+        (0, 255, 0),
+        (255, 255, 0),
+        (92, 92, 255),
+        (255, 0, 255),
+        (0, 255, 255),
+        (255, 255, 255),
+    ];
+    let channel = |value: i32| u8::try_from(value).expect("xterm channels fit in a byte");
+    match i32::from(index) {
+        0..16 => {
+            let (red, green, blue) = SYSTEM[usize::from(index)];
+            Color::Rgb(red, green, blue)
+        }
+        cube @ 16..232 => {
+            let cube = cube - 16;
+            Color::Rgb(
+                channel(level(cube / 36)),
+                channel(level(cube / 6 % 6)),
+                channel(level(cube % 6)),
+            )
+        }
+        grey => {
+            let grey = channel(8 + 10 * (grey - 232));
+            Color::Rgb(grey, grey, grey)
+        }
+    }
+}
+
+/// Returns the RGB color an xterm 256-colour terminal shows for `color`.
+pub fn xterm256_rounded(color: Color) -> Color {
+    xterm256_rgb(xterm256_index(color))
+}
+
 /// Snaps one channel to its cube step, 0 to 5, with tmux's thresholds.
 const fn cube_step(value: i32) -> i32 {
     if value < 48 {
@@ -57,6 +105,15 @@ fn to_index(value: i32) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indices_map_back_to_their_colours() {
+        for index in 16..=255 {
+            assert_eq!(xterm256_index(xterm256_rgb(index)), index);
+        }
+        assert_eq!(xterm256_rgb(194), Color::Rgb(215, 255, 215));
+        assert_eq!(xterm256_rgb(232), Color::Rgb(8, 8, 8));
+    }
 
     #[test]
     fn exact_cube_colours_and_greys_map_to_their_indices() {

@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use mire_core::{AnchorSide, FileDiff, FileStatus, LineKind, MissingNewline};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 
@@ -13,10 +13,17 @@ use crate::chrome::{
     diff_stats, file_path, fit_line, render_footer, render_help, render_sidebar, render_sidebar_divider, render_title,
     truncate_text,
 };
+use crate::description::single_line;
 use crate::stream::TextRange;
 use crate::stream::{ReviewStream, RowKey};
 use crate::theme::Theme;
 use crate::walkthrough::render_walkthrough;
+
+/// Cells a finding's body keeps before its metadata or actions, or its whole
+/// width when shorter.
+const NOTE_BODY_MIN: usize = 20;
+/// Space between a finding's metadata and its body.
+const NOTE_GAP: &str = "  ";
 
 #[derive(Clone, Copy)]
 struct SourcePosition {
@@ -190,26 +197,64 @@ fn row_line<'a>(
 }
 
 fn note_line(app: &App<'_>, note_index: usize, width: u16, selected: bool, theme: &Theme) -> Line<'static> {
-    const ACTIONS: &str = " [e][o][r][d][a]";
+    const RULE: &str = "▌ ";
+    const MARK: &str = "● ";
 
     let Some(note) = app.note(note_index) else {
         return Line::styled("  unavailable finding", theme.error);
     };
-    let author = note.author().display_name().unwrap_or_else(|| note.author().id());
-    let finding = format!(
-        " {} {} {} · {author}: {}",
-        note.status(),
-        note.severity(),
-        note.annotation_kind(),
-        note.body()
-    );
-    let action_width = if selected { Span::raw(ACTIONS).width() } else { 0 };
-    let finding_width = usize::from(width).saturating_sub(action_width);
-    let mut spans = vec![Span::styled(truncate_text(&finding, finding_width), theme.panel)];
-    if selected {
-        spans.push(Span::styled(ACTIONS, theme.accent));
+    let severity = theme.severity(note.severity());
+    let author = single_line(note.author().display_name().unwrap_or_else(|| note.author().id()));
+    let body = single_line(note.body());
+    let label = format!("{RULE}{MARK}{}", note.severity());
+    let kind = single_line(&note.annotation_kind().to_string());
+    let status = note.status().to_string();
+    let label = truncate_text(&label, usize::from(width));
+    let room = usize::from(width).saturating_sub(Span::raw(&label).width());
+    let actions = if selected { note_actions(&body, room) } else { "" };
+    let room = room.saturating_sub(Span::raw(actions).width());
+    let details = note_details(&[&kind, &status, &author], &body, room);
+    let room = room.saturating_sub(Span::raw(&details).width());
+    let body = truncate_text(&body, room);
+    let mut spans = vec![
+        Span::styled(label, severity),
+        Span::styled(details, theme.muted),
+        Span::styled(body, Style::new().add_modifier(Modifier::ITALIC)),
+    ];
+    if !actions.is_empty() {
+        spans.push(Span::styled(actions, theme.accent));
     }
-    fit_line(spans, usize::from(width), theme.panel)
+    fit_line(spans, usize::from(width), theme.finding)
+}
+
+/// Picks the action hint a focused finding shows in `room` cells.
+///
+/// The hint gives way to the body's minimum width: the full key list
+/// shortens to its first key, then goes. The key bar lists the same keys.
+fn note_actions(body: &str, room: usize) -> &'static str {
+    const ACTIONS: [&str; 2] = [" [e][o][r][d][a]", " [e]…"];
+
+    let body_need = NOTE_GAP.len() + Span::raw(body).width().min(NOTE_BODY_MIN);
+    ACTIONS
+        .into_iter()
+        .find(|actions| Span::raw(*actions).width() + body_need <= room)
+        .unwrap_or("")
+}
+
+/// Picks the finding metadata that fits beside the body in `room` cells.
+///
+/// The body keeps at least 20 cells, or its whole width when
+/// shorter. Metadata gives way first: the last part (the author) goes, then the
+/// rest (kind and status), and only then does the body shrink.
+fn note_details(parts: &[&str], body: &str, room: usize) -> String {
+    let body_need = Span::raw(body).width().min(NOTE_BODY_MIN);
+    let candidates = [parts, &parts[..parts.len().saturating_sub(1)]];
+    candidates
+        .into_iter()
+        .filter(|kept| !kept.is_empty())
+        .map(|kept| format!(" · {}{NOTE_GAP}", kept.join(" · ")))
+        .find(|details| Span::raw(details).width() + body_need <= room)
+        .unwrap_or_else(|| truncate_text(NOTE_GAP, room))
 }
 
 fn render_note_editor(frame: &mut Frame<'_>, area: Rect, app: &App<'_>, theme: &Theme) {
@@ -964,6 +1009,28 @@ new file mode 100644
     }
 
     #[test]
+    fn finding_lines_use_their_own_surface_and_a_color_per_severity() {
+        use mire_core::NoteSeverity;
+
+        let theme = Theme::resolve(crate::ThemeFamily::Iceberg, Some(crate::ColorMode::Light));
+        let review = severities_review();
+        let app = App::review_with_options(&review, crate::AppOptions::default());
+        let styles = rendered_styles(app, 120, 24, &theme);
+        assert!(has_style(&styles, theme.finding));
+        for severity in [
+            NoteSeverity::Note,
+            NoteSeverity::Low,
+            NoteSeverity::Medium,
+            NoteSeverity::High,
+            NoteSeverity::Critical,
+        ] {
+            let mark = theme.severity(severity).bg(theme.finding.bg.unwrap());
+            assert!(has_style(&styles, mark), "{severity} mark on the finding line");
+        }
+        assert!(!has_style(&styles, theme.error), "no filled severity badge");
+    }
+
+    #[test]
     fn note_snapshots_cover_inline_findings_focus_editor_and_filters() {
         let review = notes_review();
         insta::assert_snapshot!(
@@ -987,6 +1054,76 @@ new file mode 100644
         let mut filters = App::review_with_options(&review, crate::AppOptions::default());
         press(&mut filters, KeyCode::Char('f'));
         insta::assert_snapshot!("notes_filters_120x18", snapshot(filters, 120, 18));
+    }
+
+    #[test]
+    fn narrow_finding_lines_drop_metadata_before_the_body() {
+        let review = notes_review();
+        insta::assert_snapshot!(
+            "notes_inline_60x18",
+            snapshot(App::review_with_options(&review, crate::AppOptions::default()), 60, 18)
+        );
+        insta::assert_snapshot!(
+            "notes_inline_40x18",
+            snapshot(App::review_with_options(&review, crate::AppOptions::default()), 40, 18)
+        );
+    }
+
+    #[test]
+    fn narrow_focused_findings_keep_the_severity_word_and_body() {
+        let review = notes_review();
+        for width in [40, 60] {
+            let mut focused = App::review_with_options(&review, crate::AppOptions::default());
+            press(&mut focused, KeyCode::Char('p'));
+            let screen = snapshot(focused, width, 18);
+            assert!(screen.contains("● Medium  Port"), "{width} columns:\n{screen}");
+            insta::assert_snapshot!(format!("notes_focused_{width}x18"), screen);
+        }
+    }
+
+    #[test]
+    fn finding_actions_give_way_to_the_body() {
+        let body = "Port 8080 collides with the dev server.";
+        assert_eq!(note_actions(body, 38), " [e][o][r][d][a]");
+        assert_eq!(note_actions(body, 37), " [e]…");
+        assert_eq!(note_actions(body, 27), " [e]…");
+        assert_eq!(note_actions(body, 26), "");
+        assert_eq!(note_actions("Short.", 24), " [e][o][r][d][a]");
+    }
+
+    #[test]
+    fn finding_lines_draw_control_characters_as_spaces() {
+        use mire_core::{AnnotationKind, NoteSeverity};
+
+        let review = review_with_notes(&[(
+            "src/lib.rs",
+            2,
+            "port",
+            NoteSeverity::Medium,
+            AnnotationKind::Defect,
+            "First line.\nSecond\tparagraph \u{1b}[2J end",
+        )]);
+        let screen = snapshot(App::review_with_options(&review, crate::AppOptions::default()), 120, 18);
+        assert!(screen.contains("First line. Second paragraph  [2J end"), "{screen}");
+        insta::assert_snapshot!("notes_control_characters_120x18", screen);
+
+        let theme = Theme::plain();
+        let app = App::review_with_options(&review, crate::AppOptions::default());
+        let line = note_line(&app, 0, 80, false, &theme);
+        let text = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
+        assert!(!text.chars().any(char::is_control), "{text:?}");
+        assert_eq!(line.width(), 80);
+    }
+
+    #[test]
+    fn finding_details_drop_author_then_kind_and_status() {
+        let parts = ["defect", "open", "reviewer"];
+        let body = "Port 8080 collides with the dev server.";
+        assert_eq!(note_details(&parts, body, 49), " · defect · open · reviewer  ");
+        assert_eq!(note_details(&parts, body, 48), " · defect · open  ");
+        assert_eq!(note_details(&parts, body, 38), " · defect · open  ");
+        assert_eq!(note_details(&parts, body, 37), "  ");
+        assert_eq!(note_details(&parts, "Short", 23), " · defect · open  ");
     }
 
     #[test]
@@ -1164,74 +1301,136 @@ new file mode 100644
 
     /// A review of the nested patch with an open defect and an open question.
     fn notes_review() -> mire_core::Review {
+        use mire_core::{AnnotationKind, NoteSeverity};
+
+        review_with_notes(&[
+            (
+                "src/lib.rs",
+                2,
+                "port",
+                NoteSeverity::Medium,
+                AnnotationKind::Defect,
+                "Port 8080 collides with the dev server.",
+            ),
+            (
+                "src/parse/mod.rs",
+                3,
+                "trim",
+                NoteSeverity::Note,
+                AnnotationKind::Question,
+                "Should an empty value be accepted?",
+            ),
+        ])
+    }
+
+    /// A review of the nested patch with one open finding at each severity.
+    fn severities_review() -> mire_core::Review {
+        use mire_core::{AnnotationKind, NoteSeverity};
+
+        review_with_notes(&[
+            (
+                "src/lib.rs",
+                1,
+                "low",
+                NoteSeverity::Low,
+                AnnotationKind::Comment,
+                "Name the module.",
+            ),
+            (
+                "src/lib.rs",
+                2,
+                "high",
+                NoteSeverity::High,
+                AnnotationKind::Defect,
+                "Port 8080 is taken.",
+            ),
+            (
+                "src/lib.rs",
+                3,
+                "medium",
+                NoteSeverity::Medium,
+                AnnotationKind::Suggestion,
+                "Read the host.",
+            ),
+            (
+                "src/parse/mod.rs",
+                1,
+                "note",
+                NoteSeverity::Note,
+                AnnotationKind::Question,
+                "Why split here?",
+            ),
+            (
+                "src/parse/mod.rs",
+                3,
+                "critical",
+                NoteSeverity::Critical,
+                AnnotationKind::Defect,
+                "Trim drops data.",
+            ),
+        ])
+    }
+
+    /// A review of the nested patch with one open agent finding per entry:
+    /// path, new-side line, identifier, severity, kind and body.
+    fn review_with_notes(
+        notes: &[(
+            &str,
+            u64,
+            &str,
+            mire_core::NoteSeverity,
+            mire_core::AnnotationKind,
+            &str,
+        )],
+    ) -> mire_core::Review {
         use mire_core::{
-            Anchor, AnchorSide, AnnotationKind, Author, BytePath, FileContent, LineNumber, LineRange, NoteEvent,
-            NoteEventKind, NoteId, NoteSeverity, NoteStatus, Provenance, Review, ReviewNote, ReviewRevision,
+            Anchor, AnchorSide, Author, BytePath, FileContent, LineNumber, LineRange, NoteEvent, NoteEventKind, NoteId,
+            NoteStatus, Provenance, Review, ReviewNote, ReviewRevision,
         };
 
         let changeset = nested_changeset();
         let author = Author::new("reviewer", None).unwrap();
-        let note = |sequence: u64, path: &str, line: u64, id: &str, severity, kind, body: &str| {
-            let file = changeset
-                .files()
-                .iter()
-                .find(|file| {
-                    file.new_side()
-                        .is_some_and(|side| side.path.as_bytes() == path.as_bytes())
-                })
-                .expect("fixture has the file");
-            let FileContent::Text { hunks } = file.content() else {
-                panic!("fixture is textual");
-            };
-            let line = LineNumber::new(line).unwrap();
-            let anchor = Anchor::new(
-                &changeset,
-                BytePath::new(path.as_bytes().to_vec()).unwrap(),
-                AnchorSide::New,
-                LineRange::new(line, line).unwrap(),
-                hunks[0].fingerprint(),
-            )
-            .unwrap();
-            let note = ReviewNote::new(
-                NoteId::new(id).unwrap(),
-                anchor,
-                author.clone(),
-                severity,
-                NoteStatus::Open,
-                body.to_owned(),
-                Provenance::Agent { producer: "fixture".to_owned() },
-            )
-            .unwrap()
-            .with_annotation_kind(kind);
-            let created = NoteEventKind::Created { status: NoteStatus::Open };
-            let event = NoteEvent::new(sequence, NoteId::new(id).unwrap(), author.clone(), created).unwrap();
-            (note, event)
-        };
-        let (port, port_event) = note(
-            1,
-            "src/lib.rs",
-            2,
-            "port",
-            NoteSeverity::Medium,
-            AnnotationKind::Defect,
-            "Port 8080 collides with the dev server.",
-        );
-        let (trim, trim_event) = note(
-            2,
-            "src/parse/mod.rs",
-            3,
-            "trim",
-            NoteSeverity::Note,
-            AnnotationKind::Question,
-            "Should an empty value be accepted?",
-        );
-        Review::new(
-            ReviewRevision::new(1).unwrap(),
-            changeset.clone(),
-            vec![port, trim],
-            vec![port_event, trim_event],
-        )
-        .unwrap()
+        let (notes, events) = notes
+            .iter()
+            .zip(1..)
+            .map(|(&(path, line, id, severity, kind, body), sequence)| {
+                let file = changeset
+                    .files()
+                    .iter()
+                    .find(|file| {
+                        file.new_side()
+                            .is_some_and(|side| side.path.as_bytes() == path.as_bytes())
+                    })
+                    .expect("fixture has the file");
+                let FileContent::Text { hunks } = file.content() else {
+                    panic!("fixture is textual");
+                };
+                let line = LineNumber::new(line).unwrap();
+                let anchor = Anchor::new(
+                    &changeset,
+                    BytePath::new(path.as_bytes().to_vec()).unwrap(),
+                    AnchorSide::New,
+                    LineRange::new(line, line).unwrap(),
+                    hunks[0].fingerprint(),
+                )
+                .unwrap();
+                let note = ReviewNote::new(
+                    NoteId::new(id).unwrap(),
+                    anchor,
+                    author.clone(),
+                    severity,
+                    NoteStatus::Open,
+                    body.to_owned(),
+                    Provenance::Agent { producer: "fixture".to_owned() },
+                )
+                .unwrap()
+                .with_annotation_kind(kind);
+                let created = NoteEventKind::Created { status: NoteStatus::Open };
+                let event = NoteEvent::new(sequence, NoteId::new(id).unwrap(), author.clone(), created).unwrap();
+                (note, event)
+            })
+            .unzip();
+        Review::new(ReviewRevision::new(1).unwrap(), changeset.clone(), notes, events).unwrap()
     }
 
     fn press(app: &mut App<'_>, code: KeyCode) {

@@ -149,6 +149,22 @@ Supported values include Rust, Python, JavaScript, TypeScript, TSX, JSON, YAML,
 TOML, Markdown, HTML, CSS, shell, and plain text. Their common extensions and
 short aliases are accepted.
 
+## Read one file in the browser
+
+The browser review that `mire serve` opens has a focus mode, which shows the
+open file at full width with the file tree and review queue hidden. Press `b`
+or select Focus in the header to enter it. Press `Esc` or `b`, or select Leave
+focus, to return.
+
+The focus bar names the file, its status and line count, its place in the file
+tree's order, such as "3 of 6", and its Viewed box. An added or deleted file
+reports how many lines it has; any other file reports the lines added and
+removed. Press `[` and `]`, or use the arrows beside the path, to open the
+previous or next file. A generated file keeps its Show diff button.
+
+Focus mode lasts until you leave it or reload the page. The server stores
+nothing about it, so each tab has its own.
+
 ## Select a theme
 
 Use `--theme auto`, `iceberg`, `eldritch`, or `catppuccin`. Each family has a

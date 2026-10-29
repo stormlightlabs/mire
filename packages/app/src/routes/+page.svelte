@@ -3,7 +3,10 @@
 	import DiffPane from '$lib/DiffPane.svelte';
 	import FileNavigator from '$lib/FileNavigator.svelte';
 	import FindingQueue from '$lib/FindingQueue.svelte';
+	import FocusBar from '$lib/FocusBar.svelte';
+	import KeyBar from '$lib/KeyBar.svelte';
 	import Overlay from '$lib/Overlay.svelte';
+	import { filePosition, takesText } from '$lib/focus';
 	import { OverviewLoads } from '$lib/reload';
 	import { loadDevelopmentSessionSecret, parseSessionSecret, saveDevelopmentSessionSecret } from '$lib/session';
 	import { applyTheme, loadTheme, saveTheme, type Theme } from '$lib/theme';
@@ -57,6 +60,8 @@
 	let mobilePane = $state<'files' | 'findings' | null>(null);
 	/** The raw path of the generated file whose diff is open, if any. */
 	let openedGenerated = $state<string | null>(null);
+	/** Whether focus mode shows the open file alone. It lasts for this tab and is never saved. */
+	let focused = $state(false);
 
 	let streamAbort: AbortController | null = null;
 	let secret = '';
@@ -74,6 +79,9 @@
 	const title = $derived(reviewTitle(review));
 	const description = $derived(reviewDescription(review));
 	const hasMetadata = $derived(hasReviewMetadata(review));
+	const position = $derived(review ? filePosition(review.files, file ?? activeSummary) : null);
+	/** Focus mode needs a loaded review; until then the normal header explains what is happening. */
+	const inFocus = $derived(focused && review !== null && error === null);
 	const themeLabel = $derived(theme === 'dark' ? 'Use light mode' : 'Use dark mode');
 
 	$effect(() => {
@@ -403,21 +411,39 @@
 		void selectFinding(next);
 	}
 
+	/** Opens the previous or next file in the file tree's order. The ends do not wrap. */
+	function moveFile(direction: 1 | -1) {
+		const target = direction > 0 ? position?.next : position?.previous;
+		if (target) chooseFile(target.id);
+	}
+
 	function onKeydown(event: KeyboardEvent) {
 		if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
 		const target = event.target;
-		if (
-			target instanceof HTMLInputElement ||
-			target instanceof HTMLTextAreaElement ||
-			target instanceof HTMLSelectElement
-		)
-			return;
+		if (takesText(target)) return;
 		if (event.key === 'j') {
 			event.preventDefault();
 			navigateQueue(1);
+			return;
 		} else if (event.key === 'k') {
 			event.preventDefault();
 			navigateQueue(-1);
+			return;
+		}
+		// An open dialog takes Esc for itself, and the page behind it stays as it is.
+		if (!review || (target instanceof Element && target.closest('dialog'))) return;
+		if (event.key === ']') {
+			event.preventDefault();
+			moveFile(1);
+		} else if (event.key === '[') {
+			event.preventDefault();
+			moveFile(-1);
+		} else if (event.key === 'b') {
+			event.preventDefault();
+			focused = !focused;
+		} else if (event.key === 'Escape' && focused) {
+			event.preventDefault();
+			focused = false;
 		}
 	}
 
@@ -455,63 +481,81 @@
 
 <a class="skip-link" href="#review-content">Skip to diff</a>
 
-<div class="app-shell">
-	<header class="topbar">
-		<div class="brand" aria-label="Mire">
-			<strong>mire</strong>
-		</div>
-		<div class="review-meta">
-			<strong class="review-title" {title}>{title}</strong><span aria-hidden="true">·</span>
-			<span class="review-detail">
-				{#if review}
-					{review.source} · revision {review.revision} {@render refreshLabel(refreshState)}
-				{:else}
-					Connecting to local review
-				{/if}
-			</span>
-		</div>
-		<div class="topbar-actions">
-			{#if review && isNarrow}
-				<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'files')}>
-					<span class="i-lucide-files icon" aria-hidden="true"></span>Files
-				</button>
-				<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'findings')}>
-					<span class="i-lucide-list-checks icon" aria-hidden="true"></span>Findings
-				</button>
-			{/if}
-			{#if review && hasMetadata}
-				<button class="topbar-button" aria-haspopup="dialog" onclick={() => (descriptionOpen = true)}>
-					<span class="i-lucide-file-text icon" aria-hidden="true"></span>Description
-				</button>
-			{/if}
-			{#if review}
-				<button class="topbar-button" disabled={refreshState === 'pending'} onclick={() => void refreshReview()}>
-					<span class="i-lucide-refresh-cw icon" class:spinning={refreshState === 'pending'} aria-hidden="true"></span>
-					{#if refreshState === 'pending'}
-						Refreshing…
+<div class="app-shell" class:focused={inFocus}>
+	{#if inFocus}
+		<FocusBar
+			{file}
+			{position}
+			viewState={shownView}
+			onPrevious={() => moveFile(-1)}
+			onNext={() => moveFile(1)}
+			onToggleViewed={toggleViewed}
+			onLeave={() => (focused = false)} />
+	{:else}
+		<header class="topbar">
+			<div class="brand" aria-label="Mire">
+				<strong>mire</strong>
+			</div>
+			<div class="review-meta">
+				<strong class="review-title" {title}>{title}</strong><span aria-hidden="true">·</span>
+				<span class="review-detail">
+					{#if review}
+						{review.source} · revision {review.revision} {@render refreshLabel(refreshState)}
 					{:else}
-						Refresh source
+						Connecting to local review
 					{/if}
-				</button>
-				<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>
-					<span class="i-lucide-circle-check-big icon" aria-hidden="true"></span>Finish review
-				</button>
-				<button
-					class="topbar-button icon-button"
-					aria-label={themeLabel}
-					title={themeLabel}
-					aria-pressed={theme === 'dark'}
-					onclick={() => (theme = theme === 'dark' ? 'light' : 'dark')}>
-					<span class={theme === 'dark' ? 'i-lucide-sun icon' : 'i-lucide-moon icon'} aria-hidden="true"></span>
-				</button>
-			{/if}
-			<span
-				class:ready={review?.watch === 'watching'}
-				class:degraded={review?.watch === 'degraded'}
-				class="status"
-				aria-live="polite">{review ? review.watch : 'loading'}</span>
-		</div>
-	</header>
+				</span>
+			</div>
+			<div class="topbar-actions">
+				{#if review && isNarrow}
+					<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'files')}>
+						<span class="i-lucide-files icon" aria-hidden="true"></span>Files
+					</button>
+					<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'findings')}>
+						<span class="i-lucide-list-checks icon" aria-hidden="true"></span>Findings
+					</button>
+				{/if}
+				{#if review}
+					<button class="topbar-button" aria-keyshortcuts="b" onclick={() => (focused = true)}>
+						<span class="i-lucide-maximize-2 icon" aria-hidden="true"></span>Focus
+						<kbd class="key-hint" aria-hidden="true">b</kbd>
+					</button>
+				{/if}
+				{#if review && hasMetadata}
+					<button class="topbar-button" aria-haspopup="dialog" onclick={() => (descriptionOpen = true)}>
+						<span class="i-lucide-file-text icon" aria-hidden="true"></span>Description
+					</button>
+				{/if}
+				{#if review}
+					<button class="topbar-button" disabled={refreshState === 'pending'} onclick={() => void refreshReview()}>
+						<span class="i-lucide-refresh-cw icon" class:spinning={refreshState === 'pending'} aria-hidden="true"
+						></span>
+						{#if refreshState === 'pending'}
+							Refreshing…
+						{:else}
+							Refresh source
+						{/if}
+					</button>
+					<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>
+						<span class="i-lucide-circle-check-big icon" aria-hidden="true"></span>Finish review
+					</button>
+					<button
+						class="topbar-button icon-button"
+						aria-label={themeLabel}
+						title={themeLabel}
+						aria-pressed={theme === 'dark'}
+						onclick={() => (theme = theme === 'dark' ? 'light' : 'dark')}>
+						<span class={theme === 'dark' ? 'i-lucide-sun icon' : 'i-lucide-moon icon'} aria-hidden="true"></span>
+					</button>
+				{/if}
+				<span
+					class:ready={review?.watch === 'watching'}
+					class:degraded={review?.watch === 'degraded'}
+					class="status"
+					aria-live="polite">{review ? review.watch : 'loading'}</span>
+			</div>
+		</header>
+	{/if}
 
 	<main id="review-content" class="workspace" tabindex="-1">
 		{#if error}
@@ -538,7 +582,7 @@
 				<h1>Loading review</h1>
 				<p>Reading the local review file.</p>
 			</section>
-		{:else if isNarrow}
+		{:else if isNarrow || inFocus}
 			<DiffPane
 				{file}
 				{fileError}
@@ -550,6 +594,7 @@
 				viewState={shownView}
 				{viewedError}
 				bind:openedGenerated
+				showHeading={!inFocus}
 				onDismissNotice={() => (notice = null)}
 				onToggleViewed={toggleViewed}
 				onFindingClick={selectFinding}
@@ -581,6 +626,9 @@
 				onSelect={selectFinding} />
 		{/if}
 	</main>
+	{#if inFocus}
+		<KeyBar />
+	{/if}
 	{#if review && isNarrow && mobilePane === 'files'}
 		<Overlay open={true} labelledBy="files-drawer-heading" variant="drawer" onClose={() => (mobilePane = null)}>
 			<section class="drawer-content">
@@ -672,6 +720,9 @@
 		display: grid;
 		grid-template-rows: auto 1fr;
 	}
+	.app-shell.focused {
+		grid-template-rows: auto 1fr auto;
+	}
 	.topbar {
 		display: grid;
 		grid-template-columns: 14rem minmax(8rem, 1fr) auto;
@@ -752,6 +803,11 @@
 			background-color 100ms ease-out,
 			border-color 100ms ease-out;
 	}
+	.key-hint {
+		color: var(--muted);
+		font: inherit;
+		font-weight: 500;
+	}
 	.topbar-button .icon {
 		width: 0.85rem;
 		height: 0.85rem;
@@ -808,6 +864,12 @@
 		overflow: hidden;
 		display: grid;
 		grid-template-columns: 14rem minmax(0, 1fr) 18rem;
+	}
+	.focused .workspace {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.focused .workspace > :global(.diff-pane) {
+		padding-inline: max(1.25rem, calc((100% - 72rem) / 2));
 	}
 	.message {
 		align-self: center;

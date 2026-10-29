@@ -12,7 +12,7 @@ test('header icons draw under the content security policy', async ({ page, mire 
 	await expect(header).toContainText('revision 3');
 
 	const icons = header.locator('.topbar-actions .icon');
-	await expect(icons).toHaveCount(3);
+	await expect(icons).toHaveCount(4);
 	for (const icon of await icons.all()) {
 		const box = await icon.boundingBox();
 		expect(box?.width).toBeGreaterThan(0);

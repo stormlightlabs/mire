@@ -2,7 +2,7 @@
 id = "arcl-t-01M5YRTZ3YRQ2MH407QJDR40MM"
 plan = "arcl-pl-01M5YRTHS95J67NZ6THREDG33F"
 title = "Focus mode in the web review"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 4
 blocked-by = ["arcl-t-01M5SXDG7QJM6Y67FCJ8ZPNASW"]

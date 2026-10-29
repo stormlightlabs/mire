@@ -1,6 +1,6 @@
 ---
 title: Keybinds
-description: Kb & mouse controls for navigating the TUI.
+description: Kb & mouse controls for navigating the TUI and the browser review.
 section: Reference
 group: Reference
 order: 9
@@ -142,3 +142,19 @@ file or review row to select it. Click a file or hunk disclosure glyph to
 collapse or expand its source rows. In review files, right-click a source row to
 create or edit a note, and use the buttons on a note row to edit it or change
 its status.
+
+## Browser review
+
+The browser review that `mire serve` opens takes these keys. None of them work
+while a text field or a menu has focus, and `]`, `[`, `b` and `Esc` leave the
+page alone while a dialog is open.
+
+| Key       | Action                                                |
+| --------- | ----------------------------------------------------- |
+| `j` / `k` | Open the next or previous finding in the review queue |
+| `]` / `[` | Open the next or previous file in the file tree order |
+| `b`       | Enter or leave focus mode                             |
+| `Esc`     | Leave focus mode                                      |
+
+See [Read one file in the browser](/docs/guides/review-changes/#read-one-file-in-the-browser)
+for focus mode.

@@ -45,7 +45,10 @@
 	<div class="finding-list">
 		{#each findings as finding (finding.id)}
 			<button class:current={activeFindingId === finding.id} class="finding" onclick={() => onSelect(finding)}>
-				<div><span class="badge">{finding.severity}</span><span class="state">{finding.status}</span></div>
+				<div class="finding-head">
+					<span class="severity-mark" data-severity={finding.severity}>{finding.severity}</span><span class="state"
+						>{finding.status}</span>
+				</div>
 				<p>{finding.body}</p>
 				<code
 					>{formatPath(finding.path)}:{finding.startLine}{finding.endLine !== finding.startLine
@@ -151,16 +154,10 @@
 		font-size: 0.78rem;
 		line-height: 1.45;
 	}
-	.badge {
-		display: inline-block;
-		padding: 0.08rem 0.28rem;
-		border: 1px solid currentColor;
-		font-family: 'Google Sans Code Variable', 'Google Sans Code', monospace;
-		font-size: 0.62rem;
-		text-transform: uppercase;
-	}
-	.state {
-		margin-left: 0.4rem;
+	.finding-head {
+		display: flex;
+		align-items: baseline;
+		gap: 0.5rem;
 	}
 	.anchor-state {
 		display: block;

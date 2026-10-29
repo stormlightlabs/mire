@@ -2,7 +2,7 @@
 id = "arcl-t-01M61C8P4PAZS2J29NF0P3A5J8"
 plan = "arcl-pl-01M5YRTHS95J67NZ6THREDG33F"
 title = "Quieter finding badges and a distinct inline finding line"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 0
 +++

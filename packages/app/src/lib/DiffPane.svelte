@@ -108,7 +108,7 @@
 		{#if activeFinding}
 			<article class="finding-detail" aria-live="polite">
 				<div class="finding-title">
-					<span class="badge">{activeFinding.severity}</span>
+					<span class="severity-mark" data-severity={activeFinding.severity}>{activeFinding.severity}</span>
 					<span>{activeFinding.annotationKind} · {activeFinding.status}</span>
 				</div>
 				<p>{activeFinding.body}</p>
@@ -319,14 +319,6 @@
 	.message p {
 		color: var(--muted);
 		margin-top: 0.35rem;
-	}
-	.badge {
-		display: inline-block;
-		padding: 0.08rem 0.3rem;
-		border: 1px solid currentColor;
-		font-family: 'Google Sans Code Variable', 'Google Sans Code', monospace;
-		font-size: 0.62rem;
-		text-transform: uppercase;
 	}
 	.message {
 		align-self: center;

@@ -370,8 +370,11 @@ fn sidebar_file_line(
 ) -> Line<'static> {
     let available = usize::from(width);
     let mut progress = Vec::new();
+    let severity_style = findings
+        .highest_open_severity
+        .map_or(theme.muted, |severity| theme.severity(severity));
     if findings.open > 0 {
-        progress.push(Span::styled(format!("!{}", findings.open), theme.error));
+        progress.push(Span::styled(format!("!{}", findings.open), severity_style));
     }
     if findings.completed > 0 {
         if !progress.is_empty() {
@@ -403,7 +406,7 @@ fn sidebar_file_line(
         && available >= spans_width(&metadata).saturating_add(22)
     {
         metadata.push(Span::raw(" "));
-        metadata.push(Span::styled(severity.to_string(), theme.error));
+        metadata.push(Span::styled(severity.to_string(), severity_style));
     }
     if !changes.is_empty()
         && available

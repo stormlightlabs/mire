@@ -65,16 +65,33 @@
 		};
 	}
 
+	/**
+	 * Draws a finding as an annotation between code rows: a severity rule and
+	 * mark, its kind and status, then the body in prose type.
+	 */
 	function renderAnnotation(annotation: DiffLineAnnotation<FindingSummary>) {
 		const finding = annotation.metadata;
 		if (!finding) return undefined;
 		const button = document.createElement('button');
 		button.type = 'button';
+		button.className = 'finding-line';
 		button.dataset.mireFinding = finding.id;
-		button.textContent = `${finding.severity} · ${finding.body}`;
+		button.dataset.severity = finding.severity;
 		button.setAttribute('aria-label', `Open ${finding.severity} finding: ${finding.body}`);
-		button.style.cssText =
-			'display:block;width:100%;min-height:2.75rem;border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);padding:.5rem .65rem;text-align:left;font:600 .75rem/1.4 system-ui,sans-serif;cursor:pointer;border-radius:0;';
+		const head = document.createElement('span');
+		head.className = 'finding-head';
+		const mark = document.createElement('span');
+		mark.className = 'severity-mark';
+		mark.dataset.severity = finding.severity;
+		mark.textContent = finding.severity;
+		const meta = document.createElement('span');
+		meta.className = 'finding-meta';
+		meta.textContent = `${finding.annotationKind} · ${finding.status}`;
+		head.append(mark, meta);
+		const body = document.createElement('span');
+		body.className = 'finding-body';
+		body.textContent = finding.body;
+		button.append(head, body);
 		button.onclick = () => onFindingClick(finding);
 		return button;
 	}
@@ -288,5 +305,47 @@
 		--diffs-header-font-family: 'IBM Plex Sans Variable', 'IBM Plex Sans', sans-serif;
 		--diffs-font-size: 0.75rem;
 		--diffs-line-height: 1.4rem;
+	}
+	/* Findings sit between code rows, so they take prose type, their own surface and a severity rule. */
+	.diff-host :global(.finding-line) {
+		display: grid;
+		gap: 0.3rem;
+		width: calc(100% - 1.5rem);
+		margin: 0.4rem 0.75rem;
+		border: 1px solid var(--line);
+		border-left: 3px solid var(--severity-color, var(--line-strong));
+		border-radius: 0.25rem;
+		padding: 0.5rem 0.75rem 0.6rem;
+		background: var(--annotation);
+		color: var(--ink);
+		text-align: left;
+		font:
+			400 0.8125rem / 1.5 'IBM Plex Sans Variable',
+			'IBM Plex Sans',
+			sans-serif;
+		cursor: pointer;
+	}
+	.diff-host :global(.finding-head) {
+		display: flex;
+		align-items: baseline;
+		gap: 0.6rem;
+	}
+	.diff-host :global(.finding-meta) {
+		color: var(--muted);
+		font-size: 0.72rem;
+	}
+	.diff-host :global(.finding-body) {
+		overflow-wrap: anywhere;
+	}
+	@media (hover: hover) {
+		.diff-host :global(.finding-line:hover) {
+			border-color: var(--line-strong);
+			border-left-color: var(--severity-color, var(--line-strong));
+		}
+	}
+	@media (pointer: coarse) {
+		.diff-host :global(.finding-line) {
+			min-height: 2.75rem;
+		}
 	}
 </style>

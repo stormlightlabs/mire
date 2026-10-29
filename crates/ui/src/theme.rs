@@ -1,6 +1,7 @@
 use std::fmt;
 use std::str::FromStr;
 
+use mire_core::NoteSeverity;
 use ratatui::style::{Color, Modifier, Style};
 use terminal_colorsaurus::{QueryOptions, ThemeMode, theme_mode};
 
@@ -18,6 +19,7 @@ const ICEBERG_DARK: Palette = Palette {
     raised: rgb(15, 17, 23),
     header: rgb(17, 20, 66),
     selection: rgb(42, 47, 70),
+    annotation: rgb(8, 9, 13),
     border: rgb(95, 103, 143),
     overlay1: rgb(132, 137, 160),
     text: rgb(198, 200, 209),
@@ -35,6 +37,7 @@ const ICEBERG_DARK: Palette = Palette {
     blue: rgb(132, 160, 198),
     teal: rgb(137, 184, 194),
     peach: rgb(226, 164, 120),
+    warning: rgb(226, 164, 120),
 };
 
 const NORD_LIGHT: Palette = Palette {
@@ -43,6 +46,7 @@ const NORD_LIGHT: Palette = Palette {
     raised: rgb(229, 233, 240),
     header: rgb(216, 222, 233),
     selection: rgb(209, 218, 230),
+    annotation: rgb(248, 249, 251),
     border: rgb(108, 120, 142),
     overlay1: rgb(96, 114, 140),
     text: rgb(46, 52, 64),
@@ -60,6 +64,7 @@ const NORD_LIGHT: Palette = Palette {
     blue: rgb(59, 110, 168),
     teal: rgb(57, 142, 172),
     peach: rgb(172, 68, 38),
+    warning: rgb(120, 82, 14),
 };
 
 const ELDRITCH_MINIMAL: Palette = Palette {
@@ -68,6 +73,7 @@ const ELDRITCH_MINIMAL: Palette = Palette {
     raised: rgb(23, 25, 40),
     header: rgb(20, 23, 70),
     selection: rgb(44, 46, 69),
+    annotation: rgb(14, 15, 24),
     border: rgb(96, 106, 150),
     overlay1: rgb(122, 137, 204),
     text: rgb(235, 250, 250),
@@ -85,6 +91,7 @@ const ELDRITCH_MINIMAL: Palette = Palette {
     blue: rgb(4, 209, 249),
     teal: rgb(4, 209, 249),
     peach: rgb(247, 198, 127),
+    warning: rgb(247, 198, 127),
 };
 
 const ELDRITCH_DUSK: Palette = Palette {
@@ -93,6 +100,7 @@ const ELDRITCH_DUSK: Palette = Palette {
     raised: rgb(226, 230, 232),
     header: rgb(213, 217, 219),
     selection: rgb(219, 218, 239),
+    annotation: rgb(250, 251, 251),
     border: rgb(118, 122, 134),
     overlay1: rgb(91, 115, 220),
     text: rgb(30, 32, 41),
@@ -110,6 +118,7 @@ const ELDRITCH_DUSK: Palette = Palette {
     blue: rgb(10, 214, 255),
     teal: rgb(10, 214, 255),
     peach: rgb(255, 175, 77),
+    warning: rgb(138, 76, 0),
 };
 
 const CATPPUCCIN_MOCHA: Palette = Palette {
@@ -118,6 +127,7 @@ const CATPPUCCIN_MOCHA: Palette = Palette {
     raised: rgb(24, 24, 37),
     header: rgb(46, 47, 65),
     selection: rgb(58, 59, 80),
+    annotation: rgb(17, 17, 27),
     border: rgb(108, 112, 134),
     overlay1: rgb(137, 142, 166),
     text: rgb(205, 214, 244),
@@ -135,6 +145,7 @@ const CATPPUCCIN_MOCHA: Palette = Palette {
     blue: rgb(137, 180, 250),
     teal: rgb(148, 226, 213),
     peach: rgb(250, 179, 135),
+    warning: rgb(250, 179, 135),
 };
 
 const CATPPUCCIN_LATTE: Palette = Palette {
@@ -143,6 +154,7 @@ const CATPPUCCIN_LATTE: Palette = Palette {
     raised: rgb(230, 233, 239),
     header: rgb(220, 224, 232),
     selection: rgb(222, 213, 240),
+    annotation: rgb(249, 250, 252),
     border: rgb(110, 113, 135),
     overlay1: rgb(140, 143, 161),
     text: rgb(76, 79, 105),
@@ -160,6 +172,7 @@ const CATPPUCCIN_LATTE: Palette = Palette {
     blue: rgb(24, 88, 215),
     teal: rgb(23, 146, 153),
     peach: rgb(254, 100, 11),
+    warning: rgb(156, 68, 0),
 };
 
 /// A stable built-in theme identifier selected by users.
@@ -214,6 +227,7 @@ pub struct Theme {
     variant: Option<ThemeVariant>,
     syntax_colors: bool,
     syntax: SyntaxStyles,
+    severity: SeverityStyles,
     /// Base style for the complete terminal surface and review pane.
     pub application: Style,
     /// Style for navigation and help panels.
@@ -254,6 +268,8 @@ pub struct Theme {
     pub addition_emphasis: Style,
     /// Style for changed text within a removed row.
     pub deletion_emphasis: Style,
+    /// Style for a finding drawn between source rows, on a surface no source row uses.
+    pub finding: Style,
 }
 
 /// One built-in palette's colors, named by the role each plays.
@@ -261,6 +277,9 @@ pub struct Theme {
 /// The four surfaces step from `background` (the diff) through `raised` (the
 /// sidebar, title bar, footer and dialogs) and `header` (file and help
 /// headings) to `selection`, an accent-tinted step for the selected row.
+/// `annotation` sets a finding apart from the source rows around it, and
+/// `warning` marks medium severity in a color that reads as text on every
+/// surface.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Palette {
     accent: Color,
@@ -268,6 +287,7 @@ struct Palette {
     raised: Color,
     header: Color,
     selection: Color,
+    annotation: Color,
     border: Color,
     overlay1: Color,
     text: Color,
@@ -285,6 +305,18 @@ struct Palette {
     blue: Color,
     teal: Color,
     peach: Color,
+    warning: Color,
+}
+
+/// Foreground styles for each finding severity. The severity's word always
+/// accompanies the color.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SeverityStyles {
+    note: Style,
+    low: Style,
+    medium: Style,
+    high: Style,
+    critical: Style,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -390,6 +422,13 @@ impl Theme {
             variant: None,
             syntax_colors: false,
             syntax: SyntaxStyles::plain(),
+            severity: SeverityStyles {
+                note: Style::new(),
+                low: Style::new(),
+                medium: Style::new(),
+                high: Style::new().add_modifier(Modifier::BOLD),
+                critical: Style::new().add_modifier(Modifier::BOLD),
+            },
             application: Style::new(),
             panel: Style::new(),
             accent: Style::new().add_modifier(Modifier::BOLD),
@@ -410,6 +449,7 @@ impl Theme {
             search_match: Style::new().add_modifier(Modifier::REVERSED),
             addition_emphasis: Style::new().add_modifier(Modifier::BOLD),
             deletion_emphasis: Style::new().add_modifier(Modifier::BOLD),
+            finding: Style::new().add_modifier(Modifier::ITALIC),
         }
     }
 
@@ -419,6 +459,13 @@ impl Theme {
             variant: None,
             syntax_colors: false,
             syntax: SyntaxStyles::plain(),
+            severity: SeverityStyles {
+                note: Style::new(),
+                low: Style::new().fg(Color::Cyan),
+                medium: Style::new().fg(Color::Yellow),
+                high: Style::new().fg(Color::Red),
+                critical: Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+            },
             application: Style::new(),
             panel: Style::new(),
             accent: Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
@@ -441,6 +488,21 @@ impl Theme {
             search_match: Style::new().add_modifier(Modifier::REVERSED),
             addition_emphasis: Style::new().add_modifier(Modifier::BOLD),
             deletion_emphasis: Style::new().add_modifier(Modifier::BOLD),
+            finding: Style::new().add_modifier(Modifier::ITALIC),
+        }
+    }
+
+    /// Returns the foreground style that marks a finding's severity.
+    ///
+    /// The style colors a mark and the severity's word; callers always draw
+    /// the word, so severity never rests on color alone.
+    pub const fn severity(self, severity: NoteSeverity) -> Style {
+        match severity {
+            NoteSeverity::Note => self.severity.note,
+            NoteSeverity::Low => self.severity.low,
+            NoteSeverity::Medium => self.severity.medium,
+            NoteSeverity::High => self.severity.high,
+            NoteSeverity::Critical => self.severity.critical,
         }
     }
 
@@ -507,6 +569,13 @@ impl Theme {
             variant: Some(variant),
             syntax_colors: true,
             syntax,
+            severity: SeverityStyles {
+                note: Style::new().fg(palette.subtext0),
+                low: Style::new().fg(if light_variant { palette.accent } else { palette.blue }),
+                medium: Style::new().fg(palette.warning),
+                high: Style::new().fg(palette.red),
+                critical: Style::new().fg(palette.red).add_modifier(Modifier::BOLD),
+            },
             application: Style::new().fg(palette.text).bg(palette.background),
             panel: Style::new().fg(palette.text).bg(palette.raised),
             accent: Style::new().fg(palette.accent).add_modifier(Modifier::BOLD),
@@ -554,6 +623,7 @@ impl Theme {
                 .fg(palette.text)
                 .bg(palette.deletion_emphasis)
                 .add_modifier(Modifier::BOLD),
+            finding: Style::new().fg(palette.text).bg(palette.annotation),
         }
     }
 }
@@ -634,6 +704,14 @@ impl SyntaxStyles {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SEVERITIES: [NoteSeverity; 5] = [
+        NoteSeverity::Note,
+        NoteSeverity::Low,
+        NoteSeverity::Medium,
+        NoteSeverity::High,
+        NoteSeverity::Critical,
+    ];
 
     #[test]
     fn stable_identifiers_round_trip_and_unknown_identifiers_fail() {
@@ -730,6 +808,7 @@ mod tests {
                     theme.error,
                     theme.footer,
                     theme.search_match,
+                    theme.finding,
                 ] {
                     assert!(contrast(style) >= 3.0, "{family}/{mode:?} has low contrast: {style:?}");
                 }
@@ -800,6 +879,17 @@ mod tests {
             assert_ne!(selection, raised, "{name}: selected row in the sidebar");
             assert_ne!(selection, header, "{name}: selected file heading");
             assert_ne!(addition, deletion, "{name}: added and removed rows");
+            let annotation = index(palette.annotation);
+            for (surface, neighbour) in [
+                ("diff", background),
+                ("hunk header", raised),
+                ("file heading", header),
+                ("selection", selection),
+                ("added row", addition),
+                ("removed row", deletion),
+            ] {
+                assert_ne!(annotation, neighbour, "{name}: finding line matches the {surface}");
+            }
             for (role, row) in [("added", addition), ("removed", deletion)] {
                 for (surface, neighbour) in [
                     ("diff", background),
@@ -823,7 +913,60 @@ mod tests {
         }
     }
 
-    fn semantic_styles(theme: Theme) -> [Style; 20] {
+    #[test]
+    fn severity_text_reaches_aa_contrast_wherever_it_is_drawn() {
+        for variant in ThemeVariant::ALL {
+            let theme = Theme::from_palette(variant);
+            for severity in SEVERITIES {
+                let foreground = theme
+                    .severity(severity)
+                    .fg
+                    .expect("palette severities set a foreground");
+                for (background_role, background) in [
+                    ("application", theme.application),
+                    ("panel", theme.panel),
+                    ("selected", theme.selected),
+                    ("finding", theme.finding),
+                ] {
+                    let style = Style::new()
+                        .fg(foreground)
+                        .bg(background.bg.expect("palette roles set a background"));
+                    let ratio = contrast(style);
+                    assert!(
+                        ratio >= 4.5,
+                        "{}: {severity} on {background_role} is {ratio:.2}:1",
+                        variant.as_str()
+                    );
+                }
+            }
+            let muted = Style::new()
+                .fg(theme.muted.fg.expect("palette roles set a foreground"))
+                .bg(theme.finding.bg.expect("palette roles set a background"));
+            assert!(contrast(muted) >= 4.5, "{}: muted on finding", variant.as_str());
+        }
+    }
+
+    #[test]
+    fn severities_keep_distinct_styles_in_color_and_plain_themes() {
+        for theme in ThemeVariant::ALL
+            .map(Theme::from_palette)
+            .into_iter()
+            .chain([Theme::low_color()])
+        {
+            for (index, severity) in SEVERITIES.into_iter().enumerate() {
+                for other in SEVERITIES.into_iter().skip(index + 1) {
+                    assert_ne!(
+                        theme.severity(severity),
+                        theme.severity(other),
+                        "{severity} and {other}"
+                    );
+                }
+            }
+        }
+        assert_eq!(Theme::plain().severity(NoteSeverity::Medium).fg, None);
+    }
+
+    fn semantic_styles(theme: Theme) -> [Style; 21] {
         [
             theme.application,
             theme.panel,
@@ -845,6 +988,7 @@ mod tests {
             theme.search_match,
             theme.addition_emphasis,
             theme.deletion_emphasis,
+            theme.finding,
         ]
     }
 

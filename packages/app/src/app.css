@@ -70,6 +70,51 @@ select:not(:disabled) {
 	outline-offset: 2px;
 }
 
+/* A finding's severity: a colored dot and the word, so it never rests on color alone. */
+[data-severity='note'] {
+	--severity-color: var(--severity-note);
+}
+
+[data-severity='low'] {
+	--severity-color: var(--severity-low);
+}
+
+[data-severity='medium'] {
+	--severity-color: var(--severity-medium);
+}
+
+[data-severity='high'] {
+	--severity-color: var(--severity-high);
+}
+
+[data-severity='critical'] {
+	--severity-color: var(--severity-critical);
+}
+
+.severity-mark {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	color: var(--severity-color, var(--muted));
+	font-size: 0.72rem;
+	font-weight: 600;
+	text-transform: capitalize;
+	white-space: nowrap;
+}
+
+.severity-mark::before {
+	content: '';
+	flex: none;
+	width: 0.45rem;
+	height: 0.45rem;
+	border-radius: 50%;
+	background: currentColor;
+}
+
+.severity-mark[data-severity='critical'] {
+	font-weight: 700;
+}
+
 .sr-only {
 	position: absolute;
 	width: 1px;

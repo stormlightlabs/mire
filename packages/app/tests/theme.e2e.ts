@@ -20,6 +20,22 @@ test.describe('with a light browser and --theme iceberg', () => {
 		await expect(root).toHaveAttribute('data-theme', 'light');
 		expect(await background(page)).toBe('rgb(236, 239, 244)');
 	});
+
+	test('sets a finding apart from the code with its own surface and a severity rule and word', async ({
+		page,
+		mire
+	}) => {
+		await open(page, mire.url);
+		const line = page.getByRole('button', { name: /Open medium finding/ });
+		await expect(line).toContainText('medium');
+		await expect(line).toContainText('defect · open');
+		const style = await line.evaluate((element) => {
+			const computed = getComputedStyle(element);
+			return { background: computed.backgroundColor, rule: computed.borderLeftColor };
+		});
+		// --annotation and --severity-medium in Nord Light.
+		expect(style).toEqual({ background: 'rgb(248, 249, 251)', rule: 'rgb(120, 82, 14)' });
+	});
 });
 
 test.describe('with a dark browser and --theme catppuccin', () => {

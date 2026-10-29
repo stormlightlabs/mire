@@ -51,6 +51,7 @@ fn every_drawn_cell_has_a_theme_background_and_readable_contrast() {
         generated.set_generated(index, true);
     }
     let review = notes_review();
+    let severities = severities_review();
 
     let mut failures = Vec::new();
     for family in [ThemeFamily::Iceberg, ThemeFamily::Eldritch, ThemeFamily::Catppuccin] {
@@ -108,6 +109,19 @@ fn every_drawn_cell_has_a_theme_background_and_readable_contrast() {
                     20,
                 ),
                 ("filter", review_app(&review, &[KeyCode::Char('f')]), 120, 20),
+                ("severities", review_app(&severities, &[]), 120, 24),
+                (
+                    "severity focus",
+                    review_app(&severities, &[KeyCode::Char('p')]),
+                    120,
+                    24,
+                ),
+                (
+                    "severity sidebar",
+                    review_app(&severities, &[KeyCode::Tab, KeyCode::Down]),
+                    120,
+                    24,
+                ),
                 ("error", App::error("broken input"), 40, 6),
             ];
             for (scene, app, width, height) in scenes {

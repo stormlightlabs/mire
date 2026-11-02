@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { EXPORTS, handoffHeadline, handoffItems, nextUnviewed, uncountedGenerated } from './finish';
+import {
+	EXPORTS,
+	handoffAction,
+	handoffHeadline,
+	handoffItems,
+	nextOpenFinding,
+	nextUnviewed,
+	uncountedGenerated
+} from './finish';
 import type { HeldChanges } from './live';
 import type { FileSummary, FindingSummary, ReviewOverview } from './review';
 
@@ -80,6 +88,31 @@ describe('handoffItems', () => {
 			detail: '1 changed since you viewed it. 1 generated file is not counted.'
 		});
 		expect(item.kind === 'unviewed' && item.target.path.raw).toBe('b.rs');
+	});
+
+	it('marks the file on screen viewed when it is the only one left', () => {
+		const review = overview([file('a.rs', { viewed: 'viewed' }), file('b.rs', { viewed: 'changed' })]);
+
+		const [shownLast] = handoffItems(review, null, review.files[1]);
+		const [otherLeft] = handoffItems(review, null, review.files[0]);
+
+		expect(shownLast).toMatchObject({ kind: 'unviewed', markShown: true });
+		expect(shownLast.kind === 'unviewed' && shownLast.target.path.raw).toBe('b.rs');
+		expect(handoffAction(shownLast)).toBe('Mark this file viewed');
+		expect(otherLeft).toMatchObject({ kind: 'unviewed', markShown: false });
+		expect(handoffAction(otherLeft)).toBe('Next unviewed');
+	});
+
+	it('moves on from the open finding', () => {
+		const review = overview(
+			[file('a.rs', { viewed: 'viewed' })],
+			[finding('1', { severity: 'low' }), finding('2', { severity: 'high' })]
+		);
+
+		const [item] = handoffItems(review, null, null, review.findings[1]);
+
+		expect(item.kind === 'findings' && item.target.id).toBe('1');
+		expect(handoffAction(item)).toBe('Next open finding');
 	});
 
 	it('counts generated files when the review has nothing else', () => {
@@ -180,6 +213,27 @@ describe('nextUnviewed', () => {
 
 	it('returns null when every file is viewed', () => {
 		expect(nextUnviewed([file('a.rs', { viewed: 'viewed' })], null)).toBeNull();
+	});
+});
+
+describe('nextOpenFinding', () => {
+	it('goes to the next open finding in severity order after the active one and wraps', () => {
+		const findings = [
+			finding('1', { severity: 'low' }),
+			finding('2', { severity: 'high' }),
+			finding('3', { severity: 'low' }),
+			finding('4', { severity: 'critical', status: 'resolved' })
+		];
+
+		expect(nextOpenFinding(findings, null)?.id).toBe('2');
+		expect(nextOpenFinding(findings, findings[1])?.id).toBe('1');
+		expect(nextOpenFinding(findings, findings[0])?.id).toBe('3');
+		expect(nextOpenFinding(findings, findings[2])?.id).toBe('2');
+		expect(nextOpenFinding(findings, findings[3])?.id).toBe('2');
+	});
+
+	it('returns null when no finding is open', () => {
+		expect(nextOpenFinding([finding('1', { status: 'resolved' })], null)).toBeNull();
 	});
 });
 

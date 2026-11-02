@@ -555,6 +555,26 @@ async fn the_patch_export_refuses_a_binary_changeset() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(problem["code"], "patch_unavailable");
+    assert_eq!(
+        problem["detail"],
+        "The changeset has binary files, which a patch cannot carry: image.png."
+    );
+}
+
+#[test]
+fn the_binary_patch_detail_names_five_files_and_counts_the_rest() {
+    let paths = (1..=7)
+        .map(|index| BytePath::new(format!("bin/{index}.png").into_bytes()).expect("path"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        binary_patch_detail(&paths[..2]),
+        "The changeset has binary files, which a patch cannot carry: bin/1.png, bin/2.png."
+    );
+    assert_eq!(
+        binary_patch_detail(&paths),
+        "The changeset has binary files, which a patch cannot carry: \
+         bin/1.png, bin/2.png, bin/3.png, bin/4.png, bin/5.png, and 2 more."
+    );
 }
 
 #[tokio::test]

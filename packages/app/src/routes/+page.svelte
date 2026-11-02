@@ -153,7 +153,7 @@
 	const changes = $derived(review && held ? heldChanges(review, held) : null);
 	const shownChange = $derived(heldFileChange(changes, file ?? activeSummary));
 	const stopped = $derived(review ? watchNotice(connection, review.watch, review.revision) : null);
-	const handoff = $derived(review ? handoffItems(review, changes, file ?? activeSummary) : []);
+	const handoff = $derived(review ? handoffItems(review, changes, file ?? activeSummary, activeFinding) : []);
 	const generatedLeft = $derived(review ? uncountedGenerated(review.files) : 0);
 	const shownDraft = $derived(keptDraft && keptDraft.findingId === activeFinding?.id ? keptDraft : null);
 
@@ -400,13 +400,16 @@
 
 	/**
 	 * Closes the finish panel and acts on one of its items: applies the held
-	 * revision, or opens the file or finding. Keyboard focus moves to the
-	 * review content, where the change shows.
+	 * revision, marks the file on screen viewed when it is the last one left,
+	 * or opens the file or finding. Keyboard focus moves to the review content,
+	 * where the change shows.
 	 */
 	async function actOnHandoff(item: HandoffItem) {
 		finishReviewOpen = false;
 		if (item.kind === 'held') applyHeld();
-		else if (item.kind === 'unviewed') chooseFile(item.target.id);
+		else if (item.kind === 'unviewed' && item.markShown) {
+			if (review && file && shownViewState(review.files, file) !== 'viewed') void toggleViewed();
+		} else if (item.kind === 'unviewed') chooseFile(item.target.id);
 		else void selectFinding(item.target);
 		await tick();
 		document.getElementById('review-content')?.focus();

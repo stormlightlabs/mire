@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { EXPORTS, handoffHeadline, type ExportChoice, type HandoffItem } from './finish';
+	import { EXPORTS, handoffAction, handoffHeadline, type ExportChoice, type HandoffItem } from './finish';
 
 	let {
 		open,
@@ -24,6 +24,12 @@
 
 	let downloadError = $state<string | null>(null);
 
+	/**
+	 * A held revision. Exports read the review file on disk, which already has
+	 * it, so they wait until the reader applies it and sees what they export.
+	 */
+	const held = $derived(items.find((item) => item.kind === 'held') ?? null);
+
 	$effect(() => {
 		if (open) downloadError = null;
 	});
@@ -32,25 +38,14 @@
 		downloadError = null;
 		downloadError = await onDownload(choice);
 	}
-
-	function actionLabel(item: HandoffItem): string {
-		switch (item.kind) {
-			case 'held':
-				return `Apply revision ${item.revision}`;
-			case 'unviewed':
-				return 'Next unviewed';
-			case 'findings':
-				return 'Next open finding';
-			case 'anchors':
-				return 'Review anchors';
-		}
-	}
 </script>
 
 <section class="finish" aria-describedby="finish-review-summary">
 	<h1 id="finish-review-heading">Finish review</h1>
 	<p id="finish-review-summary" class="summary">
-		{handoffHeadline(items.length)} You can export now; nothing here approves or merges anything.
+		{handoffHeadline(items.length)}
+		{held ? 'You can export once the new revision is applied' : 'You can export now'}; nothing here approves or merges
+		anything.
 	</p>
 
 	<ul class="left" aria-label="Left before handoff">
@@ -69,7 +64,7 @@
 					<strong>{item.title}</strong>
 					{#if item.detail}<span class="detail">{item.detail}</span>{/if}
 				</div>
-				<button class="act" onclick={() => onAct(item)}>{actionLabel(item)}</button>
+				<button class="act" onclick={() => onAct(item)}>{handoffAction(item)}</button>
 			</li>
 		{:else}
 			<li class="item" data-kind="none">
@@ -92,10 +87,21 @@
 	</ul>
 
 	<h2 class="export-heading" id="finish-export-heading">Export</h2>
+	{#if held && held.kind === 'held'}
+		<div class="export-held" id="finish-export-held">
+			<span
+				>Exports would contain revision {held.revision}, which is not applied. Apply it to export what you see.</span>
+			<button class="act" onclick={() => onAct(held)}>Apply revision {held.revision}</button>
+		</div>
+	{/if}
 	<ul class="exports" aria-labelledby="finish-export-heading">
 		{#each EXPORTS as choice (choice.route)}
 			<li>
-				<button class="export" onclick={() => void download(choice)}>
+				<button
+					class="export"
+					disabled={held !== null}
+					aria-describedby={held ? 'finish-export-held' : undefined}
+					onclick={() => void download(choice)}>
 					<strong>{choice.label}</strong>
 					<span class="detail">{choice.filename} · {choice.purpose}</span>
 				</button>
@@ -213,6 +219,22 @@
 		color: var(--ink);
 		text-align: left;
 	}
+	.export-held {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.25rem 0.85rem;
+		margin-bottom: 0.6rem;
+		color: var(--ink);
+		font-size: 0.8rem;
+		line-height: 1.45;
+	}
+	.export:disabled {
+		color: var(--muted);
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
 	.download-error {
 		min-height: 1.2rem;
 		margin: 0.5rem 0 0;
@@ -234,7 +256,7 @@
 		font-size: 0.8rem;
 	}
 	@media (hover: hover) {
-		.export:hover,
+		.export:enabled:hover,
 		.keep:hover {
 			border-color: var(--ink);
 			background: var(--button-hover);

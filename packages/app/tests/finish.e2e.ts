@@ -18,6 +18,11 @@ function left(page: Page) {
 	return page.getByRole('dialog', { name: 'Finish review' }).getByRole('list', { name: 'Left before handoff' });
 }
 
+/** The changed file tree. */
+function files(page: Page) {
+	return page.getByRole('tree', { name: 'Changed file tree' });
+}
+
 /** Resolves both fixture findings with the CLI, then marks both files viewed in the page, leaving nothing at revision 5. */
 async function settleEverything(page: Page, mire: MireServer) {
 	mire.cli('note', 'resolve', mire.reviewPath, 'note-1', '--revision', '3', '--author', 'reviewer');
@@ -57,7 +62,16 @@ test('lists unviewed files and open findings, each with a way to act', async ({ 
 	await expect(diff.getByRole('article')).toContainText('second line should stay lowercase');
 	await expect(page.locator('#review-content')).toBeFocused();
 
+	// The next click moves on from the open finding.
+	await openPanel(page);
+	await panel.getByRole('button', { name: 'Next open finding' }).click();
+	await expect(diff.getByRole('article')).toContainText('Is the capital Y intended?');
+
 	// Next unviewed starts after the open file.
+	await files(page)
+		.getByRole('treeitem', { name: /one\.txt/ })
+		.click();
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
 	await openPanel(page);
 	await panel.getByRole('button', { name: 'Next unviewed' }).click();
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('two.txt');
@@ -69,6 +83,15 @@ test('lists unviewed files and open findings, each with a way to act', async ({ 
 	await expect(left(page)).toContainText('1 of 2 files not viewed');
 	await panel.getByRole('button', { name: 'Next unviewed' }).click();
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+
+	// When the file on screen is the last one left, the action marks it viewed.
+	await expect(diff).toHaveAttribute('aria-busy', 'false');
+	await openPanel(page);
+	await panel.getByRole('button', { name: 'Mark this file viewed' }).click();
+	await expect(panel).toBeHidden();
+	await expect(diff.getByRole('button', { name: 'Viewed' })).toHaveAttribute('aria-pressed', 'true');
+	await openPanel(page);
+	await expect(left(page)).not.toContainText('not viewed');
 });
 
 test('says nothing is left and still offers every export', async ({ page, mire }) => {
@@ -133,13 +156,44 @@ test('puts a held revision first and applies it from the panel', async ({ page, 
 	await expect(left(page).getByRole('listitem').first()).toHaveText(
 		/Revision 4 is not applied\s*1 file.* changed\. The counts below are for revision 3\.\s*Apply revision 4/
 	);
-	await panel.getByRole('button', { name: 'Apply revision 4' }).click();
+	await left(page).getByRole('button', { name: 'Apply revision 4' }).click();
 	await expect(panel).toBeHidden();
 	await expect(held).toBeHidden();
 	await expect(page.getByRole('banner')).toContainText('revision 4');
 
 	await openPanel(page, 4);
 	await expect(left(page)).not.toContainText('Revision');
+});
+
+test('holds exports until the held revision is applied', async ({ page, mire }) => {
+	await page.goto(mire.url);
+	await expect(page.getByRole('banner')).toContainText('revision 3');
+
+	await mire.writeSource('two.txt', 'x\nY\nz\n');
+	await expect(page.getByRole('region', { name: 'Revision 4 is ready.' })).toBeVisible();
+	const panel = await openPanel(page);
+	const exports = panel.getByRole('list', { name: 'Export' });
+
+	await expect(panel).toContainText('You can export once the new revision is applied');
+	await expect(panel).toContainText(
+		'Exports would contain revision 4, which is not applied. Apply it to export what you see.'
+	);
+	await expect(exports.getByRole('button')).toHaveCount(4);
+	for (const button of await exports.getByRole('button').all()) await expect(button).toBeDisabled();
+
+	// The export section applies the revision too, and the exports come back.
+	await panel.locator('.export-held').getByRole('button', { name: 'Apply revision 4' }).click();
+	await expect(panel).toBeHidden();
+	await expect(page.getByRole('banner')).toContainText('revision 4');
+	await openPanel(page, 4);
+	await expect(panel).toContainText('You can export now');
+	await expect(panel).not.toContainText('Exports would contain');
+	for (const button of await exports.getByRole('button').all()) await expect(button).toBeEnabled();
+
+	const downloading = page.waitForEvent('download');
+	await exports.getByRole('button', { name: /Patch/ }).click();
+	const patch = await readFile(await (await downloading).path(), 'utf8');
+	expect(patch).toContain('+z\n');
 });
 
 test('opens from focus mode and returns there', async ({ page, mire }) => {
@@ -184,7 +238,7 @@ test('shows why a download failed, and clears it when the panel opens again', as
 	const status = panel.getByRole('status');
 
 	await panel.getByRole('button', { name: /Patch/ }).click();
-	await expect(status).toHaveText('Patch: The changeset has binary files, which a patch cannot carry.');
+	await expect(status).toHaveText('Patch: The changeset has binary files, which a patch cannot carry: two.txt.');
 	await expect(panel).toBeVisible();
 	await expect(page.getByRole('banner')).toContainText('revision 4');
 	await expect(page.getByRole('region', { name: 'File diff' })).toBeVisible();

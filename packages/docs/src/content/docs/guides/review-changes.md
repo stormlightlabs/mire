@@ -176,20 +176,24 @@ what is left before you hand the review on. The panel writes nothing to the
 review and records no approval. Each row has a button that closes the panel
 and takes you to where you can act:
 
-| Row                                | Button            | Takes you to                                         |
-| ---------------------------------- | ----------------- | ---------------------------------------------------- |
-| A revision is not applied          | Apply revision    | The new revision, as `u` does                        |
-| Files not viewed                   | Next unviewed     | The next file in tree order not viewed as it is now  |
-| Open findings, counted by severity | Next open finding | The most severe open finding                         |
-| Findings that lost their line      | Review anchors    | The first finding whose anchor is stale or ambiguous |
+| Row                                | Button            | Takes you to                                          |
+| ---------------------------------- | ----------------- | ----------------------------------------------------- |
+| A revision is not applied          | Apply revision    | The new revision, as `u` does                         |
+| Files not viewed                   | Next unviewed     | The next file in tree order not viewed as it is now   |
+| Open findings, counted by severity | Next open finding | The next open finding by severity, after the open one |
+| Findings that lost their line      | Review anchors    | The first finding whose anchor is stale or ambiguous  |
 
-A file that changed after you marked it viewed counts as not viewed.
-Generated files are left out of the count when the review has other files,
-and the row says how many. Once every other file is viewed, a separate row
-names the generated files still not viewed. A finding whose anchor is stale or ambiguous counts
-whatever its status. With nothing left, the panel says so.
+When the file on screen is the only one not viewed, the files button reads
+Mark this file viewed and marks it. A file that changed after you marked it
+viewed counts as not viewed. Generated files are left out of the count when
+the review has other files, and the row says how many. Once every other file
+is viewed, a separate row names the generated files still not viewed. A
+finding whose anchor is stale or ambiguous counts whatever its status. With
+nothing left, the panel says so.
 
-The panel's exports download the review file as it is on disk:
+The panel's exports download the review file as it is on disk. While a new
+revision is held, the file on disk already has it, so the exports stay off
+until you apply it with the Apply revision button beside them:
 
 | Export            | File                   | Command                                      |
 | ----------------- | ---------------------- | -------------------------------------------- |

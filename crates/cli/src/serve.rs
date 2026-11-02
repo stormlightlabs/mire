@@ -22,7 +22,7 @@ use axum::{Router, extract::MatchedPath};
 use base64::Engine;
 use include_dir::{Dir, include_dir};
 use mire_core::{
-    AnnotationKind, Author, ChangesetSource, FileContent, FileDiff, Hunk, NoteId, NoteSeverity, NoteStatus,
+    AnnotationKind, Author, BytePath, ChangesetSource, FileContent, FileDiff, Hunk, NoteId, NoteSeverity, NoteStatus,
     PatchWriteError, Review, ReviewNote, ReviewRevision, ViewedMap, write_patch,
 };
 use mire_tui::ThemeFamily;
@@ -1225,14 +1225,30 @@ async fn export_patch(State(state): State<AppState>) -> Response<Body> {
     match load_current_review(&state).await {
         Ok(review) => match write_patch(review.changeset()) {
             Ok(bytes) => download(bytes, "text/x-diff; charset=utf-8", "mire-changeset.patch"),
-            Err(PatchWriteError::BinaryContent { .. }) => problem(
+            Err(PatchWriteError::BinaryContent { paths }) => problem(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "patch_unavailable",
-                "The changeset has binary files, which a patch cannot carry.",
+                &binary_patch_detail(&paths),
             ),
         },
         Err(response) => *response,
     }
+}
+
+/// Names the binary files that keep a changeset from becoming a patch: the
+/// first five, then how many more there are.
+fn binary_patch_detail(paths: &[BytePath]) -> String {
+    const LISTED: usize = 5;
+    let mut names = paths
+        .iter()
+        .take(LISTED)
+        .map(|path| String::from_utf8_lossy(path.as_bytes()).into_owned())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if paths.len() > LISTED {
+        names.push_str(&format!(", and {} more", paths.len() - LISTED));
+    }
+    format!("The changeset has binary files, which a patch cannot carry: {names}.")
 }
 
 async fn load_current_review(state: &AppState) -> Result<Review, Box<Response<Body>>> {

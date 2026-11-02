@@ -5,12 +5,23 @@
 		{ keys: ['j', 'k'], action: 'finding' },
 		{ keys: ['b', 'Esc'], action: 'leave focus' }
 	];
+
+	let {
+		heldRevision = null
+	}: {
+		/** The revision waiting for the reader, which `u` applies, or `null` when none waits. */
+		heldRevision?: number | null;
+	} = $props();
+
+	const keys = $derived(
+		heldRevision === null ? KEYS : [{ keys: ['u'], action: `apply revision ${heldRevision}` }, ...KEYS]
+	);
 </script>
 
 <footer class="key-bar" aria-label="Keys">
 	<span class="label">Keys:</span>
 	<ul>
-		{#each KEYS as entry (entry.action)}
+		{#each keys as entry (entry.action)}
 			<li>
 				{#each entry.keys as key (key)}<kbd>{key}</kbd>{/each}
 				{entry.action}

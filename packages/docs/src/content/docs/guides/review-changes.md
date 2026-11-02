@@ -169,6 +169,37 @@ the gutter, without tinted rows.
 Focus mode lasts until you leave it or reload the page. The server stores
 nothing about it, so each tab has its own.
 
+## Follow changes in the browser
+
+The browser review that `mire serve` opens watches the review file and its
+source, but it does not change the diff while you read. When a new revision
+arrives, a bar under the header names it and counts the files and findings
+that changed. The diff stays at the revision you were reading, and the file
+heading says when the open file changed. Select See what changed to list the
+files. Press `u` or select Apply revision to show the new revision. Focus
+mode shows the same bar.
+
+Until you apply it, a file that changed in the new revision does not open,
+since the server keeps only the newest content. Your own changes apply at
+once: a viewed mark, an edited finding, a decision, and Refresh source, which
+also applies a waiting revision.
+
+If you save a finding edit after a new revision arrived, the server refuses
+it. A dialog shows the text you wrote, which stays in the editor. Select Apply
+revision and keep draft, then save again, or select Copy text.
+
+A bar under the header also shows when updates stop, and the header status
+names the revision on screen:
+
+| Status         | Cause                                        | To resume                              |
+| -------------- | -------------------------------------------- | -------------------------------------- |
+| `degraded`     | Reading the review file or the source failed | Mire retries; Refresh source reads now |
+| `disconnected` | The connection to `mire serve` was lost      | Mire retries; Try again retries now    |
+| `stopped`      | `mire serve` shut down                       | Run `mire serve` and open its new URL  |
+
+The review stays on screen in each case. After the page reconnects, it checks
+for a revision it missed and holds it like any other.
+
 ## Select a theme
 
 Use `--theme auto`, `iceberg`, `eldritch`, or `catppuccin`. Each family has a

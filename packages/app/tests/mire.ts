@@ -15,6 +15,8 @@ export type MireServer = {
 	url: string;
 	/** The repository root whose working tree the review compares. */
 	root: string;
+	/** The review file the server reads and writes. */
+	reviewPath: string;
 	/** Reads the review file the server writes. */
 	readReview: () => Promise<{ revision: number; notes: { id: string; status: string; body: string }[] }>;
 	/**
@@ -24,6 +26,8 @@ export type MireServer = {
 	 * truncate and the write records the empty file as a revision of its own.
 	 */
 	writeSource: (file: string, content: string) => Promise<void>;
+	/** Stops the server as Ctrl-C would, and waits for it to exit. */
+	stop: () => Promise<void>;
 };
 
 /** The binary under test: `$MIRE_BIN`, or the workspace's debug build. */
@@ -68,15 +72,18 @@ export const test = base.extend<{
 			const theme = mireTheme ? ['--theme', mireTheme] : [];
 			child = spawn(binary, [...theme, 'serve', review], { cwd: root, stdio: ['ignore', 'pipe', 'inherit'] });
 			const url = await readBanner(child);
+			const server = child;
 			await use({
 				url,
 				root,
+				reviewPath: review,
 				readReview: async () => JSON.parse(await readFile(review, 'utf8')),
 				writeSource: async (file, content) => {
 					const staged = path.join(directory, 'staged-source');
 					await writeFile(staged, content);
 					await rename(staged, path.join(root, file));
-				}
+				},
+				stop: () => stop(server, 'SIGINT')
 			});
 		} finally {
 			if (child) await stop(child);
@@ -154,11 +161,11 @@ function readBanner(child: ChildProcess): Promise<string> {
 	});
 }
 
-/** Stops the server and waits for it to exit. */
-async function stop(child: ChildProcess) {
+/** Stops the server with `signal` and waits for it to exit, killing it after five seconds. */
+async function stop(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM') {
 	if (child.exitCode !== null || child.signalCode !== null) return;
 	const exited = new Promise((resolve) => child.once('exit', resolve));
-	child.kill('SIGTERM');
+	child.kill(signal);
 	const timeout = setTimeout(() => child.kill('SIGKILL'), 5_000);
 	await exited;
 	clearTimeout(timeout);

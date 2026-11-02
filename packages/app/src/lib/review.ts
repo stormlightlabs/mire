@@ -182,6 +182,17 @@ export type Problem = {
 	actualRevision?: number;
 };
 
+/** A failed API request, with the problem code the server returned, if any. */
+export class RequestError extends Error {
+	/** The problem's `code`, such as `revision_conflict`, or `null` when the response carried none. */
+	readonly code: string | null;
+
+	constructor(message: string, code: string | null) {
+		super(message);
+		this.code = code;
+	}
+}
+
 export type WatchStatus = 'watching' | 'unavailable' | 'degraded';
 
 export type ReanchorTotals = {

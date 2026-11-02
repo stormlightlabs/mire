@@ -743,6 +743,31 @@ async fn the_event_stream_delivers_invalidations_after_a_write() {
     assert_eq!(event["watch"], "unavailable");
 }
 
+#[tokio::test]
+async fn the_event_stream_ends_after_the_shutdown_event() {
+    let fixture = Fixture::with_note();
+    let state = fixture.state();
+    let response = app(state.clone())
+        .oneshot(api_request(Method::GET, "/api/v1/events", None))
+        .await
+        .expect("response");
+    let mut stream = response.into_body().into_data_stream();
+
+    publish(&state, ServerEventKind::Shutdown, None);
+
+    let frame = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("the shutdown event arrives")
+        .expect("the stream sends it before ending")
+        .expect("frame bytes");
+    let frame = String::from_utf8(frame.to_vec()).expect("UTF-8 event");
+    assert!(frame.contains(r#""kind":"shutdown""#), "{frame}");
+    let end = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("the stream ends");
+    assert!(end.is_none(), "no frame follows the shutdown event");
+}
+
 #[test]
 fn the_watcher_announces_every_new_revision_it_learns() {
     let fixture = Fixture::new();

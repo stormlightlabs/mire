@@ -7,17 +7,28 @@
 	import KeyBar from '$lib/KeyBar.svelte';
 	import Overlay from '$lib/Overlay.svelte';
 	import { filePosition, takesText } from '$lib/focus';
+	import {
+		heldChanges,
+		heldFileChange,
+		heldSummary,
+		watchLabel,
+		watchNotice,
+		withViewedMarks,
+		type Connection
+	} from '$lib/live';
 	import { OverviewLoads } from '$lib/reload';
 	import { loadDevelopmentSessionSecret, parseSessionSecret, saveDevelopmentSessionSecret } from '$lib/session';
 	import { applyTheme, loadTheme, saveTheme, type Theme } from '$lib/theme';
 	import {
 		completionSummary,
 		defaultFindingFilters,
+		formatPath,
 		filterFindings,
 		firstFile,
 		hasReviewMetadata,
 		isShownFile,
 		reopenedFile,
+		RequestError,
 		reviewDescription,
 		reviewTitle,
 		shownViewState,
@@ -37,6 +48,8 @@
 	} from '$lib/review';
 
 	type RefreshState = 'idle' | 'pending' | 'refreshed' | 'unchanged' | 'failed';
+	/** A finding edit the server refused because the review changed, kept until it saves. */
+	type KeptDraft = FindingDraft & { findingId: string };
 
 	let review = $state<ReviewOverview | null>(null);
 	let activeFile = $state<string | null>(null);
@@ -66,6 +79,19 @@
 	let focusButton = $state<HTMLButtonElement>();
 	/** The focus bar, which takes keyboard focus when focus mode starts. */
 	let focusBar = $state<FocusBar>();
+	/**
+	 * A newer revision than the one on screen, held until the reader applies
+	 * it. Source changes and other writers' edits wait here; the reader's own
+	 * writes apply at once.
+	 */
+	let held = $state<ReviewOverview | null>(null);
+	/** Whether the held revision's file list is open. */
+	let heldListOpen = $state(false);
+	/** Whether live updates reach the page. */
+	let connection = $state<Connection>('live');
+	/** The reader's finding edit from a save that hit a revision conflict. */
+	let keptDraft = $state<KeptDraft | null>(null);
+	let draftCopied = $state(false);
 
 	let streamAbort: AbortController | null = null;
 	let secret = '';
@@ -80,6 +106,13 @@
 	let viewedPending = false;
 	/** Orders overview loads, so a slow response cannot overwrite a newer one. */
 	const overviewLoads = new OverviewLoads();
+	/** Counts the reader's own writes in flight. Live updates that arrive meanwhile wait for them. */
+	let writesInFlight = 0;
+	/** Whether a live update arrived during one of the reader's writes and still needs a check. */
+	let checkAfterWrites = false;
+	let retryTimer: ReturnType<typeof setTimeout> | undefined;
+	/** How long to wait before the next attempt to reconnect the live channel. */
+	let retryDelay = 1_000;
 
 	const completion = $derived(review ? completionSummary(review) : null);
 	const activeSummary = $derived(review?.files.find((summary) => summary.id === activeFile) ?? null);
@@ -92,6 +125,10 @@
 	/** Focus mode needs a loaded review; until then the normal header explains what is happening. */
 	const inFocus = $derived(focused && review !== null && error === null);
 	const themeLabel = $derived(theme === 'dark' ? 'Use light mode' : 'Use dark mode');
+	const changes = $derived(review && held ? heldChanges(review, held) : null);
+	const shownChange = $derived(heldFileChange(changes, file ?? activeSummary));
+	const stopped = $derived(review ? watchNotice(connection, review.watch, review.revision) : null);
+	const shownDraft = $derived(keptDraft && keptDraft.findingId === activeFinding?.id ? keptDraft : null);
 
 	$effect(() => {
 		if (!themeReady) return;
@@ -127,6 +164,7 @@
 		});
 		return () => {
 			streamAbort?.abort();
+			clearTimeout(retryTimer);
 			narrowScreen.removeEventListener('change', updateNarrowScreen);
 		};
 	});
@@ -144,7 +182,10 @@
 			if (response.status === 409 && problem?.code === 'revision_conflict') {
 				conflictRevision = problem.actualRevision ?? null;
 			}
-			throw new Error(problem?.detail ?? `The requested review data is unavailable (${response.status}).`);
+			throw new RequestError(
+				problem?.detail ?? `The requested review data is unavailable (${response.status}).`,
+				problem?.code ?? null
+			);
 		}
 		return (await response.json()) as T;
 	}
@@ -185,28 +226,75 @@
 	}
 
 	/**
-	 * Reloads the overview. With `reopen`, as after a source change or a finding
-	 * change, the open file loads again too; a viewed mark changes no file's diff
-	 * and passes `false`. When a newer reload's response is shown first, that one
-	 * reopens the file instead, so the diff never lags the header.
+	 * Reloads the overview. With `apply`, as after the reader's own finding
+	 * change or when they apply a held revision, the response is shown and the
+	 * open file loads again. Without it, as after a live update or a viewed
+	 * mark, a newer revision is held for the reader to apply and only viewed
+	 * marks change on screen. When a newer reload's response is shown first,
+	 * that one applies instead, so the diff never lags the header.
 	 */
-	async function reloadReview(reopen = true) {
+	async function reloadReview(apply = true) {
 		if (!review) return;
-		const ticket = overviewLoads.start(reopen);
+		const ticket = overviewLoads.start(apply);
 		try {
 			const overview = await request<ReviewOverview>('/api/v1/review');
 			const settled = overviewLoads.settle(ticket);
-			if (!settled.apply) return;
+			if (!settled.apply || !review) return;
+			if (!settled.reopen) {
+				holdOverview(review, overview);
+				return;
+			}
 			const previous = activeSummary ?? file;
 			review = overview;
-			if (!settled.reopen) return;
+			if (held && held.revision <= overview.revision) {
+				held = null;
+				heldListOpen = false;
+			}
 			conflictRevision = null;
 			const reopened = reopenedFile(review.files, previous);
 			if (reopened.notice) notice = reopened.notice;
 			if (reopened.file) await selectFile(reopened.file.id);
 			else closeFile();
 		} catch (cause) {
-			error = handleErr(cause, 'The review could not be reloaded.');
+			// A background check that fails leaves the page as it is; the next update checks again.
+			if (!apply) return;
+			const message = handleErr(cause, 'The review could not be reloaded.');
+			// The revision on screen stays readable when the held one cannot load.
+			if (held) notice = `Revision ${held.revision} could not be loaded: ${message}`;
+			else error = message;
+		}
+	}
+
+	/** Holds an overview newer than the one on screen, and shows its viewed marks and watch status now. */
+	function holdOverview(shown: ReviewOverview, overview: ReviewOverview) {
+		if (overview.revision > shown.revision) {
+			held = overview;
+			review = withViewedMarks(shown, overview);
+		} else if (overview.revision === shown.revision) {
+			review = overview;
+		}
+	}
+
+	/** Shows the held revision and loads the open file at it. */
+	function applyHeld() {
+		if (held) void reloadReview(true);
+	}
+
+	/**
+	 * Runs one of the reader's own writes. A live update that arrives during it
+	 * is checked once the write and its reload finish, so the reader's change is
+	 * not held as if another writer had made it.
+	 */
+	async function ownWrite<T>(write: () => Promise<T>): Promise<T> {
+		writesInFlight++;
+		try {
+			return await write();
+		} finally {
+			writesInFlight--;
+			if (writesInFlight === 0 && checkAfterWrites) {
+				checkAfterWrites = false;
+				void reloadReview(false);
+			}
 		}
 	}
 
@@ -214,9 +302,11 @@
 		if (!review || refreshState === 'pending') return;
 		refreshState = 'pending';
 		try {
-			const result = await request<RefreshResponse>('/api/v1/refresh', { method: 'POST' });
-			refreshState = result.status;
-			await reloadReview();
+			await ownWrite(async () => {
+				const result = await request<RefreshResponse>('/api/v1/refresh', { method: 'POST' });
+				refreshState = result.status;
+				await reloadReview();
+			});
 		} catch (cause) {
 			refreshState = 'failed';
 			error = handleErr(cause, 'The source could not be refreshed.');
@@ -238,15 +328,27 @@
 		}
 	}
 
+	/**
+	 * Opens the live channel and reads its events until it closes. A closed or
+	 * failed channel marks the watch stopped, keeps the review on screen, and
+	 * tries again after a delay that doubles up to 30 seconds. Once it
+	 * reconnects, the page checks for a revision it missed.
+	 */
 	async function connectEvents() {
+		clearTimeout(retryTimer);
 		streamAbort?.abort();
-		streamAbort = new AbortController();
+		const abort = new AbortController();
+		streamAbort = abort;
 		try {
 			const response = await fetch('/api/v1/events', {
 				headers: { Authorization: `Bearer ${secret}` },
-				signal: streamAbort.signal
+				signal: abort.signal
 			});
 			if (!response.ok || !response.body) throw new Error('Live review updates are unavailable.');
+			const resumed = connection !== 'live';
+			connection = 'live';
+			retryDelay = 1_000;
+			if (resumed) void reloadReview(false);
 			const reader = response.body.getReader();
 			const decoder = new TextDecoder();
 			let buffer = '';
@@ -265,18 +367,41 @@
 					if (data) await handleEvent(data);
 				}
 			}
-		} catch (cause) {
-			if (!streamAbort?.signal.aborted) {
-				error = handleErr(cause, 'Live review updates disconnected.');
-				window.setTimeout(connectEvents, 1_000);
-			}
+		} catch {
+			// A failed or cut-off channel is reported below, like one that closed.
 		}
+		if (abort.signal.aborted) return;
+		if (connection === 'live') connection = 'lost';
+		retryTimer = setTimeout(connectEvents, retryDelay);
+		retryDelay = Math.min(retryDelay * 2, 30_000);
 	}
 
+	/** Tries the live channel again now, as the stopped-watch notice offers. */
+	function reconnect() {
+		retryDelay = 1_000;
+		void connectEvents();
+	}
+
+	/**
+	 * Handles one live event. A watch status change shows at once; any other
+	 * update checks for a newer revision, which is held until the reader
+	 * applies it.
+	 */
 	async function handleEvent(data: string) {
 		const event = JSON.parse(data) as { kind?: string; watch?: WatchStatus };
-		if (event.kind === 'shutdown') return;
-		await reloadReview(event.kind !== 'viewed');
+		if (event.kind === 'shutdown') {
+			connection = 'stopped';
+			return;
+		}
+		if (event.kind === 'watch_status') {
+			if (review && event.watch) review.watch = event.watch;
+			return;
+		}
+		if (writesInFlight > 0) {
+			checkAfterWrites = true;
+			return;
+		}
+		await reloadReview(false);
 	}
 
 	/**
@@ -323,6 +448,13 @@
 		activeFile = id;
 		if (!next || !isShownFile(file, next)) file = null;
 		fileError = null;
+		// The server only has the newest content, so a file the held revision changed waits for it.
+		if (held && next && !held.files.some((summary) => summary.id === id)) {
+			file = null;
+			fileLoading = false;
+			fileError = `${formatPath(next.path)} changed in revision ${held.revision}. Apply it to read this file.`;
+			return;
+		}
 		fileLoading = true;
 		try {
 			const detail = await request<FileDetail>(`/api/v1/files/${encodeURIComponent(id)}`);
@@ -375,31 +507,41 @@
 
 	async function editFinding(draft: FindingDraft): Promise<string | null> {
 		if (!review || !activeFinding) return 'Select a finding before editing it.';
+		const findingId = activeFinding.id;
+		const expectedRevision = review.revision;
 		try {
-			const result = await request<FindingMutation>(`/api/v1/findings/${encodeURIComponent(activeFinding.id)}`, {
-				method: 'PATCH',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ expectedRevision: review.revision, ...draft })
+			await ownWrite(async () => {
+				const result = await request<FindingMutation>(`/api/v1/findings/${encodeURIComponent(findingId)}`, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ expectedRevision, ...draft })
+				});
+				await applyFindingMutation(result);
 			});
-			await applyFindingMutation(result);
+			keptDraft = null;
 			return null;
 		} catch (cause) {
+			if (cause instanceof RequestError && cause.code === 'revision_conflict') {
+				keptDraft = { findingId, ...draft };
+				draftCopied = false;
+			}
 			return handleErr(cause, 'The finding could not be saved.');
 		}
 	}
 
 	async function decideFinding(decision: 'resolve' | 'reopen' | 'dismiss' | 'accept-risk'): Promise<string | null> {
 		if (!review || !activeFinding) return 'Select a finding before recording a decision.';
+		const findingId = activeFinding.id;
+		const expectedRevision = review.revision;
 		try {
-			const result = await request<FindingMutation>(
-				`/api/v1/findings/${encodeURIComponent(activeFinding.id)}/decision`,
-				{
+			await ownWrite(async () => {
+				const result = await request<FindingMutation>(`/api/v1/findings/${encodeURIComponent(findingId)}/decision`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ expectedRevision: review.revision, decision })
-				}
-			);
-			await applyFindingMutation(result);
+					body: JSON.stringify({ expectedRevision, decision })
+				});
+				await applyFindingMutation(result);
+			});
 			return null;
 		} catch (cause) {
 			return handleErr(cause, 'The decision could not be saved.');
@@ -468,7 +610,10 @@
 		}
 		// An open dialog takes Esc for itself, and the page behind it stays as it is.
 		if (!review || inDialog(target)) return;
-		if (event.key === 'b') {
+		if (event.key === 'u' && held) {
+			event.preventDefault();
+			if (!event.repeat) applyHeld();
+		} else if (event.key === 'b') {
 			event.preventDefault();
 			// A held key would flip focus mode on every repeat.
 			if (!event.repeat) void setFocused(!focused);
@@ -488,6 +633,17 @@
 			block: 'center',
 			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
 		});
+	}
+
+	/** Copies the kept draft's text, so the reader has it even if the editor closes. */
+	async function copyDraft() {
+		if (!keptDraft) return;
+		try {
+			await navigator.clipboard.writeText(keptDraft.body);
+			draftCopied = true;
+		} catch {
+			draftCopied = false;
+		}
 	}
 
 	function selectFileFromDrawer(id: string) {
@@ -590,13 +746,60 @@
 					</button>
 				{/if}
 				<span
-					class:ready={review?.watch === 'watching'}
-					class:degraded={review?.watch === 'degraded'}
+					class:ready={review?.watch === 'watching' && connection === 'live'}
+					class:degraded={review?.watch === 'degraded' || (review !== null && connection !== 'live')}
 					class="status"
-					aria-live="polite">{review ? review.watch : 'loading'}</span>
+					aria-live="polite">{review ? watchLabel(connection, review.watch, review.revision) : 'loading'}</span>
 			</div>
 		</header>
 	{/if}
+
+	<div class="live-strip" aria-live="polite">
+		{#if review && changes}
+			<section class="held" aria-labelledby="held-heading">
+				<div class="held-row">
+					<span class="i-lucide-refresh-cw held-icon" aria-hidden="true"></span>
+					<p>
+						<strong id="held-heading">Revision {changes.revision} is ready.</strong>
+						{heldSummary(changes)} Your place is held here until you apply it.
+					</p>
+					<div class="held-actions">
+						<button class="held-apply" aria-keyshortcuts="u" onclick={applyHeld}>
+							Apply revision {changes.revision}
+							<kbd class="key-hint" aria-hidden="true">u</kbd>
+						</button>
+						{#if changes.files.length}
+							<button
+								class="held-toggle"
+								aria-expanded={heldListOpen}
+								aria-controls="held-files"
+								onclick={() => (heldListOpen = !heldListOpen)}>
+								{heldListOpen ? 'Hide changes' : 'See what changed'}
+							</button>
+						{/if}
+					</div>
+				</div>
+				{#if heldListOpen && changes.files.length}
+					<ul id="held-files" class="held-files" aria-label="Files changed in revision {changes.revision}">
+						{#each changes.files as change (change.path.raw)}
+							<li><span class="held-change">{change.change}</span> {formatPath(change.path)}</li>
+						{/each}
+					</ul>
+				{/if}
+			</section>
+		{/if}
+		{#if stopped}
+			<section class="watch-stopped" aria-labelledby="watch-stopped-heading">
+				<span class="i-lucide-triangle-alert watch-icon" aria-hidden="true"></span>
+				<p><strong id="watch-stopped-heading">{stopped.heading}.</strong> {stopped.body}</p>
+				{#if stopped.action === 'reconnect'}
+					<button onclick={reconnect}>Try again</button>
+				{:else if stopped.action === 'refresh'}
+					<button disabled={refreshState === 'pending'} onclick={() => void refreshReview()}>Refresh source</button>
+				{/if}
+			</section>
+		{/if}
+	</div>
 
 	<main id="review-content" class="workspace" tabindex="-1">
 		{#if error}
@@ -638,6 +841,8 @@
 				{theme}
 				viewState={shownView}
 				{viewedError}
+				heldChange={shownChange && changes ? { change: shownChange, revision: changes.revision } : null}
+				keptDraft={shownDraft}
 				bind:openedGenerated
 				showHeading={!inFocus}
 				onDismissNotice={() => (notice = null)}
@@ -656,7 +861,7 @@
 		{/if}
 	</main>
 	{#if inFocus}
-		<KeyBar />
+		<KeyBar heldRevision={changes?.revision ?? null} />
 	{/if}
 	{#if review && isNarrow && mobilePane === 'files'}
 		<Overlay open={true} labelledBy="files-drawer-heading" variant="drawer" onClose={() => (mobilePane = null)}>
@@ -732,9 +937,31 @@
 	{#if conflictRevision !== null}
 		<Overlay open={true} labelledBy="conflict-heading" variant="dialog" onClose={() => (conflictRevision = null)}>
 			<section class="dialog-content">
-				<h1 id="conflict-heading">Review changed</h1>
-				<p>Revision {conflictRevision} is now current. Your unsaved edit is still here; reload, then save it again.</p>
-				<button class="primary-button" onclick={() => void reloadReview()}>Reload review</button>
+				{#if keptDraft}
+					<h1 id="conflict-heading">Your edit was not saved</h1>
+					<p>
+						Revision {conflictRevision} was written while you edited. Your text is kept below and in the editor. Apply revision
+						{conflictRevision}, then save again.
+					</p>
+					<label class="kept-draft">
+						<span>Your text</span>
+						<textarea readonly rows="4" value={keptDraft.body}></textarea>
+					</label>
+					<div class="conflict-actions">
+						<button class="primary-button" onclick={() => void reloadReview()}>
+							Apply revision {conflictRevision} and keep draft
+						</button>
+						<button class="secondary-button" onclick={() => void copyDraft()}>
+							{draftCopied ? 'Copied' : 'Copy text'}
+						</button>
+					</div>
+				{:else}
+					<h1 id="conflict-heading">Review changed</h1>
+					<p>
+						Revision {conflictRevision} was written while you worked, so your change was not saved. Apply it, then try again.
+					</p>
+					<button class="primary-button" onclick={() => void reloadReview()}>Apply revision {conflictRevision}</button>
+				{/if}
 			</section>
 		</Overlay>
 	{/if}
@@ -747,10 +974,151 @@
 		min-height: 0;
 		overflow: hidden;
 		display: grid;
-		grid-template-rows: auto 1fr;
+		grid-template-rows: auto auto 1fr;
 	}
 	.app-shell.focused {
-		grid-template-rows: auto 1fr auto;
+		grid-template-rows: auto auto 1fr auto;
+	}
+	/* The bar is inverted in light palettes. In dark ones an inverted bar would
+	   be the brightest thing on screen, so it sits one step above the page. */
+	.held {
+		--held-bg: var(--selected);
+		--held-ink: var(--selected-ink);
+		border-bottom: 1px solid var(--line);
+		background: var(--held-bg);
+		color: var(--held-ink);
+		font-size: 0.78rem;
+	}
+	:global(:root[data-theme='dark']) .held {
+		--held-bg: var(--paper-deep);
+		--held-ink: var(--ink);
+	}
+	.held-row,
+	.watch-stopped {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5rem 0.75rem;
+		padding: 0.55rem 1rem;
+	}
+	.held-row p,
+	.watch-stopped p {
+		flex: 1 1 20rem;
+		min-width: 0;
+		margin: 0;
+		line-height: 1.45;
+	}
+	.held-icon,
+	.watch-icon {
+		width: 0.95rem;
+		height: 0.95rem;
+		flex: none;
+	}
+	.held-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+	.held-actions button,
+	.watch-stopped button {
+		min-height: 1.85rem;
+		padding: 0.25rem 0.75rem;
+		font:
+			600 0.72rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.held-apply {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		border: 1px solid var(--held-ink);
+		background: var(--held-ink);
+		color: var(--held-bg);
+	}
+	.held-apply .key-hint {
+		color: inherit;
+		opacity: 0.75;
+	}
+	.held-toggle {
+		border: 1px solid var(--held-ink);
+		background: transparent;
+		color: var(--held-ink);
+	}
+	.held button:focus-visible {
+		outline: 2px solid var(--held-ink);
+		outline-offset: 2px;
+	}
+	.held-files {
+		margin: 0;
+		padding: 0 1rem 0.6rem 2.7rem;
+		list-style: none;
+		font:
+			0.75rem/1.6 'Google Sans Code Variable',
+			'Google Sans Code',
+			monospace;
+		overflow-wrap: anywhere;
+	}
+	.held-change {
+		display: inline-block;
+		min-width: 4.5rem;
+		opacity: 0.8;
+	}
+	.watch-stopped {
+		border-bottom: 1px solid var(--danger);
+		background: var(--surface);
+		font-size: 0.78rem;
+	}
+	.watch-stopped strong,
+	.watch-icon {
+		color: var(--danger);
+	}
+	.watch-stopped button {
+		border: 1px solid var(--line-strong);
+		background: var(--paper);
+		color: var(--ink);
+	}
+	.watch-stopped button:disabled {
+		cursor: not-allowed;
+		opacity: 0.5;
+	}
+	.kept-draft {
+		display: grid;
+		gap: 0.25rem;
+		margin: 0.9rem 0;
+		color: var(--muted);
+		font-size: 0.72rem;
+		font-weight: 600;
+	}
+	.kept-draft textarea {
+		width: 100%;
+		border: 1px solid var(--line-strong);
+		padding: 0.45rem 0.55rem;
+		background: var(--paper);
+		color: var(--ink);
+		font: inherit;
+		font-size: 0.82rem;
+		font-weight: 400;
+		line-height: 1.5;
+		resize: vertical;
+	}
+	.conflict-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+	.secondary-button {
+		min-height: 2.25rem;
+		border: 1px solid var(--line-strong);
+		padding: 0.35rem 0.7rem;
+		background: var(--surface);
+		color: var(--ink);
+		font:
+			600 0.75rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
 	}
 	.topbar {
 		display: grid;

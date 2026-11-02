@@ -64,8 +64,15 @@ test('reviews a change from load to export', async ({ page, mire }) => {
 	expect(markdown).toMatch(/## Low: note-2\n[\s\S]*- Status: `open`/);
 	await dialog.getByRole('button', { name: 'Close' }).click();
 
-	// Refresh: a source edit reaches the open file, which no longer counts as viewed.
+	// Refresh: a source edit waits until the reader applies it. Then it reaches
+	// the open file, which no longer counts as viewed.
 	await mire.writeSource('one.txt', 'alpha\nBETA\ngamma\ndelta\n');
+	const held = page.getByRole('region', { name: 'Revision 5 is ready.' });
+	await expect(held).toContainText('1 file');
+	await expect(header).toContainText('revision 4');
+	await expect(diff).not.toContainText('delta');
+	await held.getByRole('button', { name: 'Apply revision 5' }).click();
+	await expect(held).toBeHidden();
 	await expect(header).toContainText('revision 5');
 	await expect(diff).toContainText('delta');
 	await expect(diff.getByRole('button', { name: 'Changed since viewed' })).toBeVisible();
@@ -74,7 +81,7 @@ test('reviews a change from load to export', async ({ page, mire }) => {
 	expect((await mire.readReview()).revision).toBe(5);
 });
 
-test('opens the changed file when a viewed reload overtakes a slow source reload', async ({ page, mire }) => {
+test('holds a source change when a viewed reload overtakes its slow reload', async ({ page, mire }) => {
 	await page.goto(mire.url);
 
 	const header = page.getByRole('banner');
@@ -102,17 +109,28 @@ test('opens the changed file when a viewed reload overtakes a slow source reload
 	await mire.writeSource('one.txt', 'alpha\nBETA\ngamma\ndelta\n');
 	await holdingStarted;
 
-	// Marking the old content viewed reloads the overview, which overtakes the held reload.
-	await diff.getByRole('button', { name: 'Viewed' }).click();
+	// Marking the old content viewed reloads the overview, which overtakes the
+	// slow reload. The mark shows at once; the new revision waits.
+	const viewed = diff.getByRole('button', { name: 'Viewed' });
+	await viewed.click();
+	await expect(viewed).toHaveAttribute('aria-pressed', 'true');
+	const ready = page.getByRole('region', { name: 'Revision 4 is ready.' });
+	await expect(ready).toBeVisible();
+	await expect(header).toContainText('revision 3');
+	await expect(diff).not.toContainText('delta');
+
+	// The slow response arrives late and changes nothing.
+	held();
+	await expect(ready).toBeVisible();
+	await expect(header).toContainText('revision 3');
+	await expect(diff).not.toContainText('delta');
+
+	// Applying shows the new content, which no longer counts as viewed.
+	await ready.getByRole('button', { name: 'Apply revision 4' }).click();
 	await expect(header).toContainText('revision 4');
 	await expect(diff).toContainText('delta');
 	await expect(files.getByRole('treeitem', { name: /one\.txt/ })).toHaveAttribute('aria-selected', 'true');
 	await expect(diff.getByRole('button', { name: 'Changed since viewed' })).toBeVisible();
-
-	// The held response arrives late and changes nothing.
-	held();
-	await expect(diff).toContainText('delta');
-	await expect(header).toContainText('revision 4');
 });
 
 test('empties the diff pane when the last file leaves the review', async ({ page, mire }) => {
@@ -125,7 +143,13 @@ test('empties the diff pane when the last file leaves the review', async ({ page
 	await mire.writeSource('one.txt', 'alpha\nbeta\ngamma\n');
 	await mire.writeSource('two.txt', 'x\ny\n');
 
-	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('No changed files');
+	// The two edits may land as one revision or two, so apply until none is left.
+	await expect(async () => {
+		const apply = page.getByRole('button', { name: /^Apply revision/ });
+		if (await apply.isVisible()) await apply.click();
+		await expect(diff.getByRole('heading', { level: 1 })).toHaveText('No changed files', { timeout: 1_000 });
+	}).toPass();
+	await expect(page.getByRole('region', { name: /is ready/ })).toHaveCount(0);
 	await expect(diff.getByRole('status')).toHaveText(/is no longer in the review\./);
 	await expect(diff.getByRole('button', { name: /Viewed/ })).toHaveCount(0);
 	await expect(files.getByRole('treeitem')).toHaveCount(0);

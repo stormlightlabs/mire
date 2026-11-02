@@ -146,7 +146,7 @@ its status.
 ## Browser review
 
 The browser review that `mire serve` opens takes these keys. None of them work
-while a text field or a menu has focus, and `]`, `[`, `b` and `Esc` leave the
+while a text field or a menu has focus, and `]`, `[`, `b`, `Esc` and `u` leave the
 page alone while a dialog is open.
 
 | Key       | Action                                                |
@@ -155,6 +155,9 @@ page alone while a dialog is open.
 | `]` / `[` | Open the next or previous file in the file tree order |
 | `b`       | Enter or leave focus mode                             |
 | `Esc`     | Leave focus mode                                      |
+| `u`       | Apply a new revision that is waiting                  |
 
 See [Read one file in the browser](/docs/guides/review-changes/#read-one-file-in-the-browser)
-for focus mode.
+for focus mode, and
+[Follow changes in the browser](/docs/guides/review-changes/#follow-changes-in-the-browser)
+for new revisions.

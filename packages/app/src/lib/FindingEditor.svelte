@@ -5,15 +5,17 @@
 
 	type Props = {
 		finding: FindingDetail;
+		/** Text and fields to start from instead of the finding's, such as an edit kept through a revision conflict. */
+		draft?: FindingDraft | null;
 		onEdit: (draft: FindingDraft) => Promise<string | null>;
 		onDecision: (decision: Decision) => Promise<string | null>;
 	};
 
-	let { finding, onEdit, onDecision }: Props = $props();
+	let { finding, draft = null, onEdit, onDecision }: Props = $props();
 
-	let body = $derived(finding.body);
-	let severity = $derived(finding.severity);
-	let annotationKind = $derived(finding.annotationKind);
+	let body = $derived(draft?.body ?? finding.body);
+	let severity = $derived(draft?.severity ?? finding.severity);
+	let annotationKind = $derived(draft?.annotationKind ?? finding.annotationKind);
 	let pending = $state(false);
 	let message = $derived.by<string | null>(() => {
 		void finding.id;

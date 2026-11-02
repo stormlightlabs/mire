@@ -8,13 +8,19 @@
 	import Overlay from '$lib/Overlay.svelte';
 	import { filePosition, takesText } from '$lib/focus';
 	import {
+		FIRST_RETRY_DELAY,
 		heldChanges,
 		heldFileChange,
 		heldSummary,
+		nextRetryDelay,
+		refusedConnection,
+		retries,
+		staleFindingWrite,
 		watchLabel,
 		watchNotice,
 		withViewedMarks,
-		type Connection
+		type Connection,
+		type FindingWriteBase
 	} from '$lib/live';
 	import { OverviewLoads } from '$lib/reload';
 	import { loadDevelopmentSessionSecret, parseSessionSecret, saveDevelopmentSessionSecret } from '$lib/session';
@@ -48,7 +54,11 @@
 	} from '$lib/review';
 
 	type RefreshState = 'idle' | 'pending' | 'refreshed' | 'unchanged' | 'failed';
-	/** A finding edit the server refused because the review changed, kept until it saves. */
+	/**
+	 * A finding edit the server refused because the review changed. It fills
+	 * the editor until the reader changes the text, decides, or opens another
+	 * finding.
+	 */
 	type KeptDraft = FindingDraft & { findingId: string };
 
 	let review = $state<ReviewOverview | null>(null);
@@ -63,6 +73,12 @@
 	let filters = $state({ ...defaultFindingFilters });
 	let viewedError = $state<string | null>(null);
 	let conflictRevision = $state<number | null>(null);
+	/**
+	 * Why a write was not saved after the page applied a held revision for it,
+	 * or `null` when the server refused the write and the newer revision still
+	 * waits to be applied.
+	 */
+	let conflictReason = $state<string | null>(null);
 	let refreshState = $state<RefreshState>('idle');
 	let finishReviewOpen = $state(false);
 	let descriptionOpen = $state(false);
@@ -81,15 +97,16 @@
 	let focusBar = $state<FocusBar>();
 	/**
 	 * A newer revision than the one on screen, held until the reader applies
-	 * it. Source changes and other writers' edits wait here; the reader's own
-	 * writes apply at once.
+	 * it. Source changes and other writers' edits wait here. A viewed mark
+	 * applies at once; a finding edit or decision applies the held revision
+	 * first.
 	 */
 	let held = $state<ReviewOverview | null>(null);
 	/** Whether the held revision's file list is open. */
 	let heldListOpen = $state(false);
 	/** Whether live updates reach the page. */
 	let connection = $state<Connection>('live');
-	/** The reader's finding edit from a save that hit a revision conflict. */
+	/** The reader's finding edit from a save that hit a revision conflict, until the editor takes it over. */
 	let keptDraft = $state<KeptDraft | null>(null);
 	let draftCopied = $state(false);
 
@@ -112,7 +129,7 @@
 	let checkAfterWrites = false;
 	let retryTimer: ReturnType<typeof setTimeout> | undefined;
 	/** How long to wait before the next attempt to reconnect the live channel. */
-	let retryDelay = 1_000;
+	let retryDelay = FIRST_RETRY_DELAY;
 
 	const completion = $derived(review ? completionSummary(review) : null);
 	const activeSummary = $derived(review?.files.find((summary) => summary.id === activeFile) ?? null);
@@ -251,6 +268,8 @@
 				heldListOpen = false;
 			}
 			conflictRevision = null;
+			conflictReason = null;
+			await syncActiveFinding(overview);
 			const reopened = reopenedFile(review.files, previous);
 			if (reopened.notice) notice = reopened.notice;
 			if (reopened.file) await selectFile(reopened.file.id);
@@ -262,6 +281,36 @@
 			// The revision on screen stays readable when the held one cannot load.
 			if (held) notice = `Revision ${held.revision} could not be loaded: ${message}`;
 			else error = message;
+		}
+	}
+
+	/**
+	 * Brings the open finding up to date with a newly shown overview: it closes
+	 * when the overview no longer lists it, and loads again when its summary
+	 * changed. A failed load keeps the copy on screen.
+	 */
+	async function syncActiveFinding(overview: ReviewOverview) {
+		const shown = activeFinding;
+		if (!shown) return;
+		const summary = overview.findings.find((finding) => finding.id === shown.id);
+		if (!summary) {
+			activeFinding = null;
+			return;
+		}
+		const same =
+			summary.body === shown.body &&
+			summary.status === shown.status &&
+			summary.severity === shown.severity &&
+			summary.annotationKind === shown.annotationKind &&
+			summary.anchorState === shown.anchorState &&
+			summary.startLine === shown.startLine &&
+			summary.endLine === shown.endLine;
+		if (same) return;
+		try {
+			const detail = await request<FindingDetail>(`/api/v1/findings/${encodeURIComponent(shown.id)}`);
+			if (activeFinding?.id === shown.id) activeFinding = detail;
+		} catch {
+			// The copy on screen stays; the editor's save reports any real problem.
 		}
 	}
 
@@ -332,7 +381,8 @@
 	 * Opens the live channel and reads its events until it closes. A closed or
 	 * failed channel marks the watch stopped, keeps the review on screen, and
 	 * tries again after a delay that doubles up to 30 seconds. Once it
-	 * reconnects, the page checks for a revision it missed.
+	 * reconnects, the page checks for a revision it missed. After a shutdown
+	 * event, or when the server refuses the session secret, it stops trying.
 	 */
 	async function connectEvents() {
 		clearTimeout(retryTimer);
@@ -344,10 +394,13 @@
 				headers: { Authorization: `Bearer ${secret}` },
 				signal: abort.signal
 			});
-			if (!response.ok || !response.body) throw new Error('Live review updates are unavailable.');
+			if (!response.ok || !response.body) {
+				connection = refusedConnection(response.status);
+				throw new Error('Live review updates are unavailable.');
+			}
 			const resumed = connection !== 'live';
 			connection = 'live';
-			retryDelay = 1_000;
+			retryDelay = FIRST_RETRY_DELAY;
 			if (resumed) void reloadReview(false);
 			const reader = response.body.getReader();
 			const decoder = new TextDecoder();
@@ -370,15 +423,15 @@
 		} catch {
 			// A failed or cut-off channel is reported below, like one that closed.
 		}
-		if (abort.signal.aborted) return;
-		if (connection === 'live') connection = 'lost';
+		if (abort.signal.aborted || !retries(connection)) return;
+		connection = 'lost';
 		retryTimer = setTimeout(connectEvents, retryDelay);
-		retryDelay = Math.min(retryDelay * 2, 30_000);
+		retryDelay = nextRetryDelay(retryDelay);
 	}
 
 	/** Tries the live channel again now, as the stopped-watch notice offers. */
 	function reconnect() {
-		retryDelay = 1_000;
+		retryDelay = FIRST_RETRY_DELAY;
 		void connectEvents();
 	}
 
@@ -495,6 +548,7 @@
 	async function selectFinding(finding: FindingSummary) {
 		findingError = null;
 		notice = null;
+		if (keptDraft?.findingId !== finding.id) keptDraft = null;
 		try {
 			activeFinding = await request<FindingDetail>(`/api/v1/findings/${encodeURIComponent(finding.id)}`);
 			if (!finding.navigable || !review) return;
@@ -508,23 +562,27 @@
 	async function editFinding(draft: FindingDraft): Promise<string | null> {
 		if (!review || !activeFinding) return 'Select a finding before editing it.';
 		const findingId = activeFinding.id;
-		const expectedRevision = review.revision;
+		const body = activeFinding.body;
 		try {
-			await ownWrite(async () => {
+			const stale = await ownWrite(async () => {
+				const stale = await applyHeldFor({ findingId, body });
+				if (stale || !review) return stale;
 				const result = await request<FindingMutation>(`/api/v1/findings/${encodeURIComponent(findingId)}`, {
 					method: 'PATCH',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ expectedRevision, ...draft })
+					body: JSON.stringify({ expectedRevision: review.revision, ...draft })
 				});
 				await applyFindingMutation(result);
+				return null;
 			});
+			if (stale) {
+				keepDraft(findingId, draft);
+				return `${stale} Your edit was not saved, and your text is still here.`;
+			}
 			keptDraft = null;
 			return null;
 		} catch (cause) {
-			if (cause instanceof RequestError && cause.code === 'revision_conflict') {
-				keptDraft = { findingId, ...draft };
-				draftCopied = false;
-			}
+			if (cause instanceof RequestError && cause.code === 'revision_conflict') keepDraft(findingId, draft);
 			return handleErr(cause, 'The finding could not be saved.');
 		}
 	}
@@ -532,20 +590,55 @@
 	async function decideFinding(decision: 'resolve' | 'reopen' | 'dismiss' | 'accept-risk'): Promise<string | null> {
 		if (!review || !activeFinding) return 'Select a finding before recording a decision.';
 		const findingId = activeFinding.id;
-		const expectedRevision = review.revision;
+		const status = activeFinding.status;
+		keptDraft = null;
 		try {
-			await ownWrite(async () => {
+			const stale = await ownWrite(async () => {
+				const stale = await applyHeldFor({ findingId, status });
+				if (stale || !review) return stale;
 				const result = await request<FindingMutation>(`/api/v1/findings/${encodeURIComponent(findingId)}/decision`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ expectedRevision, decision })
+					body: JSON.stringify({ expectedRevision: review.revision, decision })
 				});
 				await applyFindingMutation(result);
+				return null;
 			});
-			return null;
+			return stale ? `${stale} Your decision was not saved.` : null;
 		} catch (cause) {
 			return handleErr(cause, 'The decision could not be saved.');
 		}
+	}
+
+	/**
+	 * Applies a held revision before one of the reader's finding writes, so the
+	 * write goes to the revision it changes. Returns `null` when nothing was
+	 * held, or when the finding and what the reader started from are unchanged
+	 * in it. Otherwise it opens the conflict dialog and returns the reason.
+	 */
+	async function applyHeldFor(base: FindingWriteBase): Promise<string | null> {
+		if (!held) return null;
+		const revision = held.revision;
+		await reloadReview(true);
+		if (!review || held) return `Revision ${revision} could not be applied.`;
+		const stale = staleFindingWrite(review, base);
+		if (stale) {
+			conflictRevision = review.revision;
+			conflictReason = stale;
+		}
+		return stale;
+	}
+
+	/** Keeps a finding edit that did not save, for the editor and the conflict dialog. */
+	function keepDraft(findingId: string, draft: FindingDraft) {
+		keptDraft = { findingId, ...draft };
+		draftCopied = false;
+	}
+
+	/** Closes the conflict dialog. */
+	function closeConflict() {
+		conflictRevision = null;
+		conflictReason = null;
 	}
 
 	async function applyFindingMutation(result: FindingMutation) {
@@ -754,7 +847,12 @@
 		</header>
 	{/if}
 
-	<div class="live-strip" aria-live="polite">
+	<div class="live-strip">
+		<!-- Only the status sentences are announced, not the buttons and file list around them. -->
+		<p class="sr-only" aria-live="polite">
+			{#if review && changes}Revision {changes.revision} is ready. {heldSummary(changes)}{/if}
+			{#if stopped}{stopped.heading}. {stopped.body}{/if}
+		</p>
 		{#if review && changes}
 			<section class="held" aria-labelledby="held-heading">
 				<div class="held-row">
@@ -843,6 +941,7 @@
 				{viewedError}
 				heldChange={shownChange && changes ? { change: shownChange, revision: changes.revision } : null}
 				keptDraft={shownDraft}
+				onDraftTaken={() => (keptDraft = null)}
 				bind:openedGenerated
 				showHeading={!inFocus}
 				onDismissNotice={() => (notice = null)}
@@ -935,33 +1034,57 @@
 		</Overlay>
 	{/if}
 	{#if conflictRevision !== null}
-		<Overlay open={true} labelledBy="conflict-heading" variant="dialog" onClose={() => (conflictRevision = null)}>
+		<Overlay open={true} labelledBy="conflict-heading" variant="dialog" onClose={closeConflict}>
 			<section class="dialog-content">
-				{#if keptDraft}
+				{#if conflictReason && keptDraft}
+					<h1 id="conflict-heading">Your edit was not saved</h1>
+					<p>
+						{conflictReason} Mire applied revision {conflictRevision} for your save, and it is on screen now. Your text is
+						kept below and in the editor. Read the finding, then save again.
+					</p>
+				{:else if conflictReason}
+					<h1 id="conflict-heading">Your decision was not saved</h1>
+					<p>
+						{conflictReason} Mire applied revision {conflictRevision} for your decision, and it is on screen now. Read the
+						finding, then decide again.
+					</p>
+				{:else if keptDraft}
 					<h1 id="conflict-heading">Your edit was not saved</h1>
 					<p>
 						Revision {conflictRevision} was written while you edited. Your text is kept below and in the editor. Apply revision
 						{conflictRevision}, then save again.
 					</p>
-					<label class="kept-draft">
-						<span>Your text</span>
-						<textarea readonly rows="4" value={keptDraft.body}></textarea>
-					</label>
-					<div class="conflict-actions">
-						<button class="primary-button" onclick={() => void reloadReview()}>
-							Apply revision {conflictRevision} and keep draft
-						</button>
-						<button class="secondary-button" onclick={() => void copyDraft()}>
-							{draftCopied ? 'Copied' : 'Copy text'}
-						</button>
-					</div>
 				{:else}
 					<h1 id="conflict-heading">Review changed</h1>
 					<p>
 						Revision {conflictRevision} was written while you worked, so your change was not saved. Apply it, then try again.
 					</p>
-					<button class="primary-button" onclick={() => void reloadReview()}>Apply revision {conflictRevision}</button>
 				{/if}
+				{#if keptDraft}
+					<label class="kept-draft">
+						<span>Your text</span>
+						<textarea readonly rows="4" value={keptDraft.body}></textarea>
+					</label>
+				{/if}
+				<div class="conflict-actions">
+					<!-- The dialog opens on its main action, not on the read-only copy of the text. -->
+					{#if conflictReason}
+						<!-- svelte-ignore a11y_autofocus -->
+						<button class="primary-button" autofocus onclick={closeConflict}>
+							{keptDraft ? 'Keep editing' : 'Close'}
+						</button>
+					{:else}
+						<!-- svelte-ignore a11y_autofocus -->
+						<button class="primary-button" autofocus onclick={() => void reloadReview()}>
+							Apply revision {conflictRevision}{keptDraft ? ' and keep draft' : ''}
+						</button>
+					{/if}
+					{#if keptDraft}
+						<button class="secondary-button" onclick={() => void copyDraft()}>
+							{draftCopied ? 'Copied' : 'Copy text'}
+						</button>
+					{/if}
+				</div>
 			</section>
 		</Overlay>
 	{/if}

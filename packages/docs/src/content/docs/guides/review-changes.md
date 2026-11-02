@@ -180,13 +180,18 @@ files. Press `u` or select Apply revision to show the new revision. Focus
 mode shows the same bar.
 
 Until you apply it, a file that changed in the new revision does not open,
-since the server keeps only the newest content. Your own changes apply at
-once: a viewed mark, an edited finding, a decision, and Refresh source, which
-also applies a waiting revision.
+since the server keeps only the newest content. A viewed mark applies at once
+and leaves the new revision waiting. Refresh source applies it.
 
-If you save a finding edit after a new revision arrived, the server refuses
-it. A dialog shows the text you wrote, which stays in the editor. Select Apply
-revision and keep draft, then save again, or select Copy text.
+Saving a finding edit or recording a decision applies the waiting revision
+first, then saves your change against it. Mire saves only if the new revision
+still has the finding and has not changed what you started from: its text,
+for an edit, or its status, for a decision. Otherwise a dialog names what
+changed and nothing is saved. For an edit, your text stays in the editor and
+the dialog, with Copy text. Read the finding, then save or decide again.
+
+If a revision lands before the page hears of it, the server refuses the save,
+and a dialog says so. Select Apply revision and keep draft, then save again.
 
 A bar under the header also shows when updates stop, and the header status
 names the revision on screen:
@@ -196,9 +201,12 @@ names the revision on screen:
 | `degraded`     | Reading the review file or the source failed | Mire retries; Refresh source reads now |
 | `disconnected` | The connection to `mire serve` was lost      | Mire retries; Try again retries now    |
 | `stopped`      | `mire serve` shut down                       | Run `mire serve` and open its new URL  |
+| `expired`      | `mire serve` refused the page's session      | Open the URL `mire serve` printed      |
 
-The review stays on screen in each case. After the page reconnects, it checks
-for a revision it missed and holds it like any other.
+The review stays on screen in each case. The page reconnects a lost
+connection on its own, after 1 second, then twice as long each time, up to 30
+seconds. It does not reconnect after `stopped` or `expired`. After the page
+reconnects, it checks for a revision it missed and holds it like any other.
 
 ## Select a theme
 

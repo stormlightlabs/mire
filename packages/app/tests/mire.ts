@@ -26,6 +26,8 @@ export type MireServer = {
 	 * truncate and the write records the empty file as a revision of its own.
 	 */
 	writeSource: (file: string, content: string) => Promise<void>;
+	/** Runs the `mire` binary in the repository, as another writer would, and returns its output. */
+	cli: (...args: string[]) => string;
 	/** Stops the server as Ctrl-C would, and waits for it to exit. */
 	stop: () => Promise<void>;
 };
@@ -83,6 +85,7 @@ export const test = base.extend<{
 					await writeFile(staged, content);
 					await rename(staged, path.join(root, file));
 				},
+				cli: (...args) => mire(...args).toString(),
 				stop: () => stop(server, 'SIGINT')
 			});
 		} finally {

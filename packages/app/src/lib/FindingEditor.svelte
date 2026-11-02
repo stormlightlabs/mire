@@ -1,7 +1,10 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { FindingDetail, FindingDraft } from './review';
 
 	type Decision = 'resolve' | 'reopen' | 'dismiss' | 'accept-risk';
+	/** The finding fields the editor last filled itself from. */
+	type Filled = FindingDraft & { id: string };
 
 	type Props = {
 		finding: FindingDetail;
@@ -9,18 +12,48 @@
 		draft?: FindingDraft | null;
 		onEdit: (draft: FindingDraft) => Promise<string | null>;
 		onDecision: (decision: Decision) => Promise<string | null>;
+		/** Called when the reader changes a field after the editor filled it from `draft`, so the editor's text replaces the draft. */
+		onDraftTaken?: () => void;
 	};
 
-	let { finding, draft = null, onEdit, onDecision }: Props = $props();
+	let { finding, draft = null, onEdit, onDecision, onDraftTaken = () => {} }: Props = $props();
 
-	let body = $derived(draft?.body ?? finding.body);
-	let severity = $derived(draft?.severity ?? finding.severity);
-	let annotationKind = $derived(draft?.annotationKind ?? finding.annotationKind);
+	let body = $state('');
+	let severity = $state('');
+	let annotationKind = $state('');
 	let pending = $state(false);
 	let message = $derived.by<string | null>(() => {
 		void finding.id;
 		return null;
 	});
+	let filled: Filled | null = null;
+	let filledDraft: FindingDraft | null = null;
+
+	// Another finding, or a new draft, fills every field. A newer copy of the
+	// same finding, such as after a save or an applied revision, replaces only
+	// the fields the reader has not changed, so their typing survives it.
+	$effect.pre(() => {
+		const next = {
+			id: finding.id,
+			body: finding.body,
+			severity: finding.severity,
+			annotationKind: finding.annotationKind
+		};
+		const nextDraft = draft;
+		untrack(() => fill(next, nextDraft));
+	});
+
+	function fill(next: Filled, nextDraft: FindingDraft | null) {
+		const previous = filled;
+		const newDraft = nextDraft !== null && nextDraft !== filledDraft;
+		filled = next;
+		filledDraft = nextDraft;
+		const from = newDraft ? nextDraft : next;
+		const sameFinding = !newDraft && previous?.id === next.id;
+		if (!sameFinding || body === previous.body) body = from.body;
+		if (!sameFinding || severity === previous.severity) severity = from.severity;
+		if (!sameFinding || annotationKind === previous.annotationKind) annotationKind = from.annotationKind;
+	}
 
 	async function save() {
 		pending = true;
@@ -38,6 +71,9 @@
 <form
 	class="finding-editor"
 	aria-busy={pending}
+	oninput={() => {
+		if (draft) onDraftTaken();
+	}}
 	onsubmit={(event) => {
 		event.preventDefault();
 		void save();

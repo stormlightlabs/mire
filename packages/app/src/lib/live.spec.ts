@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
-import { heldChanges, heldFileChange, heldSummary, watchLabel, watchNotice, withViewedMarks } from './live';
+import {
+	FIRST_RETRY_DELAY,
+	MAX_RETRY_DELAY,
+	heldChanges,
+	heldFileChange,
+	heldSummary,
+	nextRetryDelay,
+	refusedConnection,
+	retries,
+	staleFindingWrite,
+	watchLabel,
+	watchNotice,
+	withViewedMarks
+} from './live';
 import type { FileSummary, FindingSummary, ReviewOverview } from './review';
 
 function file(raw: string, id: string, viewed: FileSummary['viewed'] = null): FileSummary {
@@ -115,6 +128,45 @@ describe('watchNotice', () => {
 		expect(stopped?.action).toBeNull();
 		expect(stopped?.body).toContain('Run mire serve again');
 		expect(stopped?.body).toContain('revision 3');
+		const expired = watchNotice('expired', 'watching', 3);
+		expect(expired?.heading).toBe('Session expired');
+		expect(expired?.action).toBeNull();
+		expect(expired?.body).toContain('Open the URL mire serve printed');
+	});
+});
+
+describe('reconnecting', () => {
+	it('doubles the wait up to the cap', () => {
+		const delays = [FIRST_RETRY_DELAY];
+		while (delays.length < 7) delays.push(nextRetryDelay(delays[delays.length - 1]));
+		expect(delays).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]);
+		expect(MAX_RETRY_DELAY).toBe(30_000);
+	});
+
+	it('stops after a shutdown or a refused session', () => {
+		expect(retries('lost')).toBe(true);
+		expect(retries('stopped')).toBe(false);
+		expect(retries('expired')).toBe(false);
+		expect(refusedConnection(401)).toBe('expired');
+		expect(refusedConnection(403)).toBe('expired');
+		expect(refusedConnection(502)).toBe('lost');
+	});
+});
+
+describe('staleFindingWrite', () => {
+	const next = overview(5, [], [finding('n1', 'resolved', 'New text'), finding('n2')]);
+
+	it('lets a write through when what the reader started from is unchanged', () => {
+		expect(staleFindingWrite(next, { findingId: 'n2', status: 'open' })).toBeNull();
+		expect(staleFindingWrite(next, { findingId: 'n1', body: 'New text' })).toBeNull();
+	});
+
+	it('names what the newer revision changed', () => {
+		expect(staleFindingWrite(next, { findingId: 'gone', status: 'open' })).toBe('Revision 5 removed this finding.');
+		expect(staleFindingWrite(next, { findingId: 'n1', body: 'Body' })).toBe("Revision 5 changed this finding's text.");
+		expect(staleFindingWrite(next, { findingId: 'n1', status: 'open' })).toBe(
+			"Revision 5 changed this finding's status to resolved."
+		);
 	});
 });
 
@@ -125,5 +177,6 @@ describe('watchLabel', () => {
 		expect(watchLabel('live', 'degraded', 3)).toBe('degraded · showing revision 3');
 		expect(watchLabel('lost', 'watching', 3)).toBe('disconnected · showing revision 3');
 		expect(watchLabel('stopped', 'watching', 3)).toBe('stopped · showing revision 3');
+		expect(watchLabel('expired', 'watching', 3)).toBe('expired · showing revision 3');
 	});
 });

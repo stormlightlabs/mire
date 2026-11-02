@@ -10,6 +10,7 @@
 		onPrevious,
 		onNext,
 		onToggleViewed,
+		onFinish,
 		onLeave
 	}: {
 		/** The file on screen, or `null` while none is loaded. */
@@ -20,6 +21,8 @@
 		onPrevious: () => void;
 		onNext: () => void;
 		onToggleViewed: () => void;
+		/** Opens the finish panel, as Finish review does in the header. */
+		onFinish: () => void;
 		onLeave: () => void;
 	} = $props();
 
@@ -100,7 +103,8 @@
 			{viewState === 'changed' ? 'Changed since viewed' : 'Viewed'}
 		</label>
 	{/if}
-	<button bind:this={leaveButton} class="leave" aria-keyshortcuts="Escape" onclick={onLeave}>
+	<button class="bar-button" aria-haspopup="dialog" onclick={onFinish}>Finish review</button>
+	<button bind:this={leaveButton} class="bar-button" aria-keyshortcuts="Escape" onclick={onLeave}>
 		Leave focus <kbd aria-hidden="true">Esc</kbd>
 	</button>
 </header>
@@ -125,7 +129,7 @@
 			monospace;
 	}
 	.step,
-	.leave {
+	.bar-button {
 		flex: none;
 		min-height: 1.85rem;
 		border: 1px solid var(--line-strong);
@@ -148,14 +152,14 @@
 		cursor: not-allowed;
 		opacity: 0.5;
 	}
-	.leave {
+	.bar-button {
 		padding: 0.25rem 0.65rem;
 		font:
 			600 0.72rem 'IBM Plex Sans Variable',
 			'IBM Plex Sans',
 			sans-serif;
 	}
-	.leave kbd {
+	.bar-button kbd {
 		color: var(--muted);
 		font: inherit;
 		font-weight: 500;
@@ -208,7 +212,7 @@
 	}
 	@media (hover: hover) {
 		.step:not(:disabled):hover,
-		.leave:hover {
+		.bar-button:hover {
 			background: var(--button-hover);
 			border-color: var(--ink);
 		}
@@ -219,7 +223,7 @@
 		}
 		.meta,
 		.directory,
-		.leave kbd {
+		.bar-button kbd {
 			display: none;
 		}
 	}
@@ -230,7 +234,7 @@
 	}
 	@media (pointer: coarse) {
 		.step,
-		.leave {
+		.bar-button {
 			min-height: 2.75rem;
 		}
 		.step {

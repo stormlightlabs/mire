@@ -10,7 +10,8 @@
 	}: {
 		open: boolean;
 		labelledBy: string;
-		variant: 'dialog' | 'drawer';
+		/** A `panel` is a dialog wide enough for a two-column layout. */
+		variant: 'dialog' | 'panel' | 'drawer';
 		onClose: () => void;
 		children: Snippet;
 	} = $props();
@@ -31,6 +32,7 @@
 <dialog
 	bind:this={element}
 	class:drawer={variant === 'drawer'}
+	class:panel={variant === 'panel'}
 	class="overlay"
 	aria-labelledby={labelledBy}
 	onclick={closeWhenBackdropClicked}
@@ -48,6 +50,11 @@
 		background: var(--surface);
 		color: var(--ink);
 		box-shadow: 0 1rem 3rem var(--overlay-shadow);
+	}
+	.overlay.panel {
+		width: min(calc(100% - 2rem), 38rem);
+		max-height: calc(100% - 2rem);
+		padding: 2rem;
 	}
 	.overlay::backdrop {
 		background: var(--backdrop);

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-	completionSummary,
 	fileViewState,
 	firstFile,
 	hasReviewMetadata,
@@ -50,25 +49,6 @@ function review(): ReviewOverview {
 		watch: 'watching'
 	};
 }
-
-describe('completionSummary', () => {
-	it('combines viewed marks with review readiness', () => {
-		const summary = completionSummary(review());
-
-		expect(summary).toEqual({ ready: false, unviewedFiles: 1, openFindings: 1, unsafeAnchors: 0 });
-	});
-
-	it('counts a file that changed since it was viewed as unviewed', () => {
-		const changed = review();
-		changed.files[0].viewed = { fingerprint: 'older', revision: 1 };
-		changed.files[1].viewed = { fingerprint: 'second', revision: 1 };
-		changed.readiness = { ready: true, openFindings: 0, unsafeAnchors: 0 };
-
-		expect(completionSummary(changed)).toEqual({ ready: false, unviewedFiles: 1, openFindings: 0, unsafeAnchors: 0 });
-		changed.files[0].viewed = { fingerprint: 'first', revision: 2 };
-		expect(completionSummary(changed).ready).toBe(true);
-	});
-});
 
 describe('viewed state', () => {
 	it('compares the mark with the current fingerprint', () => {

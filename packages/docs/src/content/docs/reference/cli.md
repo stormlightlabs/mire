@@ -412,6 +412,11 @@ has `checkpoint`: the `revision` and `path` of the row it was written on, or
 `checkpoint_not_found` or `checkpoint_unavailable` (404). A `revision` that is
 not a positive number fails with `invalid_revision` (400).
 
+The Finish review panel downloads `GET /api/v1/exports/notes.md`,
+`notes.json`, `context.json` and `changeset.patch` under the same prefix. The
+patch is the output of `mire review export --format patch`. A changeset with a
+binary file has no patch, and the route fails with `patch_unavailable` (422).
+
 Ctrl-C stops the server. It first sends a `shutdown` event on
 `GET /api/v1/events` and ends each event stream, so open tabs show that
 watching stopped and the server does not wait for them to close. A stream

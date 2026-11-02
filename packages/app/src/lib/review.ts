@@ -233,13 +233,6 @@ export type RefreshResponse = {
 	reanchor: ReanchorTotals;
 };
 
-export type CompletionSummary = {
-	ready: boolean;
-	unviewedFiles: number;
-	openFindings: number;
-	unsafeAnchors: number;
-};
-
 /** Fallback heading for a review without a caller-supplied title. */
 export const DEFAULT_REVIEW_TITLE = 'Local review';
 
@@ -258,15 +251,4 @@ export function reviewDescription(review: Pick<ReviewOverview, 'description'> | 
 /** Reports whether a review has a caller-supplied title or a description to show. */
 export function hasReviewMetadata(review: Pick<ReviewOverview, 'title' | 'description'> | null): boolean {
 	return Boolean(review?.title?.trim()) || reviewDescription(review) !== null;
-}
-
-/** Combines review readiness with the files the reader has not viewed as they are now. */
-export function completionSummary(review: ReviewOverview): CompletionSummary {
-	const unviewedFiles = review.files.filter((file) => fileViewState(file) !== 'viewed').length;
-	return {
-		ready: review.readiness.ready && unviewedFiles === 0,
-		unviewedFiles,
-		openFindings: review.readiness.openFindings,
-		unsafeAnchors: review.readiness.unsafeAnchors
-	};
 }

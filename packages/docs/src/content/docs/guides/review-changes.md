@@ -169,6 +169,41 @@ the gutter, without tinted rows.
 Focus mode lasts until you leave it or reload the page. The server stores
 nothing about it, so each tab has its own.
 
+## Finish a review in the browser
+
+Select Finish review in the header, or in the focus bar in focus mode, to see
+what is left before you hand the review on. The panel writes nothing to the
+review and records no approval. Each row has a button that closes the panel
+and takes you to where you can act:
+
+| Row                                | Button            | Takes you to                                          |
+| ---------------------------------- | ----------------- | ----------------------------------------------------- |
+| A revision is not applied          | Apply revision    | The new revision, as `u` does                         |
+| Files not viewed                   | Next unviewed     | The next file in tree order not viewed as it is now   |
+| Open findings, counted by severity | Next open finding | The next open finding by severity, after the open one |
+| Findings that lost their line      | Review anchors    | The first finding whose anchor is stale or ambiguous  |
+
+When the file on screen is the only one not viewed, the files button reads
+Mark this file viewed and marks it. A file that changed after you marked it
+viewed counts as not viewed. Generated files are left out of the count when
+the review has other files, and the row says how many. Once every other file
+is viewed, a separate row names the generated files still not viewed. A
+finding whose anchor is stale or ambiguous counts whatever its status. With
+nothing left, the panel says so.
+
+The panel's exports download the review file as it is on disk. While a new
+revision is held, the file on disk already has it, so the exports stay off
+until you apply it with the Apply revision button beside them:
+
+| Export            | File                   | Command                                      |
+| ----------------- | ---------------------- | -------------------------------------------- |
+| Notes as Markdown | `mire-notes.md`        | `mire notes export REVIEW --format markdown` |
+| Notes as JSON     | `mire-notes.json`      | `mire notes export REVIEW --format json`     |
+| Agent context     | `mire-context.json`    | `mire context REVIEW`                        |
+| Patch             | `mire-changeset.patch` | `mire review export REVIEW --format patch`   |
+
+A changeset with a binary file has no patch export, and the panel says why.
+
 ## Follow changes in the browser
 
 The browser review that `mire serve` opens watches the review file and its

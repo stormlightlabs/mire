@@ -14,9 +14,11 @@
 		onDecision: (decision: Decision) => Promise<string | null>;
 		/** Called when the reader changes a field after the editor filled it from `draft`, so the editor's text replaces the draft. */
 		onDraftTaken?: () => void;
+		/** Called each time the reader changes a field, so the page can record the text the edit started from. */
+		onInput?: () => void;
 	};
 
-	let { finding, draft = null, onEdit, onDecision, onDraftTaken = () => {} }: Props = $props();
+	let { finding, draft = null, onEdit, onDecision, onDraftTaken = () => {}, onInput = () => {} }: Props = $props();
 
 	let body = $state('');
 	let severity = $state('');
@@ -72,6 +74,7 @@
 	class="finding-editor"
 	aria-busy={pending}
 	oninput={() => {
+		onInput();
 		if (draft) onDraftTaken();
 	}}
 	onsubmit={(event) => {

@@ -31,7 +31,8 @@
 		onFindingClick,
 		onEditFinding,
 		onDecideFinding,
-		onDraftTaken = () => {}
+		onDraftTaken = () => {},
+		onEditStart = () => {}
 	}: {
 		file: FileDetail | null;
 		fileError: string | null;
@@ -59,6 +60,8 @@
 		onDecideFinding: (decision: 'resolve' | 'reopen' | 'dismiss' | 'accept-risk') => Promise<string | null>;
 		/** Called once the reader changes the editor's text after it was filled from `keptDraft`. */
 		onDraftTaken?: () => void;
+		/** Called each time the reader changes a field in the finding editor. */
+		onEditStart?: () => void;
 	} = $props();
 
 	let diffStyle = $state<'unified' | 'split'>('unified');
@@ -137,7 +140,8 @@
 				draft={keptDraft}
 				onEdit={onEditFinding}
 				onDecision={onDecideFinding}
-				{onDraftTaken} />
+				{onDraftTaken}
+				onInput={onEditStart} />
 		{/if}
 		{#if findingError}<p class="finding-error" role="alert">{findingError}</p>{/if}
 

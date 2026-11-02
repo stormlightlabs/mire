@@ -1,6 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { readFile, rename, writeFile } from 'node:fs/promises';
 import type { Page } from '@playwright/test';
-import { expect, test } from './mire';
+import { expect, test, type MireServer } from './mire';
 
 test('holds a new revision in focus mode until u applies it', async ({ page, mire }) => {
 	await page.goto(mire.url);
@@ -147,6 +148,93 @@ test('keeps the text when the held revision changed the finding', async ({ page,
 	expect((await mire.readReview()).notes[0].body).toBe('My rewrite.');
 });
 
+test('saves no edit typed from text another writer changed, even after applying their revision', async ({
+	page,
+	mire
+}) => {
+	await page.goto(mire.url);
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await expect(page.getByRole('banner')).toContainText('revision 3');
+	await page.keyboard.press('j');
+	const editor = diff.getByRole('textbox', { name: 'Finding' });
+	await editor.fill('My rewrite.');
+
+	await editAsOtherWriter(page, mire, 'Their rewrite.');
+	const held = page.getByRole('region', { name: 'Revision 4 is ready.' });
+	await held.getByRole('button', { name: 'Apply revision 4' }).click();
+	await expect(held).toBeHidden();
+	await expect(diff.getByRole('article')).toContainText('Their rewrite.');
+	await expect(editor).toHaveValue('My rewrite.');
+
+	// Nothing is held now, but the text the reader started from is gone.
+	await diff.getByRole('button', { name: 'Save edit' }).click();
+	const dialog = page.getByRole('dialog', { name: 'Your edit was not saved' });
+	await expect(dialog).toContainText("Revision 4 changed this finding's text.");
+	await expect(dialog.getByRole('textbox', { name: 'Your text' })).toHaveValue('My rewrite.');
+	await expect(dialog.getByRole('button', { name: 'Copy text' })).toBeVisible();
+	expect((await mire.readReview()).notes[0].body).toBe('Their rewrite.');
+
+	// Having seen their text, the reader can save over it.
+	await dialog.getByRole('button', { name: 'Keep editing' }).click();
+	await expect(editor).toHaveValue('My rewrite.');
+	await diff.getByRole('button', { name: 'Save edit' }).click();
+	await expect(diff.getByRole('article')).toContainText('My rewrite.');
+	expect((await mire.readReview()).notes[0].body).toBe('My rewrite.');
+});
+
+test('holds a replaced review at a lower revision', async ({ page, mire }) => {
+	await page.goto(mire.url);
+	const header = page.getByRole('banner');
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await expect(header).toContainText('revision 3');
+	const original = await readFile(mire.reviewPath, 'utf8');
+
+	resolveAsOtherWriter(mire, 0, 3);
+	await expect(page.getByRole('region', { name: 'Revision 4 is ready.' })).toBeVisible();
+	await page.keyboard.press('u');
+	await expect(header).toContainText('revision 4');
+
+	await replaceReview(mire.reviewPath, original);
+	const replaced = page.getByRole('region', { name: 'Revision 3 replaced the review.' });
+	await expect(replaced).toContainText('1 finding');
+	await expect(header).toContainText('revision 4');
+
+	await page.keyboard.press('u');
+	await expect(replaced).toBeHidden();
+	await expect(header).toContainText('revision 3');
+	await page.keyboard.press('j');
+	await expect(diff.getByRole('article')).toContainText('open');
+});
+
+test('replaces a held revision the review file went back from', async ({ page, mire }) => {
+	await page.goto(mire.url);
+	const header = page.getByRole('banner');
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await expect(header).toContainText('revision 3');
+	const original = await readFile(mire.reviewPath, 'utf8');
+
+	resolveAsOtherWriter(mire, 1, 3);
+	await expect(page.getByRole('region', { name: 'Revision 4 is ready.' })).toBeVisible();
+	await page.keyboard.press('u');
+	await expect(header).toContainText('revision 4');
+	resolveAsOtherWriter(mire, 0, 4);
+	const newer = page.getByRole('region', { name: 'Revision 5 is ready.' });
+	await expect(newer).toBeVisible();
+
+	await replaceReview(mire.reviewPath, original);
+	await expect(page.getByRole('region', { name: 'Revision 3 replaced the review.' })).toBeVisible();
+	await expect(newer).toBeHidden();
+
+	// A decision applies the revision the server has, not the one it went back from.
+	await page.keyboard.press('j');
+	await diff.getByRole('button', { name: 'Resolve' }).click();
+	await expect(diff.getByRole('article')).toContainText('resolved');
+	await expect(page.getByRole('dialog')).toHaveCount(0);
+	const review = await mire.readReview();
+	expect(review.revision).toBe(4);
+	expect(review.notes.map((note) => note.status)).toEqual(['resolved', 'open']);
+});
+
 test('keeps a draft when the server refuses a save', async ({ page, mire }) => {
 	// Without live updates the page cannot hold the new revision, so the server refuses the save.
 	await page.route('**/api/v1/events', (route) => route.abort());
@@ -199,18 +287,13 @@ test('shows a degraded watch and clears it when the watch recovers', async ({ pa
 	await expect(header).toContainText('watching');
 
 	const review = await readFile(mire.reviewPath, 'utf8');
-	const replaceReview = async (content: string) => {
-		const staged = `${mire.reviewPath}.staged`;
-		await writeFile(staged, content);
-		await rename(staged, mire.reviewPath);
-	};
-	await replaceReview('not a review');
+	await replaceReview(mire.reviewPath, 'not a review');
 	const notice = page.getByRole('region', { name: 'Watching stopped.' });
 	await expect(notice).toContainText('The watch is degraded');
 	await expect(notice.getByRole('button', { name: 'Refresh source' })).toBeVisible();
 	await expect(header).toContainText('degraded · showing revision 3');
 
-	await replaceReview(review);
+	await replaceReview(mire.reviewPath, review);
 	await expect(notice).toBeHidden();
 	await expect(header).toContainText('watching');
 });
@@ -318,6 +401,32 @@ test('holds a revision that landed while disconnected', async ({ page, mire }) =
 	await expect(page.getByRole('banner')).toContainText('revision 3');
 	await expect(diff).not.toContainText('delta');
 });
+
+/** Edits the first finding through the API, as another tab or agent would. */
+async function editAsOtherWriter(page: Page, mire: MireServer, body: string) {
+	const review = await mire.readReview();
+	const response = await page.request.patch(new URL(`/api/v1/findings/${review.notes[0].id}`, mire.url).href, {
+		headers: { Authorization: `Bearer ${secretOf(mire.url)}`, Origin: new URL(mire.url).origin },
+		data: { expectedRevision: review.revision, body, severity: 'medium', annotationKind: 'defect' }
+	});
+	expect(response.ok()).toBe(true);
+}
+
+/**
+ * Resolves a finding with the CLI, as another writer would. The page hears of
+ * it only through the server's watch of the review file.
+ */
+function resolveAsOtherWriter(mire: MireServer, note: number, revision: number) {
+	const id = JSON.parse(readFileSync(mire.reviewPath, 'utf8')).notes[note].id;
+	mire.cli('note', 'resolve', mire.reviewPath, id, '--revision', String(revision), '--author', 'other');
+}
+
+/** Replaces the review file in one step, as an editor that saves by rename would. */
+async function replaceReview(reviewPath: string, content: string) {
+	const staged = `${reviewPath}.staged`;
+	await writeFile(staged, content);
+	await rename(staged, reviewPath);
+}
 
 /** The session secret in a URL `mire serve` printed. */
 function secretOf(url: string): string {

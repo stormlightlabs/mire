@@ -5,7 +5,9 @@ import {
 	MAX_RETRY_DELAY,
 	heldChanges,
 	heldFileChange,
+	heldHeading,
 	heldSummary,
+	nextHeld,
 	nextRetryDelay,
 	refusedConnection,
 	retries,
@@ -87,14 +89,38 @@ describe('heldChanges', () => {
 	});
 });
 
+describe('replaced reviews', () => {
+	it('holds any revision other than the one on screen, lower ones included', () => {
+		const shown = overview(4, []);
+		const lower = overview(2, []);
+		const higher = overview(5, []);
+
+		expect(nextHeld(shown, higher)).toBe(higher);
+		expect(nextHeld(shown, lower)).toBe(lower);
+		expect(nextHeld(shown, overview(4, []))).toBeNull();
+	});
+
+	it('names a lower revision as a replaced review', () => {
+		const shown = overview(4, []);
+		expect(heldChanges(shown, overview(2, [])).replaced).toBe(true);
+		expect(heldChanges(shown, overview(5, [])).replaced).toBe(false);
+		expect(heldHeading(heldChanges(shown, overview(2, [])))).toBe('Revision 2 replaced the review.');
+		expect(heldHeading(heldChanges(shown, overview(5, [])))).toBe('Revision 5 is ready.');
+	});
+});
+
 describe('heldSummary', () => {
 	it('names files and findings', () => {
 		const files = [{ path: { display: 'a', lossy: false, raw: 'a' }, change: 'changed' as const }];
-		expect(heldSummary({ revision: 2, files, findings: 1 })).toBe('1 file and 1 finding changed while you read.');
-		expect(heldSummary({ revision: 2, files: [...files, ...files], findings: 0 })).toBe(
+		expect(heldSummary({ revision: 2, files, findings: 1, replaced: false })).toBe(
+			'1 file and 1 finding changed while you read.'
+		);
+		expect(heldSummary({ revision: 2, files: [...files, ...files], findings: 0, replaced: false })).toBe(
 			'2 files changed while you read.'
 		);
-		expect(heldSummary({ revision: 2, files: [], findings: 0 })).toBe('No diff or finding changed while you read.');
+		expect(heldSummary({ revision: 2, files: [], findings: 0, replaced: false })).toBe(
+			'No diff or finding changed while you read.'
+		);
 	});
 });
 

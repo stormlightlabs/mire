@@ -20,6 +20,11 @@ export type HeldChanges = {
 	files: RevisionFileChange[];
 	/** Findings added, removed, or with a new status, body or anchor state. */
 	findings: number;
+	/**
+	 * Whether the held revision is lower than the one on screen, as when the
+	 * review file was replaced with an older copy.
+	 */
+	replaced: boolean;
 };
 
 /**
@@ -92,7 +97,29 @@ export function heldChanges(shown: ReviewOverview, next: ReviewOverview): HeldCh
 	for (const file of shown.files) {
 		if (!after.has(file.path.raw)) files.push({ path: file.path, change: 'removed' });
 	}
-	return { revision: next.revision, files, findings: findingChanges(shown.findings, next.findings) };
+	return {
+		revision: next.revision,
+		files,
+		findings: findingChanges(shown.findings, next.findings),
+		replaced: next.revision < shown.revision
+	};
+}
+
+/**
+ * Returns the overview to hold after a background check: any revision other
+ * than the one on screen, lower ones included, since a replaced review file
+ * can go back. Returns `null` when the server is at the revision on screen,
+ * which also drops a held revision the server no longer has.
+ */
+export function nextHeld(shown: ReviewOverview, overview: ReviewOverview): ReviewOverview | null {
+	return overview.revision === shown.revision ? null : overview;
+}
+
+/** Names a held revision: "Revision 4 is ready.", or "Revision 2 replaced the review." for a lower one. */
+export function heldHeading(changes: Pick<HeldChanges, 'revision' | 'replaced'>): string {
+	return changes.replaced
+		? `Revision ${changes.revision} replaced the review.`
+		: `Revision ${changes.revision} is ready.`;
 }
 
 /** Returns the held change to the file on screen, or `null` when the held revision leaves it as it is. */

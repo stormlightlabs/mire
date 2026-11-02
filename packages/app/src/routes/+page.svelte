@@ -11,7 +11,9 @@
 		FIRST_RETRY_DELAY,
 		heldChanges,
 		heldFileChange,
+		heldHeading,
 		heldSummary,
+		nextHeld,
 		nextRetryDelay,
 		refusedConnection,
 		retries,
@@ -96,10 +98,10 @@
 	/** The focus bar, which takes keyboard focus when focus mode starts. */
 	let focusBar = $state<FocusBar>();
 	/**
-	 * A newer revision than the one on screen, held until the reader applies
-	 * it. Source changes and other writers' edits wait here. A viewed mark
-	 * applies at once; a finding edit or decision applies the held revision
-	 * first.
+	 * A revision other than the one on screen, held until the reader applies
+	 * it. It is usually newer; a lower one means the review file was replaced.
+	 * Source changes and other writers' edits wait here. A viewed mark applies
+	 * at once; a finding edit or decision applies the held revision first.
 	 */
 	let held = $state<ReviewOverview | null>(null);
 	/** Whether the held revision's file list is open. */
@@ -109,6 +111,12 @@
 	/** The reader's finding edit from a save that hit a revision conflict, until the editor takes it over. */
 	let keptDraft = $state<KeptDraft | null>(null);
 	let draftCopied = $state(false);
+	/**
+	 * The open finding's text when the reader started editing it. A save checks
+	 * the finding against it, so an edit typed from older text never replaces
+	 * another writer's. It clears when the edit saves or another finding opens.
+	 */
+	let editBase: { findingId: string; body: string } | null = null;
 
 	let streamAbort: AbortController | null = null;
 	let secret = '';
@@ -263,10 +271,9 @@
 			}
 			const previous = activeSummary ?? file;
 			review = overview;
-			if (held && held.revision <= overview.revision) {
-				held = null;
-				heldListOpen = false;
-			}
+			// The applied overview is the newest the page has, so nothing older waits.
+			held = null;
+			heldListOpen = false;
 			conflictRevision = null;
 			conflictReason = null;
 			await syncActiveFinding(overview);
@@ -295,6 +302,7 @@
 		const summary = overview.findings.find((finding) => finding.id === shown.id);
 		if (!summary) {
 			activeFinding = null;
+			editBase = null;
 			return;
 		}
 		const same =
@@ -314,13 +322,19 @@
 		}
 	}
 
-	/** Holds an overview newer than the one on screen, and shows its viewed marks and watch status now. */
+	/**
+	 * Holds an overview at any revision other than the one on screen, and shows
+	 * its viewed marks and watch status now. It replaces a held revision the
+	 * server has moved past or gone back from. At the revision on screen it
+	 * shows the overview and drops anything held.
+	 */
 	function holdOverview(shown: ReviewOverview, overview: ReviewOverview) {
-		if (overview.revision > shown.revision) {
-			held = overview;
+		held = nextHeld(shown, overview);
+		if (held) {
 			review = withViewedMarks(shown, overview);
-		} else if (overview.revision === shown.revision) {
+		} else {
 			review = overview;
+			heldListOpen = false;
 		}
 	}
 
@@ -549,6 +563,8 @@
 		findingError = null;
 		notice = null;
 		if (keptDraft?.findingId !== finding.id) keptDraft = null;
+		// The editor fills from another finding's text, so its edit starts over.
+		if (activeFinding?.id !== finding.id) editBase = null;
 		try {
 			activeFinding = await request<FindingDetail>(`/api/v1/findings/${encodeURIComponent(finding.id)}`);
 			if (!finding.navigable || !review) return;
@@ -559,13 +575,19 @@
 		}
 	}
 
+	/** Records the open finding's text when the reader first changes the editor. */
+	function startEdit() {
+		if (!activeFinding || editBase?.findingId === activeFinding.id) return;
+		editBase = { findingId: activeFinding.id, body: activeFinding.body };
+	}
+
 	async function editFinding(draft: FindingDraft): Promise<string | null> {
 		if (!review || !activeFinding) return 'Select a finding before editing it.';
 		const findingId = activeFinding.id;
-		const body = activeFinding.body;
+		const base = editBase?.findingId === findingId ? editBase : { findingId, body: activeFinding.body };
 		try {
 			const stale = await ownWrite(async () => {
-				const stale = await applyHeldFor({ findingId, body });
+				const stale = await checkFindingWrite(base);
 				if (stale || !review) return stale;
 				const result = await request<FindingMutation>(`/api/v1/findings/${encodeURIComponent(findingId)}`, {
 					method: 'PATCH',
@@ -577,9 +599,13 @@
 			});
 			if (stale) {
 				keepDraft(findingId, draft);
+				// The dialog showed the reader the newer text, so their next save is made knowing it.
+				const current = review?.findings.find((finding) => finding.id === findingId);
+				editBase = current ? { findingId, body: current.body } : null;
 				return `${stale} Your edit was not saved, and your text is still here.`;
 			}
 			keptDraft = null;
+			editBase = null;
 			return null;
 		} catch (cause) {
 			if (cause instanceof RequestError && cause.code === 'revision_conflict') keepDraft(findingId, draft);
@@ -594,7 +620,7 @@
 		keptDraft = null;
 		try {
 			const stale = await ownWrite(async () => {
-				const stale = await applyHeldFor({ findingId, status });
+				const stale = await checkFindingWrite({ findingId, status });
 				if (stale || !review) return stale;
 				const result = await request<FindingMutation>(`/api/v1/findings/${encodeURIComponent(findingId)}/decision`, {
 					method: 'POST',
@@ -611,16 +637,19 @@
 	}
 
 	/**
-	 * Applies a held revision before one of the reader's finding writes, so the
-	 * write goes to the revision it changes. Returns `null` when nothing was
-	 * held, or when the finding and what the reader started from are unchanged
-	 * in it. Otherwise it opens the conflict dialog and returns the reason.
+	 * Checks one of the reader's finding writes before it is sent. A held
+	 * revision applies first, so the write goes to the revision it changes.
+	 * Then the finding on screen is compared with what the reader started
+	 * from. Returns `null` when the finding is there and unchanged. Otherwise
+	 * it opens the conflict dialog and returns the reason.
 	 */
-	async function applyHeldFor(base: FindingWriteBase): Promise<string | null> {
-		if (!held) return null;
-		const revision = held.revision;
-		await reloadReview(true);
-		if (!review || held) return `Revision ${revision} could not be applied.`;
+	async function checkFindingWrite(base: FindingWriteBase): Promise<string | null> {
+		if (held) {
+			const revision = held.revision;
+			await reloadReview(true);
+			if (!review || held) return `Revision ${revision} could not be applied.`;
+		}
+		if (!review) return 'The review is not loaded.';
 		const stale = staleFindingWrite(review, base);
 		if (stale) {
 			conflictRevision = review.revision;
@@ -850,7 +879,7 @@
 	<div class="live-strip">
 		<!-- Only the status sentences are announced, not the buttons and file list around them. -->
 		<p class="sr-only" aria-live="polite">
-			{#if review && changes}Revision {changes.revision} is ready. {heldSummary(changes)}{/if}
+			{#if review && changes}{heldHeading(changes)} {heldSummary(changes)}{/if}
 			{#if stopped}{stopped.heading}. {stopped.body}{/if}
 		</p>
 		{#if review && changes}
@@ -858,7 +887,7 @@
 				<div class="held-row">
 					<span class="i-lucide-refresh-cw held-icon" aria-hidden="true"></span>
 					<p>
-						<strong id="held-heading">Revision {changes.revision} is ready.</strong>
+						<strong id="held-heading">{heldHeading(changes)}</strong>
 						{heldSummary(changes)} Your place is held here until you apply it.
 					</p>
 					<div class="held-actions">
@@ -942,6 +971,7 @@
 				heldChange={shownChange && changes ? { change: shownChange, revision: changes.revision } : null}
 				keptDraft={shownDraft}
 				onDraftTaken={() => (keptDraft = null)}
+				onEditStart={startEdit}
 				bind:openedGenerated
 				showHeading={!inFocus}
 				onDismissNotice={() => (notice = null)}
@@ -1039,14 +1069,13 @@
 				{#if conflictReason && keptDraft}
 					<h1 id="conflict-heading">Your edit was not saved</h1>
 					<p>
-						{conflictReason} Mire applied revision {conflictRevision} for your save, and it is on screen now. Your text is
-						kept below and in the editor. Read the finding, then save again.
+						{conflictReason} Revision {conflictRevision} is on screen now. Your text is kept below and in the editor. Read
+						the finding, then save again.
 					</p>
 				{:else if conflictReason}
 					<h1 id="conflict-heading">Your decision was not saved</h1>
 					<p>
-						{conflictReason} Mire applied revision {conflictRevision} for your decision, and it is on screen now. Read the
-						finding, then decide again.
+						{conflictReason} Revision {conflictRevision} is on screen now. Read the finding, then decide again.
 					</p>
 				{:else if keptDraft}
 					<h1 id="conflict-heading">Your edit was not saved</h1>

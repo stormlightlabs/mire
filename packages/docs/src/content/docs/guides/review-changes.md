@@ -183,12 +183,17 @@ Until you apply it, a file that changed in the new revision does not open,
 since the server keeps only the newest content. A viewed mark applies at once
 and leaves the new revision waiting. Refresh source applies it.
 
+If the review file is replaced with a copy at a lower revision, the bar says
+that revision replaced the review, and `u` shows it the same way.
+
 Saving a finding edit or recording a decision applies the waiting revision
-first, then saves your change against it. Mire saves only if the new revision
-still has the finding and has not changed what you started from: its text,
-for an edit, or its status, for a decision. Otherwise a dialog names what
-changed and nothing is saved. For an edit, your text stays in the editor and
-the dialog, with Copy text. Read the finding, then save or decide again.
+first, then saves your change against it. Mire saves only if the finding is
+still there and has not changed from what you started with: its text when you
+began typing, for an edit, or its status, for a decision. This holds even if
+you applied the newer revision yourself while editing. Otherwise a dialog
+names what changed and nothing is saved. For an edit, your text stays in the
+editor and the dialog, with Copy text. Read the finding, then save or decide
+again.
 
 If a revision lands before the page hears of it, the server refuses the save,
 and a dialog says so. Select Apply revision and keep draft, then save again.

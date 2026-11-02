@@ -1032,7 +1032,10 @@
 		<Overlay open={true} labelledBy="files-drawer-heading" variant="drawer" onClose={() => (mobilePane = null)}>
 			<section class="drawer-content">
 				<header class="drawer-heading">
-					<h2 id="files-drawer-heading">Changed files</h2>
+					<div class="drawer-title">
+						<h2 id="files-drawer-heading">Changed files</h2>
+						<span>{review.files.length}</span>
+					</div>
 					<button onclick={() => (mobilePane = null)}>Close files</button>
 				</header>
 				<FileNavigator files={review.files} {activeFile} drawer onSelect={selectFileFromDrawer} />
@@ -1042,7 +1045,10 @@
 		<Overlay open={true} labelledBy="findings-drawer-heading" variant="drawer" onClose={() => (mobilePane = null)}>
 			<section class="drawer-content">
 				<header class="drawer-heading">
-					<h2 id="findings-drawer-heading">Review queue</h2>
+					<div class="drawer-title">
+						<h2 id="findings-drawer-heading">Review queue</h2>
+						<span>{review.totals.open} open</span>
+					</div>
 					<button onclick={() => (mobilePane = null)}>Close findings</button>
 				</header>
 				<FindingQueue
@@ -1612,6 +1618,15 @@
 		height: 100%;
 		display: grid;
 		grid-template-rows: auto minmax(0, 1fr);
+	}
+	.drawer-title {
+		display: flex;
+		align-items: baseline;
+		gap: 0.6rem;
+	}
+	.drawer-title span {
+		color: var(--muted);
+		font-size: 0.78rem;
 	}
 	.drawer-heading {
 		display: flex;

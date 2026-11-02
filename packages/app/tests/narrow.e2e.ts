@@ -74,6 +74,9 @@ test('reaches the file list and the queue, and decides a finding', async ({ page
 
 	await tabs(page).getByRole('button', { name: /Files/ }).click();
 	const files = page.getByRole('dialog', { name: 'Changed files' });
+	// One heading names each drawer, and its bar keeps the count.
+	await expect(files.getByRole('heading')).toHaveText(['Changed files']);
+	await expect(files.locator('.drawer-heading')).toContainText('2');
 	await expectNoSidewaysOverflow(page);
 	await files.getByRole('treeitem', { name: /two\.txt/ }).click();
 	await expect(files).toBeHidden();
@@ -83,6 +86,8 @@ test('reaches the file list and the queue, and decides a finding', async ({ page
 		.getByRole('button', { name: /2 open Findings/ })
 		.click();
 	const queue = page.getByRole('dialog', { name: 'Review queue' });
+	await expect(queue.getByRole('heading')).toHaveText(['Review queue']);
+	await expect(queue.locator('.drawer-heading')).toContainText('2 open');
 	await expectNoSidewaysOverflow(page);
 	await queue.getByRole('button', { name: /second line should stay lowercase/ }).click();
 	await expect(queue).toBeHidden();

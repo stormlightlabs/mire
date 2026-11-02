@@ -93,10 +93,13 @@
 </script>
 
 <aside class:drawer class="files" aria-label="Changed files">
-	<div class="pane-heading">
-		<h2>Changed files</h2>
-		<span>{files.length}</span>
-	</div>
+	<!-- A drawer names the list and counts it in its own bar. -->
+	{#if !drawer}
+		<div class="pane-heading">
+			<h2>Changed files</h2>
+			<span>{files.length}</span>
+		</div>
+	{/if}
 	<label class="search">
 		<span>Filter files</span>
 		<input bind:value={query} type="search" placeholder="Filter files" />

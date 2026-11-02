@@ -173,7 +173,8 @@
 		});
 		return {
 			name: file.path.display,
-			prevName: file.oldPath?.display,
+			// The header draws an arrow from the old path whenever one is given, so only a rename passes it.
+			prevName: file.oldPath && file.oldPath.display !== file.path.display ? file.oldPath.display : undefined,
 			type: pierreChangeType(file.status),
 			hunks,
 			splitLineCount: splitIndex,
@@ -301,6 +302,8 @@
 
 <style>
 	.diff-host {
+		/* The code rows scroll on their own layer, which can round out over the right border unless clipped. */
+		overflow: clip;
 		min-width: 0;
 		border: 1px solid var(--line);
 		background: var(--surface);

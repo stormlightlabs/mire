@@ -18,11 +18,14 @@
 	} = $props();
 </script>
 
-<aside class:drawer class="findings" aria-labelledby="findings-heading">
-	<div class="pane-heading">
-		<h2 id="findings-heading">Review queue</h2>
-		<span>{openCount} open</span>
-	</div>
+<aside class:drawer class="findings" aria-label="Review queue">
+	<!-- A drawer names the queue and counts it in its own bar. -->
+	{#if !drawer}
+		<div class="pane-heading">
+			<h2>Review queue</h2>
+			<span>{openCount} open</span>
+		</div>
+	{/if}
 	<div class="filters" aria-label="Filter findings">
 		<label
 			>Status <select bind:value={filters.status}

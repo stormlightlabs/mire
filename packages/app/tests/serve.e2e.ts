@@ -14,6 +14,9 @@ test('reviews a change from load to export', async ({ page, mire }) => {
 	// Load: the first file opens and both findings are queued.
 	await expect(header).toContainText('revision 3');
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+	// The diff header draws an old path and an arrow only for a rename.
+	await expect(diff.locator('[data-diffs-header]')).toContainText('one.txt');
+	await expect(diff.locator('[data-prev-name]')).toHaveCount(0);
 	await expect(queue).toContainText('2 open');
 	await expect(first).toBeVisible();
 	await expect(second).toBeVisible();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { EXPORTS, handoffHeadline, handoffItems, nextUnviewed } from './finish';
+import { EXPORTS, handoffHeadline, handoffItems, nextUnviewed, uncountedGenerated } from './finish';
 import type { HeldChanges } from './live';
 import type { FileSummary, FindingSummary, ReviewOverview } from './review';
 
@@ -143,6 +143,29 @@ describe('handoffItems', () => {
 			revision: 5
 		});
 		expect(handoffHeadline(items.length)).toBe('Three things are left.');
+	});
+});
+
+describe('uncountedGenerated', () => {
+	it('counts generated files not viewed once every other file is viewed', () => {
+		const review = overview([
+			file('src.rs', { viewed: 'viewed' }),
+			file('Cargo.lock', { generated: true }),
+			file('dist/app.js', { generated: true, viewed: 'changed' }),
+			file('dist/app.css', { generated: true, viewed: 'viewed' })
+		]);
+
+		expect(handoffItems(review, null, null)).toEqual([]);
+		expect(uncountedGenerated(review.files)).toBe(2);
+	});
+
+	it('is 0 while the unviewed row shows, or when generated files are counted', () => {
+		const pending = [file('src.rs'), file('Cargo.lock', { generated: true })];
+		const onlyGenerated = [file('Cargo.lock', { generated: true })];
+
+		expect(uncountedGenerated(pending)).toBe(0);
+		expect(uncountedGenerated(onlyGenerated)).toBe(0);
+		expect(uncountedGenerated([file('src.rs', { viewed: 'viewed' })])).toBe(0);
 	});
 });
 

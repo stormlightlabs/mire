@@ -172,3 +172,50 @@ test('opens from focus mode and returns there', async ({ page, mire }) => {
 	);
 	await expect(header.getByRole('button', { name: 'Leave focus' })).toBeVisible();
 });
+
+test('shows why a download failed, and clears it when the panel opens again', async ({ page, mire }) => {
+	await page.goto(mire.url);
+	await expect(page.getByRole('banner')).toContainText('revision 3');
+
+	// A binary file leaves the changeset with no patch.
+	await mire.writeSource('two.txt', 'x\u0000Y\n');
+	await page.getByRole('button', { name: 'Apply revision 4' }).click();
+	const panel = await openPanel(page, 4);
+	const status = panel.getByRole('status');
+
+	await panel.getByRole('button', { name: /Patch/ }).click();
+	await expect(status).toHaveText('Patch: The changeset has binary files, which a patch cannot carry.');
+	await expect(panel).toBeVisible();
+	await expect(page.getByRole('banner')).toContainText('revision 4');
+	await expect(page.getByRole('region', { name: 'File diff' })).toBeVisible();
+
+	await panel.getByRole('button', { name: 'Keep reviewing' }).click();
+	await expect(panel).toBeHidden();
+	await openPanel(page, 4);
+	await expect(status).toHaveText('');
+});
+
+test.describe('with a generated file', () => {
+	test.use({ mireAttributes: 'two.txt linguist-generated\n' });
+
+	test('lists generated files not viewed apart, and still says nothing is left', async ({ page, mire }) => {
+		mire.cli('note', 'resolve', mire.reviewPath, 'note-1', '--revision', '3', '--author', 'reviewer');
+		mire.cli('note', 'resolve', mire.reviewPath, 'note-2', '--revision', '4', '--author', 'reviewer');
+		await page.goto(mire.url);
+		const diff = page.getByRole('region', { name: 'File diff' });
+		await expect(page.getByRole('banner')).toContainText('revision 5');
+		await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+		await expect(diff).toHaveAttribute('aria-busy', 'false');
+		const viewed = diff.getByRole('button', { name: 'Viewed' });
+		await viewed.click();
+		await expect(viewed).toHaveAttribute('aria-pressed', 'true');
+
+		const panel = await openPanel(page, 5);
+		await expect(panel).toContainText('Nothing is left.');
+		await expect(left(page).getByRole('listitem')).toHaveText([
+			/Every counted file viewed, every finding settled/,
+			/1 generated file not viewed\s*Generated files are not counted\./
+		]);
+		await expect(left(page).getByRole('button')).toHaveCount(0);
+	});
+});

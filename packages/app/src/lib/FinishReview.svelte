@@ -2,13 +2,19 @@
 	import { EXPORTS, handoffHeadline, type ExportChoice, type HandoffItem } from './finish';
 
 	let {
+		open,
 		items,
+		generatedLeft,
 		onAct,
 		onDownload,
 		onClose
 	}: {
+		/** Whether the panel shows. Opening it clears an earlier download error. */
+		open: boolean;
 		/** What is left before handoff, from `handoffItems`. Empty when nothing is left. */
 		items: HandoffItem[];
+		/** Generated files not viewed that no row counts, from `uncountedGenerated`. */
+		generatedLeft: number;
 		/** Closes the panel and takes the reader to where they can act on the item. */
 		onAct: (item: HandoffItem) => void;
 		/** Downloads an export, and resolves with why it failed, or `null`. */
@@ -17,6 +23,10 @@
 	} = $props();
 
 	let downloadError = $state<string | null>(null);
+
+	$effect(() => {
+		if (open) downloadError = null;
+	});
 
 	async function download(choice: ExportChoice) {
 		downloadError = null;
@@ -65,11 +75,20 @@
 			<li class="item" data-kind="none">
 				<span class="mark i-lucide-check" aria-hidden="true"></span>
 				<div class="text">
-					<strong>Every file viewed, every finding settled</strong>
+					<strong>{generatedLeft ? 'Every counted file' : 'Every file'} viewed, every finding settled</strong>
 					<span class="detail">No open findings, and every finding still matches its line.</span>
 				</div>
 			</li>
 		{/each}
+		{#if generatedLeft}
+			<li class="item" data-kind="generated">
+				<span class="mark i-lucide-circle-dashed" aria-hidden="true"></span>
+				<div class="text">
+					<strong>{generatedLeft} generated {generatedLeft === 1 ? 'file' : 'files'} not viewed</strong>
+					<span class="detail">Generated files are not counted.</span>
+				</div>
+			</li>
+		{/if}
 	</ul>
 
 	<h2 class="export-heading" id="finish-export-heading">Export</h2>
@@ -134,6 +153,9 @@
 	}
 	[data-kind='anchors'] .mark {
 		color: var(--severity-medium);
+	}
+	[data-kind='generated'] {
+		color: var(--muted);
 	}
 	[data-kind='none'] .mark {
 		color: var(--success);

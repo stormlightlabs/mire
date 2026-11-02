@@ -47,7 +47,8 @@ export type HandoffItem =
  * held revision, files not viewed as they are now, open findings, and
  * findings whose anchor is stale or ambiguous. An empty list means nothing is
  * left. Generated files are left out of the viewed count when the review has
- * other files, and the detail line says how many.
+ * other files, and the detail line says how many; `uncountedGenerated`
+ * counts them when no unviewed row shows.
  */
 export function handoffItems(
 	review: ReviewOverview,
@@ -63,6 +64,18 @@ export function handoffItems(
 	const anchors = anchorsItem(review.findings);
 	if (anchors) items.push(anchors);
 	return items;
+}
+
+/**
+ * Counts the generated files not viewed as they are now that no row names:
+ * the review has other files and every one of them is viewed. The panel lists
+ * these apart, since they do not count toward what is left. Returns 0 when an
+ * unviewed row would show, as its detail line already counts them.
+ */
+export function uncountedGenerated(files: FileSummary[]): number {
+	const source = files.filter((file) => !file.generated);
+	if (!source.length || source.some((file) => fileViewState(file) !== 'viewed')) return 0;
+	return files.filter((file) => file.generated && fileViewState(file) !== 'viewed').length;
 }
 
 /** The panel's opening sentence, such as "Three things are left." */

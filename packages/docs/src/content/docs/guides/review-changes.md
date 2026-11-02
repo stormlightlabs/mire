@@ -185,7 +185,8 @@ and takes you to where you can act:
 
 A file that changed after you marked it viewed counts as not viewed.
 Generated files are left out of the count when the review has other files,
-and the row says how many. A finding whose anchor is stale or ambiguous counts
+and the row says how many. Once every other file is viewed, a separate row
+names the generated files still not viewed. A finding whose anchor is stale or ambiguous counts
 whatever its status. With nothing left, the panel says so.
 
 The panel's exports download the review file as it is on disk:

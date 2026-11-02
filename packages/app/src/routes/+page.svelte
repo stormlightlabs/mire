@@ -7,7 +7,7 @@
 	import FocusBar from '$lib/FocusBar.svelte';
 	import KeyBar from '$lib/KeyBar.svelte';
 	import Overlay from '$lib/Overlay.svelte';
-	import { handoffItems, type ExportChoice, type HandoffItem } from '$lib/finish';
+	import { handoffItems, uncountedGenerated, type ExportChoice, type HandoffItem } from '$lib/finish';
 	import { filePosition, takesText } from '$lib/focus';
 	import {
 		FIRST_RETRY_DELAY,
@@ -154,6 +154,7 @@
 	const shownChange = $derived(heldFileChange(changes, file ?? activeSummary));
 	const stopped = $derived(review ? watchNotice(connection, review.watch, review.revision) : null);
 	const handoff = $derived(review ? handoffItems(review, changes, file ?? activeSummary) : []);
+	const generatedLeft = $derived(review ? uncountedGenerated(review.files) : 0);
 	const shownDraft = $derived(keptDraft && keptDraft.findingId === activeFinding?.id ? keptDraft : null);
 
 	$effect(() => {
@@ -1047,7 +1048,9 @@
 			variant="panel"
 			onClose={() => (finishReviewOpen = false)}>
 			<FinishReview
+				open={finishReviewOpen}
 				items={handoff}
+				{generatedLeft}
 				onAct={(item) => void actOnHandoff(item)}
 				onDownload={download}
 				onClose={() => (finishReviewOpen = false)} />

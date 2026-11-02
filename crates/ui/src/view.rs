@@ -896,7 +896,11 @@ new file mode 100644
 
     #[test]
     fn named_theme_styles_cover_states_help_and_both_review_layouts() {
-        let theme = Theme::resolve(crate::ThemeFamily::Catppuccin, Some(crate::ColorMode::Dark));
+        let theme = Theme::resolve(
+            crate::ThemeFamily::Catppuccin,
+            Some(crate::ColorMode::Dark),
+            crate::ColorDepth::Truecolor,
+        );
 
         let loading = rendered_styles(App::loading(), 32, 5, &theme);
         assert!(has_style(&loading, theme.application));
@@ -937,7 +941,11 @@ new file mode 100644
 
     #[test]
     fn named_theme_styles_cover_search_syntax_and_intraline_emphasis() {
-        let theme = Theme::resolve(crate::ThemeFamily::Eldritch, Some(crate::ColorMode::Light));
+        let theme = Theme::resolve(
+            crate::ThemeFamily::Eldritch,
+            Some(crate::ColorMode::Light),
+            crate::ColorDepth::Truecolor,
+        );
         let patch = b"diff --git a/file.rs b/file.rs\n--- a/file.rs\n+++ b/file.rs\n@@ -1 +1 @@\n-let old = 1;\n+let new = 2;\n";
         let changeset = parse_patch(patch, ChangesetSource::Patch { label: None }, PatchLimits::default()).unwrap();
         let mut app = App::ready(&changeset);
@@ -1012,7 +1020,11 @@ new file mode 100644
     fn finding_lines_use_their_own_surface_and_a_color_per_severity() {
         use mire_core::NoteSeverity;
 
-        let theme = Theme::resolve(crate::ThemeFamily::Iceberg, Some(crate::ColorMode::Light));
+        let theme = Theme::resolve(
+            crate::ThemeFamily::Iceberg,
+            Some(crate::ColorMode::Light),
+            crate::ColorDepth::Truecolor,
+        );
         let review = severities_review();
         let app = App::review_with_options(&review, crate::AppOptions::default());
         let styles = rendered_styles(app, 120, 24, &theme);

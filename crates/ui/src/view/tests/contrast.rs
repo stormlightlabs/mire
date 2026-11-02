@@ -8,7 +8,7 @@ use ratatui::style::Color;
 
 use super::*;
 use crate::theme::contrast::contrast_ratio;
-use crate::{ColorMode, ThemeFamily};
+use crate::{ColorDepth, ColorMode, ThemeFamily};
 
 /// Contrast WCAG 2 asks of text.
 const TEXT_CONTRAST: f64 = 4.5;
@@ -55,9 +55,12 @@ fn every_drawn_cell_has_a_theme_background_and_readable_contrast() {
 
     let mut failures = Vec::new();
     for family in [ThemeFamily::Iceberg, ThemeFamily::Eldritch, ThemeFamily::Catppuccin] {
-        for mode in [ColorMode::Dark, ColorMode::Light] {
-            let theme = Theme::resolve(family, Some(mode));
-            let name = format!("{family}/{mode:?}");
+        for (mode, depth) in [ColorMode::Dark, ColorMode::Light]
+            .into_iter()
+            .flat_map(|mode| [ColorDepth::Truecolor, ColorDepth::Xterm256].map(|depth| (mode, depth)))
+        {
+            let theme = Theme::resolve(family, Some(mode), depth);
+            let name = format!("{family}/{mode:?}/{depth:?}");
             let scenes: Vec<(&str, App<'_>, u16, u16)> = vec![
                 ("split", keys(App::ready(&intraline), &[KeyCode::Char('2')]), 160, 16),
                 ("unified", keys(App::ready(&intraline), &[KeyCode::Char('1')]), 100, 16),

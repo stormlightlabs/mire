@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use mire_core::NoteSeverity;
 use ratatui::style::{Color, Style};
 
-use super::{ColorMode, Theme, ThemeFamily, ThemeVariant};
+use super::{ColorDepth, ColorMode, Theme, ThemeFamily, ThemeVariant};
 
 /// Builds CSS custom properties for every palette, selected by the
 /// `data-theme-family` and `data-theme` attributes on the root element.
@@ -16,6 +16,7 @@ use super::{ColorMode, Theme, ThemeFamily, ThemeVariant};
 /// `data-theme-family` holds a [`ThemeFamily`] identifier and `data-theme`
 /// holds `light` or `dark`. Each variant's properties come from the roles
 /// [`Theme::from_palette`] assigns, so the browser and the terminal share them.
+/// Browsers show every RGB color, so each variant uses its truecolor palette.
 pub fn web_stylesheet() -> String {
     let mut css = String::from("/* Generated from crates/ui/src/theme.rs by `just web-themes`. Do not edit. */\n");
     for variant in ThemeVariant::ALL {
@@ -35,7 +36,7 @@ pub fn web_stylesheet() -> String {
 
 /// The CSS custom properties the browser reads, paired with their colors.
 fn properties(variant: ThemeVariant) -> [(&'static str, Color); 20] {
-    let theme = Theme::from_palette(variant);
+    let theme = Theme::from_palette(variant, ColorDepth::Truecolor);
     let fg = |style: Style| style.fg.expect("palette roles set a foreground");
     let bg = |style: Style| style.bg.expect("palette roles set a background");
     [

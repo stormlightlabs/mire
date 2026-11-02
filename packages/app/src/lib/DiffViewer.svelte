@@ -10,6 +10,7 @@
 		expandContext,
 		theme,
 		showHeader = true,
+		wrap = false,
 		onFindingClick
 	}: {
 		file: FileDetail;
@@ -18,6 +19,8 @@
 		theme: Theme;
 		/** Whether to draw the file name and line counts above the diff. Focus mode names the file in its own bar. */
 		showHeader?: boolean;
+		/** Whether long lines wrap inside the pane instead of scrolling sideways, as on a narrow screen. */
+		wrap?: boolean;
 		onFindingClick: (finding: FindingSummary) => void;
 	} = $props();
 
@@ -55,7 +58,7 @@
 			// A whole-file addition or deletion reads as plain code, with only the gutter bar marking it.
 			disableBackground: isWholeFileChange(file.status),
 			hunkSeparators: 'line-info' as const,
-			overflow: 'scroll' as const,
+			overflow: wrap ? ('wrap' as const) : ('scroll' as const),
 			expandUnchanged: expandContext,
 			collapsedContextThreshold: 3,
 			renderAnnotation,

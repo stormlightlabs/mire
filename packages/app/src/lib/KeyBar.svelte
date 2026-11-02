@@ -36,7 +36,7 @@
 		display: flex;
 		align-items: center;
 		gap: 1.25rem;
-		padding: 0.45rem 1rem;
+		padding: 0.45rem 1rem calc(0.45rem + env(safe-area-inset-bottom));
 		border-top: 1px solid var(--line);
 		background: var(--surface);
 		color: var(--muted);

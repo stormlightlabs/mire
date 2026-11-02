@@ -819,7 +819,7 @@
 
 <a class="skip-link" href="#review-content">Skip to diff</a>
 
-<div class="app-shell" class:focused={inFocus}>
+<div class="app-shell" class:focused={inFocus} class:with-tabs={review !== null && isNarrow && !inFocus}>
 	{#if inFocus}
 		<FocusBar
 			bind:this={focusBar}
@@ -847,15 +847,8 @@
 				</span>
 			</div>
 			<div class="topbar-actions">
-				{#if review && isNarrow}
-					<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'files')}>
-						<span class="i-lucide-files icon" aria-hidden="true"></span>Files
-					</button>
-					<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'findings')}>
-						<span class="i-lucide-list-checks icon" aria-hidden="true"></span>Findings
-					</button>
-				{/if}
-				{#if review}
+				<!-- On a narrow screen the tab bar at the bottom holds Focus and Finish review. -->
+				{#if review && !isNarrow}
 					<button
 						bind:this={focusButton}
 						class="topbar-button"
@@ -880,9 +873,11 @@
 							Refresh source
 						{/if}
 					</button>
-					<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>
-						<span class="i-lucide-circle-check-big icon" aria-hidden="true"></span>Finish review
-					</button>
+					{#if !isNarrow}
+						<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>
+							<span class="i-lucide-circle-check-big icon" aria-hidden="true"></span>Finish review
+						</button>
+					{/if}
 					<button
 						class="topbar-button icon-button"
 						aria-label={themeLabel}
@@ -995,6 +990,7 @@
 				{viewedError}
 				heldChange={shownChange && changes ? { change: shownChange, revision: changes.revision } : null}
 				keptDraft={shownDraft}
+				narrow={isNarrow}
 				onDraftTaken={() => (keptDraft = null)}
 				onEditStart={startEdit}
 				bind:openedGenerated
@@ -1016,6 +1012,21 @@
 	</main>
 	{#if inFocus}
 		<KeyBar heldRevision={changes?.revision ?? null} />
+	{:else if review && isNarrow}
+		<nav class="tab-bar" aria-label="Review sections">
+			<button class="tab" aria-haspopup="dialog" onclick={() => (mobilePane = 'files')}>
+				<span class="tab-mark">{review.files.length}</span>Files
+			</button>
+			<button class="tab" aria-haspopup="dialog" onclick={() => (mobilePane = 'findings')}>
+				<span class="tab-mark">{review.totals.open}<span class="sr-only"> open</span></span>Findings
+			</button>
+			<button bind:this={focusButton} class="tab" aria-keyshortcuts="b" onclick={() => void setFocused(true)}>
+				<span class="i-lucide-maximize-2 tab-mark tab-icon" aria-hidden="true"></span>Focus
+			</button>
+			<button class="tab" aria-haspopup="dialog" onclick={() => (finishReviewOpen = true)}>
+				<span class="i-lucide-circle-check-big tab-mark tab-icon" aria-hidden="true"></span>Finish
+			</button>
+		</nav>
 	{/if}
 	{#if review && isNarrow && mobilePane === 'files'}
 		<Overlay open={true} labelledBy="files-drawer-heading" variant="drawer" onClose={() => (mobilePane = null)}>
@@ -1141,9 +1152,51 @@
 		overflow: hidden;
 		display: grid;
 		grid-template-rows: auto auto 1fr;
+		/* A phone's notch and rounded corners stay clear of the bars and the diff. */
+		padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
 	}
-	.app-shell.focused {
+	.app-shell.focused,
+	.app-shell.with-tabs {
 		grid-template-rows: auto auto 1fr auto;
+	}
+	.tab-bar {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		border-top: 1px solid var(--line);
+		padding-bottom: env(safe-area-inset-bottom);
+		background: var(--surface);
+	}
+	.tab {
+		min-height: 3.25rem;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.2rem;
+		border: 0;
+		padding: 0.35rem 0.25rem;
+		background: transparent;
+		color: var(--muted);
+		font:
+			500 0.72rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
+		cursor: pointer;
+	}
+	.tab-mark {
+		color: var(--focus);
+		font:
+			600 0.85rem/1.1rem 'Google Sans Code Variable',
+			'Google Sans Code',
+			monospace;
+	}
+	.tab-icon {
+		width: 1.1rem;
+		height: 1.1rem;
+	}
+	.tab:focus-visible {
+		outline: 2px solid var(--focus);
+		outline-offset: -2px;
 	}
 	/* The bar is inverted in light palettes. In dark ones an inverted bar would
 	   be the brightest thing on screen, so it sits one step above the page. */
@@ -1596,17 +1649,25 @@
 			padding: 0;
 		}
 		.review-meta {
+			flex-direction: column;
+			gap: 0.1rem;
+		}
+		.review-meta > [aria-hidden='true'] {
 			display: none;
+		}
+		.review-meta .review-title {
+			max-width: none;
 		}
 		.topbar-actions {
 			grid-column: 3;
 			margin-left: 0;
+			gap: 0.35rem;
 		}
 		.workspace {
 			grid-template-columns: minmax(0, 1fr);
 		}
 
-		.topbar-actions .topbar-button:not(.mobile-pane-button):not(.icon-button) {
+		.topbar-actions .topbar-button {
 			width: 2.75rem;
 			padding-inline: 0;
 			font-size: 0;
@@ -1617,15 +1678,6 @@
 		}
 	}
 	@media (max-width: 32rem) {
-		.topbar-actions {
-			flex-wrap: wrap;
-			gap: 0.35rem;
-		}
-		.topbar-actions .mobile-pane-button {
-			width: 2.75rem;
-			padding-inline: 0;
-			font-size: 0;
-		}
 		.status {
 			gap: 0;
 			font-size: 0;
@@ -1641,7 +1693,15 @@
 			width: 100%;
 		}
 	}
+	@media (hover: hover) {
+		.tab:hover {
+			background: var(--button-hover);
+			color: var(--ink);
+		}
+	}
 	@media (pointer: coarse) {
+		.held-actions button,
+		.watch-stopped button,
 		.topbar-button,
 		.dialog-content .close,
 		.primary-button,

@@ -65,6 +65,11 @@
 		height: 100%;
 		max-height: none;
 		margin: 0 0 0 auto;
-		padding: 0;
+		padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) 0;
+	}
+	@media (max-width: 32rem) {
+		.overlay.panel {
+			padding: 1.25rem;
+		}
 	}
 </style>

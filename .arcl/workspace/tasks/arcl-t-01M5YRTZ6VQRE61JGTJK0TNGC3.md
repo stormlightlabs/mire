@@ -2,7 +2,7 @@
 id = "arcl-t-01M5YRTZ6VQRE61JGTJK0TNGC3"
 plan = "arcl-pl-01M5YRTHS95J67NZ6THREDG33F"
 title = "Narrow web layout"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 7
 blocked-by = ["arcl-t-01M5SXDG7QJM6Y67FCJ8ZPNASW"]

@@ -22,8 +22,8 @@ use axum::{Router, extract::MatchedPath};
 use base64::Engine;
 use include_dir::{Dir, include_dir};
 use mire_core::{
-    AnnotationKind, Author, ChangesetSource, FileContent, FileDiff, Hunk, NoteId, NoteSeverity, NoteStatus, Review,
-    ReviewNote, ReviewRevision, ViewedMap,
+    AnnotationKind, Author, ChangesetSource, FileContent, FileDiff, Hunk, NoteId, NoteSeverity, NoteStatus,
+    PatchWriteError, Review, ReviewNote, ReviewRevision, ViewedMap, write_patch,
 };
 use mire_tui::ThemeFamily;
 use serde::{Deserialize, Serialize};
@@ -386,6 +386,7 @@ enum FindingMutationError {
         export_notes_json,
         export_notes_markdown,
         export_context,
+        export_patch,
         get_openapi,
         viewed::put_viewed,
         viewed::delete_viewed,
@@ -502,6 +503,7 @@ fn app(state: AppState) -> Router {
         .route("/api/v1/exports/notes.json", get(export_notes_json))
         .route("/api/v1/exports/notes.md", get(export_notes_markdown))
         .route("/api/v1/exports/context.json", get(export_context))
+        .route("/api/v1/exports/changeset.patch", get(export_patch))
         .route("/api/v1/openapi.json", get(get_openapi))
         .fallback(get(static_asset))
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
@@ -1206,6 +1208,28 @@ async fn export_context(State(state): State<AppState>) -> Response<Body> {
         ) {
             Ok(bytes) => download(bytes, "application/json; charset=utf-8", "mire-context.json"),
             Err(error) => protocol_problem(error),
+        },
+        Err(response) => *response,
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/exports/changeset.patch",
+    responses(
+        (status = 200, description = "Git-compatible patch of the captured changeset, without findings"),
+        (status = 422, description = "The changeset has binary files, which a patch cannot carry", body = Problem)
+    )
+)]
+async fn export_patch(State(state): State<AppState>) -> Response<Body> {
+    match load_current_review(&state).await {
+        Ok(review) => match write_patch(review.changeset()) {
+            Ok(bytes) => download(bytes, "text/x-diff; charset=utf-8", "mire-changeset.patch"),
+            Err(PatchWriteError::BinaryContent { .. }) => problem(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "patch_unavailable",
+                "The changeset has binary files, which a patch cannot carry.",
+            ),
         },
         Err(response) => *response,
     }

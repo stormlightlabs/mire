@@ -380,6 +380,11 @@ Each file in `GET /api/v1/review` and `GET /api/v1/files/{file_id}` has
 lists generated files in a collapsed group and hides each diff until the
 reader asks for it.
 
+The Finish review panel downloads `GET /api/v1/exports/notes.md`,
+`notes.json`, `context.json` and `changeset.patch` under the same prefix. The
+patch is the output of `mire review export --format patch`. A changeset with a
+binary file has no patch, and the route fails with `patch_unavailable` (422).
+
 | Route                                       | Effect                                                                      |
 | ------------------------------------------- | --------------------------------------------------------------------------- |
 | `PUT /api/v1/viewed?path=`                  | Marks the path viewed at the `fingerprint` and `revision` in the body.      |

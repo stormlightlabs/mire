@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 const stylesheet = readFileSync(new URL('../themes.css', import.meta.url), 'utf8');
 
 const TEXT = ['ink', 'muted', 'focus', 'danger'];
-/** Graphics, such as the ready status dot, need 3:1 rather than 4.5:1. */
-const GRAPHICS = ['success'];
+/** Graphics, such as the ready status dot and the finish panel's anchor mark, need 3:1 rather than 4.5:1. */
+const GRAPHICS = ['success', 'severity-medium'];
 const BACKGROUNDS = ['paper', 'surface'];
 
 /** Reads each palette block of the generated stylesheet into its custom properties. */
@@ -53,7 +53,7 @@ describe('generated themes', () => {
 		}
 	});
 
-	it('gives the success color 3:1 on every background', () => {
+	it('gives the success and medium severity colors 3:1 on every background', () => {
 		for (const { name, colors } of palettes(stylesheet)) {
 			for (const background of BACKGROUNDS) {
 				for (const foreground of GRAPHICS) {

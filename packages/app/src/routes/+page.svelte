@@ -3,9 +3,11 @@
 	import DiffPane from '$lib/DiffPane.svelte';
 	import FileNavigator from '$lib/FileNavigator.svelte';
 	import FindingQueue from '$lib/FindingQueue.svelte';
+	import FinishReview from '$lib/FinishReview.svelte';
 	import FocusBar from '$lib/FocusBar.svelte';
 	import KeyBar from '$lib/KeyBar.svelte';
 	import Overlay from '$lib/Overlay.svelte';
+	import { handoffItems, type ExportChoice, type HandoffItem } from '$lib/finish';
 	import { filePosition, takesText } from '$lib/focus';
 	import {
 		FIRST_RETRY_DELAY,
@@ -28,7 +30,6 @@
 	import { loadDevelopmentSessionSecret, parseSessionSecret, saveDevelopmentSessionSecret } from '$lib/session';
 	import { applyTheme, loadTheme, saveTheme, type Theme } from '$lib/theme';
 	import {
-		completionSummary,
 		defaultFindingFilters,
 		formatPath,
 		filterFindings,
@@ -139,7 +140,6 @@
 	/** How long to wait before the next attempt to reconnect the live channel. */
 	let retryDelay = FIRST_RETRY_DELAY;
 
-	const completion = $derived(review ? completionSummary(review) : null);
 	const activeSummary = $derived(review?.files.find((summary) => summary.id === activeFile) ?? null);
 	const shownView = $derived(review && file ? shownViewState(review.files, file) : 'unviewed');
 	const visibleFindings = $derived(review ? filterFindings(review.findings, filters) : []);
@@ -153,6 +153,7 @@
 	const changes = $derived(review && held ? heldChanges(review, held) : null);
 	const shownChange = $derived(heldFileChange(changes, file ?? activeSummary));
 	const stopped = $derived(review ? watchNotice(connection, review.watch, review.revision) : null);
+	const handoff = $derived(review ? handoffItems(review, changes, file ?? activeSummary) : []);
 	const shownDraft = $derived(keptDraft && keptDraft.findingId === activeFinding?.id ? keptDraft : null);
 
 	$effect(() => {
@@ -376,19 +377,38 @@
 		}
 	}
 
-	async function download(path: string, filename: string) {
+	/** Downloads an export from the finish panel, and returns why it failed, or `null`. */
+	async function download(choice: ExportChoice): Promise<string | null> {
 		try {
-			const response = await fetch(path, { headers: { Authorization: `Bearer ${secret}` } });
-			if (!response.ok) throw new Error(`The download is unavailable (${response.status}).`);
+			const response = await fetch(choice.route, { headers: { Authorization: `Bearer ${secret}` } });
+			if (!response.ok) {
+				const problem = (await response.json().catch(() => null)) as Problem | null;
+				throw new Error(problem?.detail ?? `The download is unavailable (${response.status}).`);
+			}
 			const url = URL.createObjectURL(await response.blob());
 			const link = document.createElement('a');
 			link.href = url;
-			link.download = filename;
+			link.download = choice.filename;
 			link.click();
 			URL.revokeObjectURL(url);
+			return null;
 		} catch (cause) {
-			error = handleErr(cause, 'The download could not be created.');
+			return `${choice.label}: ${handleErr(cause, 'the download could not be created.')}`;
 		}
+	}
+
+	/**
+	 * Closes the finish panel and acts on one of its items: applies the held
+	 * revision, or opens the file or finding. Keyboard focus moves to the
+	 * review content, where the change shows.
+	 */
+	async function actOnHandoff(item: HandoffItem) {
+		finishReviewOpen = false;
+		if (item.kind === 'held') applyHeld();
+		else if (item.kind === 'unviewed') chooseFile(item.target.id);
+		else void selectFinding(item.target);
+		await tick();
+		document.getElementById('review-content')?.focus();
 	}
 
 	/**
@@ -805,6 +825,7 @@
 			onPrevious={() => moveFile(-1)}
 			onNext={() => moveFile(1)}
 			onToggleViewed={toggleViewed}
+			onFinish={() => (finishReviewOpen = true)}
 			onLeave={() => void setFocused(false)} />
 	{:else}
 		<header class="topbar">
@@ -1019,30 +1040,17 @@
 			</section>
 		</Overlay>
 	{/if}
-	{#if review && completion}
+	{#if review}
 		<Overlay
 			open={finishReviewOpen}
 			labelledBy="finish-review-heading"
-			variant="dialog"
+			variant="panel"
 			onClose={() => (finishReviewOpen = false)}>
-			<section class="dialog-content">
-				<h1 id="finish-review-heading">Finish review</h1>
-				<p>
-					{completion.ready ? 'This review is ready to hand off.' : 'Resolve the remaining review work before handoff.'}
-				</p>
-				<ul>
-					<li>{completion.unviewedFiles} unviewed file{completion.unviewedFiles === 1 ? '' : 's'}</li>
-					<li>{completion.openFindings} open finding{completion.openFindings === 1 ? '' : 's'}</li>
-					<li>{completion.unsafeAnchors} stale or ambiguous anchor{completion.unsafeAnchors === 1 ? '' : 's'}</li>
-				</ul>
-				<div class="downloads" aria-label="Review downloads">
-					<button onclick={() => void download('/api/v1/exports/notes.md', 'mire-notes.md')}>Markdown</button>
-					<button onclick={() => void download('/api/v1/exports/notes.json', 'mire-notes.json')}>JSON</button>
-					<button onclick={() => void download('/api/v1/exports/context.json', 'mire-context.json')}
-						>Agent context</button>
-				</div>
-				<button class="close" onclick={() => (finishReviewOpen = false)}>Close</button>
-			</section>
+			<FinishReview
+				items={handoff}
+				onAct={(item) => void actOnHandoff(item)}
+				onDownload={download}
+				onClose={() => (finishReviewOpen = false)} />
 		</Overlay>
 	{/if}
 	{#if review && hasMetadata}
@@ -1519,18 +1527,6 @@
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
 	}
-	.dialog-content ul {
-		margin: 1rem 0;
-		padding-left: 1.2rem;
-		line-height: 1.7;
-	}
-	.downloads {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-		margin-bottom: 1rem;
-	}
-	.downloads button,
 	.dialog-content .close,
 	.primary-button,
 	.drawer-heading button,
@@ -1568,7 +1564,6 @@
 	}
 	@media (hover: hover) {
 		.topbar-button:hover,
-		.downloads button:hover,
 		.dialog-content .close:hover,
 		.drawer-heading button:hover,
 		.session-form button:hover {
@@ -1642,7 +1637,6 @@
 	}
 	@media (pointer: coarse) {
 		.topbar-button,
-		.downloads button,
 		.dialog-content .close,
 		.primary-button,
 		.drawer-heading button {
@@ -1651,7 +1645,6 @@
 	}
 	@media (prefers-reduced-motion: no-preference) {
 		.topbar-button,
-		.downloads button,
 		.dialog-content .close,
 		.primary-button,
 		.drawer-heading button,

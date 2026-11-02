@@ -54,15 +54,16 @@ test('reviews a change from load to export', async ({ page, mire }) => {
 	await header.getByRole('button', { name: 'Finish review' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Finish review' });
 	await expect(dialog).toContainText('1 open finding');
+	await expect(dialog).toContainText('1 low');
 	const downloading = page.waitForEvent('download');
-	await dialog.getByRole('button', { name: 'Markdown' }).click();
+	await dialog.getByRole('button', { name: /Notes as Markdown/ }).click();
 	const download = await downloading;
 	expect(download.suggestedFilename()).toBe('mire-notes.md');
 	const markdown = await readFile(await download.path(), 'utf8');
 	expect(markdown).toContain('Review revision: 4');
 	expect(markdown).toMatch(/## Medium: note-1\n[\s\S]*- Status: `resolved`/);
 	expect(markdown).toMatch(/## Low: note-2\n[\s\S]*- Status: `open`/);
-	await dialog.getByRole('button', { name: 'Close' }).click();
+	await dialog.getByRole('button', { name: 'Keep reviewing' }).click();
 
 	// Refresh: a source edit waits until the reader applies it. Then it reaches
 	// the open file, which no longer counts as viewed.

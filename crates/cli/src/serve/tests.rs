@@ -12,7 +12,7 @@ use tower::ServiceExt;
 static TEST_ID: AtomicU64 = AtomicU64::new(0);
 
 const ORIGIN_VALUE: &str = "http://127.0.0.1:3737";
-const API_GET_ROUTES: [&str; 7] = [
+const API_GET_ROUTES: [&str; 8] = [
     "/api/v1/review",
     "/api/v1/files/missing",
     "/api/v1/findings/missing",
@@ -20,6 +20,7 @@ const API_GET_ROUTES: [&str; 7] = [
     "/api/v1/exports/notes.json",
     "/api/v1/exports/notes.md",
     "/api/v1/exports/context.json",
+    "/api/v1/exports/changeset.patch",
 ];
 
 /// A review file in its own temporary directory, with the server state that
@@ -509,6 +510,54 @@ async fn a_locked_review_reports_locked_instead_of_writing() {
 }
 
 #[tokio::test]
+async fn the_patch_export_carries_the_changeset_without_findings() {
+    let fixture = Fixture::with_note();
+    let (status, headers, bytes) = send(
+        fixture.state(),
+        api_request(Method::GET, "/api/v1/exports/changeset.patch", None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(CONTENT_TYPE).and_then(|value| value.to_str().ok()),
+        Some("text/x-diff; charset=utf-8")
+    );
+    assert_eq!(
+        headers.get(CONTENT_DISPOSITION).and_then(|value| value.to_str().ok()),
+        Some("attachment; filename=\"mire-changeset.patch\"")
+    );
+    let patch = String::from_utf8(bytes).expect("the patch is text");
+    assert!(patch.contains("-let old = 1;\n+let new = 2;\n"), "{patch}");
+    assert!(!patch.contains(&fixture.note_id()), "the patch leaves the findings out");
+}
+
+#[tokio::test]
+async fn the_patch_export_refuses_a_binary_changeset() {
+    let fixture = Fixture::new();
+    let changeset = parse_patch(
+        b"diff --git a/image.png b/image.png\nindex 1111111..2222222 100644\nBinary files a/image.png and b/image.png differ\n",
+        ChangesetSource::Patch { label: None },
+        PatchLimits::default(),
+    )
+    .expect("changeset");
+    let review = Review::new(
+        ReviewRevision::new(1).expect("positive revision"),
+        changeset,
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("review");
+    crate::write_review_atomic(fixture.path(), &review).expect("review is written");
+    let (status, problem) = send_json(
+        fixture.state(),
+        api_request(Method::GET, "/api/v1/exports/changeset.patch", None),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(problem["code"], "patch_unavailable");
+}
+
+#[tokio::test]
 async fn exports_and_the_openapi_document_are_typed_downloads() {
     let fixture = Fixture::with_note();
     let id = fixture.note_id();
@@ -558,6 +607,7 @@ async fn exports_and_the_openapi_document_are_typed_downloads() {
         "/api/v1/exports/notes.json",
         "/api/v1/exports/notes.md",
         "/api/v1/exports/context.json",
+        "/api/v1/exports/changeset.patch",
     ] {
         assert!(paths.contains_key(path), "the OpenAPI document lists {path}");
     }

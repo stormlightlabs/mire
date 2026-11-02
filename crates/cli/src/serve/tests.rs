@@ -55,6 +55,7 @@ impl Fixture {
             origin: ORIGIN_VALUE.into(),
             request_ids: Arc::new(AtomicU64::new(1)),
             events: broadcast::channel(16).0,
+            stopping: Arc::new(watch::channel(false).0),
             watch_status: Arc::new(Mutex::new(WatchStatus::Unavailable)),
             announced_viewed: Arc::new(Mutex::new(ViewedMap::new())),
             held_blobs: Arc::default(),
@@ -741,6 +742,102 @@ async fn the_event_stream_delivers_invalidations_after_a_write() {
     assert_eq!(event["kind"], "review_invalidated");
     assert_eq!(event["revision"], 3);
     assert_eq!(event["watch"], "unavailable");
+}
+
+#[tokio::test]
+async fn the_event_stream_ends_after_the_shutdown_event() {
+    let fixture = Fixture::with_note();
+    let state = fixture.state();
+    let response = app(state.clone())
+        .oneshot(api_request(Method::GET, "/api/v1/events", None))
+        .await
+        .expect("response");
+    let mut stream = response.into_body().into_data_stream();
+
+    publish(&state, ServerEventKind::Shutdown, None);
+
+    let frame = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("the shutdown event arrives")
+        .expect("the stream sends it before ending")
+        .expect("frame bytes");
+    let frame = String::from_utf8(frame.to_vec()).expect("UTF-8 event");
+    assert!(frame.contains(r#""kind":"shutdown""#), "{frame}");
+    let end = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("the stream ends");
+    assert!(end.is_none(), "no frame follows the shutdown event");
+}
+
+#[tokio::test]
+async fn an_event_stream_opened_after_shutdown_ends_at_once() {
+    let fixture = Fixture::with_note();
+    let state = fixture.state();
+    begin_shutdown(&state);
+
+    let response = app(state)
+        .oneshot(api_request(Method::GET, "/api/v1/events", None))
+        .await
+        .expect("response");
+    let mut stream = response.into_body().into_data_stream();
+
+    let frame = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("the shutdown event arrives")
+        .expect("the stream sends it before ending")
+        .expect("frame bytes");
+    let frame = String::from_utf8(frame.to_vec()).expect("UTF-8 event");
+    assert!(frame.contains(r#""kind":"shutdown""#), "{frame}");
+    let end = tokio::time::timeout(Duration::from_secs(5), stream.next())
+        .await
+        .expect("the stream ends");
+    assert!(end.is_none(), "no frame follows the shutdown event");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_finishes_when_a_tab_stops_reading() {
+    use std::io::Write as _;
+
+    let fixture = Fixture::with_note();
+    let mut state = fixture.state();
+    state.events = broadcast::channel(1024).0;
+    let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
+        .await
+        .expect("listener");
+    let address = listener.local_addr().expect("address");
+    let (signal, stop) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(serve_until(
+        listener,
+        state.clone(),
+        async move {
+            let _ = stop.await;
+        },
+        Duration::from_secs(1),
+    ));
+
+    // The tab asks for the event stream and never reads a byte of it.
+    let mut tab = std::net::TcpStream::connect(address).expect("connection");
+    tab.write_all(
+        format!(
+            "GET /api/v1/events HTTP/1.1\r\nHost: 127.0.0.1:3737\r\nOrigin: {ORIGIN_VALUE}\r\nAuthorization: Bearer secret\r\n\r\n"
+        )
+        .as_bytes(),
+    )
+    .expect("request");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Far more events than the socket buffers hold, so the server's writes to the tab block.
+    let flood = Instant::now();
+    while flood.elapsed() < Duration::from_secs(3) {
+        for _ in 0..1024 {
+            publish(&state, ServerEventKind::Viewed, Some(2));
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+
+    let _ = signal.send(());
+    let finished = tokio::time::timeout(Duration::from_secs(10), server).await;
+    assert!(finished.is_ok(), "shutdown waited on a tab that stopped reading");
+    drop(tab);
 }
 
 #[test]

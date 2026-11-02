@@ -9,6 +9,7 @@
 		type FileDetail,
 		type FindingSummary
 	} from './review';
+	import type { FileChange } from './live';
 	import type { Theme } from './theme';
 
 	let {
@@ -23,11 +24,15 @@
 		viewedError,
 		openedGenerated = $bindable(null),
 		showHeading = true,
+		heldChange = null,
+		keptDraft = null,
 		onDismissNotice = () => {},
 		onToggleViewed,
 		onFindingClick,
 		onEditFinding,
-		onDecideFinding
+		onDecideFinding,
+		onDraftTaken = () => {},
+		onEditStart = () => {}
 	}: {
 		file: FileDetail | null;
 		fileError: string | null;
@@ -44,11 +49,19 @@
 		openedGenerated?: string | null;
 		/** Whether to show the path, the Viewed control and the diff's file header. Focus mode shows them in its own bar. */
 		showHeading?: boolean;
+		/** How a held revision changes the file on screen, or `null` when it leaves the file as it is. */
+		heldChange?: { change: FileChange; revision: number } | null;
+		/** The reader's edit to the active finding that a revision conflict kept from saving. */
+		keptDraft?: FindingDraft | null;
 		onDismissNotice?: () => void;
 		onToggleViewed: () => void;
 		onFindingClick: (finding: FindingSummary) => void;
 		onEditFinding: (draft: FindingDraft) => Promise<string | null>;
 		onDecideFinding: (decision: 'resolve' | 'reopen' | 'dismiss' | 'accept-risk') => Promise<string | null>;
+		/** Called once the reader changes the editor's text after it was filled from `keptDraft`. */
+		onDraftTaken?: () => void;
+		/** Called each time the reader changes a field in the finding editor. */
+		onEditStart?: () => void;
 	} = $props();
 
 	let diffStyle = $state<'unified' | 'split'>('unified');
@@ -89,6 +102,11 @@
 				<div>
 					<span class="eyebrow">{file.status}{file.generated ? ' · generated' : ''}</span>
 					<h1>{formatPath(file.path)}</h1>
+					{#if heldChange}
+						<span class="held-change">
+							{heldChange.change === 'removed' ? 'Leaves the review' : 'Changed on disk'} at revision {heldChange.revision}
+						</span>
+					{/if}
 				</div>
 				{#if file.oldPath && file.oldPath.display !== file.path.display}
 					<span class="renamed">from {formatPath(file.oldPath)}</span>
@@ -117,7 +135,13 @@
 					{activeFinding.anchorState}
 				</footer>
 			</article>
-			<FindingEditor finding={activeFinding} onEdit={onEditFinding} onDecision={onDecideFinding} />
+			<FindingEditor
+				finding={activeFinding}
+				draft={keptDraft}
+				onEdit={onEditFinding}
+				onDecision={onDecideFinding}
+				{onDraftTaken}
+				onInput={onEditStart} />
 		{/if}
 		{#if findingError}<p class="finding-error" role="alert">{findingError}</p>{/if}
 
@@ -228,6 +252,12 @@
 			monospace;
 		letter-spacing: 0.06em;
 		text-transform: uppercase;
+	}
+	.held-change {
+		display: block;
+		margin-top: 0.2rem;
+		color: var(--danger);
+		font-size: 0.72rem;
 	}
 	.renamed,
 	.finding-title,

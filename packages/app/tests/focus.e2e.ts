@@ -112,6 +112,7 @@ test('an added file reads as plain code with a gutter bar', async ({ page, mire 
 	await expect(diff.locator('pre[data-background]')).toHaveCount(1);
 
 	await mire.writeSource('three.txt', '// A new file.\nfirst\nsecond\n');
+	await page.getByRole('button', { name: 'Apply revision 4' }).click();
 	await files.getByRole('treeitem', { name: /three\.txt/ }).click();
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('three.txt');
 	await expect(diff.locator('pre[data-indicators="bars"]')).toHaveCount(1);
@@ -132,6 +133,7 @@ test.describe('with a generated added file', () => {
 		await expect(header).toContainText('revision 3');
 
 		await mire.writeSource('three.txt', 'first\nsecond\n');
+		await page.getByRole('button', { name: 'Apply revision 4' }).click();
 		await page.getByRole('treeitem', { name: /Generated/ }).click();
 		await page.getByRole('treeitem', { name: /three\.txt/ }).click();
 		await page.keyboard.press('b');
@@ -202,7 +204,7 @@ test('in focus mode a dialog keeps its keys and Esc only closes it', async ({ pa
 	const diff = page.getByRole('region', { name: 'File diff' });
 	await expect(header).toContainText('revision 3');
 
-	// A save that loses a revision race opens the Review changed dialog, which focus mode can reach.
+	// A save that loses a revision race opens the conflict dialog, which focus mode can reach.
 	await page.route('**/api/v1/findings/*', (route) =>
 		route.request().method() === 'PATCH'
 			? route.fulfill({
@@ -217,11 +219,11 @@ test('in focus mode a dialog keeps its keys and Esc only closes it', async ({ pa
 	await expect(leave).toBeVisible();
 	await page.keyboard.press('j');
 	await diff.getByRole('button', { name: 'Save edit' }).click();
-	const dialog = page.getByRole('dialog', { name: 'Review changed' });
+	const dialog = page.getByRole('dialog', { name: 'Your edit was not saved' });
 	await expect(dialog).toBeVisible();
 	const heading = await header.getByRole('heading', { level: 1 }).textContent();
 
-	await dialog.getByRole('heading', { name: 'Review changed' }).click();
+	await dialog.getByRole('heading', { name: 'Your edit was not saved' }).click();
 	for (const key of ['b', ']', '[']) await page.keyboard.press(key);
 	await expect(dialog).toBeVisible();
 	await expect(leave).toBeVisible();

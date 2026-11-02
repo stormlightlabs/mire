@@ -412,6 +412,12 @@ has `checkpoint`: the `revision` and `path` of the row it was written on, or
 `checkpoint_not_found` or `checkpoint_unavailable` (404). A `revision` that is
 not a positive number fails with `invalid_revision` (400).
 
+Ctrl-C stops the server. It first sends a `shutdown` event on
+`GET /api/v1/events` and ends each event stream, so open tabs show that
+watching stopped and the server does not wait for them to close. A stream
+opened after that gets the `shutdown` event and ends. A connection still open
+5 seconds later, such as a tab that stopped reading, is dropped.
+
 ```sh
 # Serve a review on the default port
 mire serve review.json

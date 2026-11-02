@@ -169,6 +169,50 @@ the gutter, without tinted rows.
 Focus mode lasts until you leave it or reload the page. The server stores
 nothing about it, so each tab has its own.
 
+## Follow changes in the browser
+
+The browser review that `mire serve` opens watches the review file and its
+source, but it does not change the diff while you read. When a new revision
+arrives, a bar under the header names it and counts the files and findings
+that changed. The diff stays at the revision you were reading, and the file
+heading says when the open file changed. Select See what changed to list the
+files. Press `u` or select Apply revision to show the new revision. Focus
+mode shows the same bar.
+
+Until you apply it, a file that changed in the new revision does not open,
+since the server keeps only the newest content. A viewed mark applies at once
+and leaves the new revision waiting. Refresh source applies it.
+
+If the review file is replaced with a copy at a lower revision, the bar says
+that revision replaced the review, and `u` shows it the same way.
+
+Saving a finding edit or recording a decision applies the waiting revision
+first, then saves your change against it. Mire saves only if the finding is
+still there and has not changed from what you started with: its text when you
+began typing, for an edit, or its status, for a decision. This holds even if
+you applied the newer revision yourself while editing. Otherwise a dialog
+names what changed and nothing is saved. For an edit, your text stays in the
+editor and the dialog, with Copy text. Read the finding, then save or decide
+again.
+
+If a revision lands before the page hears of it, the server refuses the save,
+and a dialog says so. Select Apply revision and keep draft, then save again.
+
+A bar under the header also shows when updates stop, and the header status
+names the revision on screen:
+
+| Status         | Cause                                        | To resume                              |
+| -------------- | -------------------------------------------- | -------------------------------------- |
+| `degraded`     | Reading the review file or the source failed | Mire retries; Refresh source reads now |
+| `disconnected` | The connection to `mire serve` was lost      | Mire retries; Try again retries now    |
+| `stopped`      | `mire serve` shut down                       | Run `mire serve` and open its new URL  |
+| `expired`      | `mire serve` refused the page's session      | Open the URL `mire serve` printed      |
+
+The review stays on screen in each case. The page reconnects a lost
+connection on its own, after 1 second, then twice as long each time, up to 30
+seconds. It does not reconnect after `stopped` or `expired`. After the page
+reconnects, it checks for a revision it missed and holds it like any other.
+
 ## Select a theme
 
 Use `--theme auto`, `iceberg`, `eldritch`, or `catppuccin`. Each family has a

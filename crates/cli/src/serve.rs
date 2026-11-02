@@ -29,10 +29,10 @@ use mire_tui::ThemeFamily;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use tokio::sync::{broadcast, watch};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
 use tokio_stream::StreamExt;
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::ReceiverStream;
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 use utoipa::{OpenApi, ToSchema};
@@ -57,6 +57,9 @@ const DEFAULT_THEME_FAMILY_ATTRIBUTE: &str = "data-theme-family=\"auto\"";
 /// characters take two bytes) and a maximum title to 2 KiB, so 1 MiB leaves
 /// room for the file and note manifests.
 const MAX_CONTEXT_EXPORT_BYTES: usize = 1024 * 1024;
+/// How long a shutdown waits for open connections to finish before it stops
+/// serving them. A tab that stops reading would otherwise hold it open.
+const SHUTDOWN_DRAIN: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Error)]
 pub enum ServeError {
@@ -87,6 +90,9 @@ struct AppState {
     held_blobs: Arc<history::HeldBlobCache>,
     /// The palette family from `--theme`, written into served HTML.
     theme: ThemeFamily,
+    /// Turns true once the server starts shutting down. Event streams end on
+    /// it, including ones that open afterwards.
+    stopping: Arc<watch::Sender<bool>>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -459,6 +465,7 @@ pub async fn run(arguments: ServeArgs, theme: ThemeFamily) -> Result<(), ServeEr
         announced_viewed: Arc::new(Mutex::new(initial_review.viewed().clone())),
         held_blobs: Arc::default(),
         theme,
+        stopping: Arc::new(watch::channel(false).0),
     };
     let (shutdown, shutdown_receiver) = watch::channel(false);
     let watcher = start_watcher(state.clone(), initial_revision, shutdown_receiver);
@@ -468,13 +475,9 @@ pub async fn run(arguments: ServeArgs, theme: ThemeFamily) -> Result<(), ServeEr
         open::that_detached(&session_url).map_err(ServeError::OpenBrowser)?;
     }
 
-    let server = axum::serve(listener, app(state.clone()))
-        .with_graceful_shutdown(shutdown_signal())
+    let server = serve_until(listener, state.clone(), ctrl_c(), SHUTDOWN_DRAIN)
         .await
         .map_err(ServeError::Run);
-    let _ = state
-        .events
-        .send(server_event(ServerEventKind::Shutdown, None, watch_status(&state)));
     let _ = shutdown.send(true);
     if let Err(error) = watcher.await {
         tracing::error!(error = %error, "Mire watcher task stopped unexpectedly");
@@ -517,9 +520,44 @@ fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn shutdown_signal() {
+/// Serves `app` until `signal` resolves, then shuts down. Open tabs get the
+/// shutdown event and their event streams end. Connections still open after
+/// `drain`, such as a tab that stopped reading, are dropped.
+async fn serve_until(
+    listener: tokio::net::TcpListener, state: AppState, signal: impl Future<Output = ()> + Send + 'static,
+    drain: Duration,
+) -> std::io::Result<()> {
+    let mut stopping = state.stopping.subscribe();
+    let stopper = state.clone();
+    let server = axum::serve(listener, app(state))
+        .with_graceful_shutdown(async move {
+            signal.await;
+            begin_shutdown(&stopper);
+        })
+        .into_future();
+    let deadline = async move {
+        let _ = stopping.wait_for(|stopping| *stopping).await;
+        tokio::time::sleep(drain).await;
+    };
+    tokio::select! {
+        result = server => result,
+        () = deadline => {
+            tracing::warn!(drain_seconds = drain.as_secs(), "Mire dropped connections still open after the shutdown wait");
+            Ok(())
+        }
+    }
+}
+
+async fn ctrl_c() {
     let _ = tokio::signal::ctrl_c().await;
     eprintln!("Shutting down Mire review server…");
+}
+
+/// Marks the server as stopping and tells open tabs. Each event stream ends
+/// after the shutdown event, and a stream opened later ends at once.
+fn begin_shutdown(state: &AppState) {
+    state.stopping.send_replace(true);
+    publish(state, ServerEventKind::Shutdown, None);
 }
 
 fn start_watcher(state: AppState, initial_revision: u64, shutdown: watch::Receiver<bool>) -> JoinHandle<()> {
@@ -1081,13 +1119,50 @@ async fn refresh(State(state): State<AppState>) -> Response<Body> {
     responses((status = 200, description = "Authenticated review invalidation event stream"))
 )]
 async fn get_events(State(state): State<AppState>) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
-    let stream = BroadcastStream::new(state.events.subscribe()).filter_map(|event| {
-        event.ok().map(|event| {
-            let data = serde_json::to_string(&event).unwrap_or_else(|_| "{\"kind\":\"watch_status\"}".to_owned());
-            Ok(Event::default().event("mire").data(data))
-        })
+    let stream = ReceiverStream::new(forward_events(state)).map(|event| {
+        let data = serde_json::to_string(&event).unwrap_or_else(|_| "{\"kind\":\"watch_status\"}".to_owned());
+        Ok(Event::default().event("mire").data(data))
     });
     Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)).text("keepalive"))
+}
+
+/// Forwards server events to one event stream until the server shuts down
+/// or the tab goes away. The shutdown event is the last one sent, and the
+/// stream then ends. The forwarder watches the stopping flag while it waits
+/// to send, so a tab that stops reading cannot keep it running, and a stream
+/// opened after shutdown began gets the shutdown event and ends.
+fn forward_events(state: AppState) -> mpsc::Receiver<ServerEvent> {
+    let (sender, receiver) = mpsc::channel(16);
+    let mut events = state.events.subscribe();
+    let mut stopping = state.stopping.subscribe();
+    tokio::spawn(async move {
+        if !*stopping.borrow_and_update() {
+            loop {
+                let event = tokio::select! {
+                    biased;
+                    () = sender.closed() => return,
+                    _ = stopping.changed() => break,
+                    event = events.recv() => event,
+                };
+                match event {
+                    Ok(event) if event.kind == ServerEventKind::Shutdown => break,
+                    Ok(event) => {
+                        tokio::select! {
+                            biased;
+                            _ = stopping.changed() => break,
+                            sent = sender.send(event) => if sent.is_err() { return },
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        }
+        // The last event goes out only if the tab has room for it; the
+        // stream ends either way when the sender drops.
+        let _ = sender.try_send(server_event(ServerEventKind::Shutdown, None, watch_status(&state)));
+    });
+    receiver
 }
 
 #[utoipa::path(

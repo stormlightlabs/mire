@@ -15,12 +15,17 @@ async function open(page: Page, url: string) {
 }
 
 /**
- * Checks that the page does not scroll sideways and that no visible element
- * reaches past either edge of the screen, where the app shell would clip it.
+ * Checks that no scroll container is wider than its box and that no visible
+ * element reaches past either edge of the screen. The app shell and the
+ * workspace clip what overflows them, so the document itself never scrolls;
+ * the check measures their content instead.
  */
 async function expectNoSidewaysOverflow(page: Page) {
 	const result = await page.evaluate(() => {
 		const width = window.innerWidth;
+		const scrollers = [...document.querySelectorAll<HTMLElement>('.app-shell, .workspace, .diff-pane')]
+			.filter((element) => element.scrollWidth > element.clientWidth)
+			.map((element) => `${element.className}: ${element.scrollWidth} > ${element.clientWidth}`);
 		const outside = [...document.querySelectorAll<HTMLElement>('body *')]
 			.filter((element) => element.checkVisibility())
 			.filter((element) => {
@@ -28,9 +33,9 @@ async function expectNoSidewaysOverflow(page: Page) {
 				return box.width > 1 && (box.right > width + 0.5 || box.left < -0.5);
 			})
 			.map((element) => `${element.tagName.toLowerCase()}.${element.className}`);
-		return { scrollWidth: document.scrollingElement!.scrollWidth, width, outside };
+		return { scrollers, outside };
 	});
-	expect(result.scrollWidth).toBeLessThanOrEqual(result.width);
+	expect(result.scrollers).toEqual([]);
 	expect(result.outside).toEqual([]);
 }
 
@@ -81,6 +86,8 @@ test('reaches the file list and the queue, and decides a finding', async ({ page
 	await files.getByRole('treeitem', { name: /two\.txt/ }).click();
 	await expect(files).toBeHidden();
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('two.txt');
+	// Focus moves to the diff that shows the pick, not to the page body.
+	await expect(diff).toBeFocused();
 
 	await tabs(page)
 		.getByRole('button', { name: /2 open Findings/ })
@@ -91,6 +98,7 @@ test('reaches the file list and the queue, and decides a finding', async ({ page
 	await expectNoSidewaysOverflow(page);
 	await queue.getByRole('button', { name: /second line should stay lowercase/ }).click();
 	await expect(queue).toBeHidden();
+	await expect(diff).toBeFocused();
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
 	await expect(diff.getByRole('article')).toContainText('The second line should stay lowercase.');
 	await expectNoSidewaysOverflow(page);
@@ -125,6 +133,28 @@ test('fits focus mode and the finish panel', async ({ page, mire }) => {
 	await tabs(page).getByRole('button', { name: 'Finish' }).click();
 	await expect(panel).toBeVisible();
 	await expectNoSidewaysOverflow(page);
+});
+
+test('a wider window closes an open drawer and keeps focus on the page', async ({ page, mire }) => {
+	await open(page, mire.url);
+	await tabs(page)
+		.getByRole('button', { name: /Findings/ })
+		.click();
+	const queue = page.getByRole('dialog', { name: 'Review queue' });
+	await expect(queue).toBeVisible();
+
+	await page.setViewportSize({ width: 1200, height: 800 });
+	await expect(queue).toBeHidden();
+	await expect(page.getByRole('complementary', { name: 'Review queue' })).toBeVisible();
+	await expect(page.getByRole('main')).toBeFocused();
+	// The closed drawer leaves no modal behind, so the page takes clicks.
+	await page
+		.getByRole('tree', { name: 'Changed file tree' })
+		.getByRole('treeitem', { name: /two\.txt/ })
+		.click();
+	await expect(page.getByRole('region', { name: 'File diff' }).getByRole('heading', { level: 1 })).toHaveText(
+		'two.txt'
+	);
 });
 
 test('fits the stopped watch bar and a conflict dialog', async ({ page, mire }) => {

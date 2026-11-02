@@ -78,7 +78,7 @@
 	});
 </script>
 
-<section class="diff-pane" aria-label="File diff" aria-busy={fileLoading}>
+<section id="diff-pane" class="diff-pane" aria-label="File diff" aria-busy={fileLoading} tabindex="-1">
 	{#if notice}
 		<div class="notice" role="status">
 			<p>{notice}</p>

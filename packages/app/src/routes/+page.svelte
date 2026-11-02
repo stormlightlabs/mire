@@ -166,8 +166,13 @@
 	onMount(() => {
 		const narrowScreen = window.matchMedia('(max-width: 54rem)');
 		const updateNarrowScreen = () => {
+			// Widening removes the drawers and the tab bar. Focus inside them would
+			// fall to the body, so it moves to the review content instead.
+			const lost = mobilePane !== null || document.activeElement?.closest('.tab-bar') != null;
 			isNarrow = narrowScreen.matches;
-			if (!isNarrow) mobilePane = null;
+			if (isNarrow) return;
+			mobilePane = null;
+			if (lost) void tick().then(() => document.getElementById('review-content')?.focus());
 		};
 		theme = loadTheme();
 		themeReady = true;
@@ -793,13 +798,23 @@
 	}
 
 	function selectFileFromDrawer(id: string) {
-		mobilePane = null;
 		chooseFile(id);
+		void closeDrawerToDiff();
 	}
 
 	function selectFindingFromDrawer(finding: FindingSummary) {
-		mobilePane = null;
 		void selectFinding(finding);
+		void closeDrawerToDiff();
+	}
+
+	/**
+	 * Closes the open drawer and moves keyboard focus to the diff pane, where
+	 * the file or finding the reader picked shows.
+	 */
+	async function closeDrawerToDiff() {
+		mobilePane = null;
+		await tick();
+		document.getElementById('diff-pane')?.focus();
 	}
 </script>
 
@@ -1028,37 +1043,49 @@
 			</button>
 		</nav>
 	{/if}
-	{#if review && isNarrow && mobilePane === 'files'}
-		<Overlay open={true} labelledBy="files-drawer-heading" variant="drawer" onClose={() => (mobilePane = null)}>
-			<section class="drawer-content">
-				<header class="drawer-heading">
-					<div class="drawer-title">
-						<h2 id="files-drawer-heading">Changed files</h2>
-						<span>{review.files.length}</span>
-					</div>
-					<button onclick={() => (mobilePane = null)}>Close files</button>
-				</header>
-				<FileNavigator files={review.files} {activeFile} drawer onSelect={selectFileFromDrawer} />
-			</section>
+	{#if review}
+		<!-- The drawers stay mounted while closed, so closing one, even by a wider window, goes through close() and returns focus. -->
+		<Overlay
+			open={isNarrow && mobilePane === 'files'}
+			labelledBy="files-drawer-heading"
+			variant="drawer"
+			onClose={() => (mobilePane = null)}>
+			{#if isNarrow && mobilePane === 'files'}
+				<section class="drawer-content">
+					<header class="drawer-heading">
+						<div class="drawer-title">
+							<h2 id="files-drawer-heading">Changed files</h2>
+							<span>{review.files.length}</span>
+						</div>
+						<button onclick={() => (mobilePane = null)}>Close files</button>
+					</header>
+					<FileNavigator files={review.files} {activeFile} drawer onSelect={selectFileFromDrawer} />
+				</section>
+			{/if}
 		</Overlay>
-	{:else if review && isNarrow && mobilePane === 'findings'}
-		<Overlay open={true} labelledBy="findings-drawer-heading" variant="drawer" onClose={() => (mobilePane = null)}>
-			<section class="drawer-content">
-				<header class="drawer-heading">
-					<div class="drawer-title">
-						<h2 id="findings-drawer-heading">Review queue</h2>
-						<span>{review.totals.open} open</span>
-					</div>
-					<button onclick={() => (mobilePane = null)}>Close findings</button>
-				</header>
-				<FindingQueue
-					findings={visibleFindings}
-					activeFindingId={activeFinding?.id ?? null}
-					openCount={review.totals.open}
-					drawer
-					bind:filters
-					onSelect={selectFindingFromDrawer} />
-			</section>
+		<Overlay
+			open={isNarrow && mobilePane === 'findings'}
+			labelledBy="findings-drawer-heading"
+			variant="drawer"
+			onClose={() => (mobilePane = null)}>
+			{#if isNarrow && mobilePane === 'findings'}
+				<section class="drawer-content">
+					<header class="drawer-heading">
+						<div class="drawer-title">
+							<h2 id="findings-drawer-heading">Review queue</h2>
+							<span>{review.totals.open} open</span>
+						</div>
+						<button onclick={() => (mobilePane = null)}>Close findings</button>
+					</header>
+					<FindingQueue
+						findings={visibleFindings}
+						activeFindingId={activeFinding?.id ?? null}
+						openCount={review.totals.open}
+						drawer
+						bind:filters
+						onSelect={selectFindingFromDrawer} />
+				</section>
+			{/if}
 		</Overlay>
 	{/if}
 	{#if review}
@@ -1164,6 +1191,10 @@
 	.app-shell.focused,
 	.app-shell.with-tabs {
 		grid-template-rows: auto auto 1fr auto;
+	}
+	/* The tab bar and the key bar pad for the home indicator themselves; without either, the shell does. */
+	.app-shell:not(.focused):not(.with-tabs) {
+		padding-bottom: env(safe-area-inset-bottom);
 	}
 	.tab-bar {
 		display: grid;

@@ -47,27 +47,32 @@
 
 	let host = $state<HTMLElement>();
 	let viewer: FileDiff<FindingSummary> | undefined;
-	/** Where each hunk's rows begin and how many there are, in both layouts, as last rendered. */
-	let hunkSpans: { unified: [number, number]; split: [number, number] }[] = [];
+	/** Where each hunk's rows begin and how many there are, by unified line index, as last rendered. */
+	let hunkSpans: [number, number][] = [];
 
 	/**
 	 * Returns the element that starts each hunk on screen, in order: the
 	 * separator above the hunk where there is one, or else its first row.
+	 *
+	 * Every row's `data-line-index` reads `unified,split` in either layout, so
+	 * the unified index places a row in its hunk whichever layout is shown. A
+	 * hunk's lowest unified index is on its first row in both layouts.
 	 */
 	export function hunkStarts(): HTMLElement[] {
 		const root = host?.shadowRoot;
 		if (!root) return [];
-		const column = diffStyle === 'split' ? 1 : 0;
-		const rows = [...root.querySelectorAll<HTMLElement>('[data-line][data-line-index]')];
-		return hunkSpans.flatMap((span) => {
-			const [start, count] = column ? span.split : span.unified;
-			const row = rows.find((candidate) => {
-				const index = Number(candidate.dataset.lineIndex?.split(',')[column]);
-				return index >= start && index < start + count;
-			});
-			if (!row) return [];
-			const above = row.previousElementSibling;
-			return [above instanceof HTMLElement && above.hasAttribute('data-separator') ? above : row];
+		const firstRows: { index: number; row: HTMLElement }[] = [];
+		for (const row of root.querySelectorAll<HTMLElement>('[data-line][data-line-index]')) {
+			const index = Number(row.dataset.lineIndex?.split(',')[0]);
+			const hunk = hunkContaining(index);
+			if (hunk < 0) continue;
+			const first = firstRows[hunk];
+			if (!first || index < first.index) firstRows[hunk] = { index, row };
+		}
+		return firstRows.flatMap((first) => {
+			if (!first) return [];
+			const above = first.row.previousElementSibling;
+			return [above instanceof HTMLElement && above.hasAttribute('data-separator') ? above : first.row];
 		});
 	}
 
@@ -159,6 +164,20 @@
 		}
 	}
 
+	/** Returns the position in `hunkSpans` of the hunk holding unified line index `index`, or -1. */
+	function hunkContaining(index: number): number {
+		let low = 0;
+		let high = hunkSpans.length - 1;
+		while (low <= high) {
+			const middle = (low + high) >> 1;
+			const [start, count] = hunkSpans[middle];
+			if (index < start) high = middle - 1;
+			else if (index >= start + count) low = middle + 1;
+			else return middle;
+		}
+		return -1;
+	}
+
 	function annotations(findings: FindingSummary[]): DiffLineAnnotation<FindingSummary>[] {
 		return findings
 			.filter((finding) => finding.navigable)
@@ -172,10 +191,7 @@
 	function render(currentFile: FileDetail) {
 		if (!viewer || !host || currentFile.content.kind !== 'text') return;
 		const fileDiff = toPierreDiff(currentFile);
-		hunkSpans = fileDiff.hunks.map((hunk) => ({
-			unified: [hunk.unifiedLineStart, hunk.unifiedLineCount],
-			split: [hunk.splitLineStart, hunk.splitLineCount]
-		}));
+		hunkSpans = fileDiff.hunks.map((hunk) => [hunk.unifiedLineStart, hunk.unifiedLineCount]);
 		viewer.render({
 			fileContainer: host,
 			fileDiff,

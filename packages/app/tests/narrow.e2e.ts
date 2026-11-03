@@ -157,6 +157,14 @@ test('the layout and wrap keys leave the narrow diff as it is', async ({ page, m
 	await page.keyboard.press('w');
 	await expect(diff.locator('pre[data-diff-type="single"][data-overflow="wrap"]')).toHaveCount(1);
 
+	// The keys left the wide layout alone too, so widening the screen shows it as it was.
+	await page.setViewportSize({ width: 1280, height: 844 });
+	await expect(diff.getByRole('button', { name: 'Unified' })).toHaveAttribute('aria-pressed', 'true');
+	await expect(diff.getByRole('button', { name: 'Wrap' })).toHaveAttribute('aria-pressed', 'false');
+	await expect(diff.locator('pre[data-diff-type="single"][data-overflow="scroll"]')).toHaveCount(1);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(diff.getByRole('button', { name: 'Wrap' })).toHaveCount(0);
+
 	// The focus key bar leaves out the keys that do nothing here, and every key it lists is on screen.
 	await tabs(page).getByRole('button', { name: 'Focus' }).click();
 	await expect(header.getByRole('heading', { level: 1 })).toHaveText('one.txt');

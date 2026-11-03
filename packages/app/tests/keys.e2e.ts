@@ -123,10 +123,16 @@ test('1, 2 and w switch the layout and wrapping', async ({ page, mire }) => {
 	await expect(wrap).toHaveAttribute('aria-pressed', 'false');
 
 	// The keys do nothing while typing in a text field or with a dialog open.
-	await page.getByRole('searchbox', { name: 'Filter files' }).fill('2w');
+	// Real key presses, since `fill` sends no keydown for the page to act on.
+	const filter = page.getByRole('searchbox', { name: 'Filter files' });
+	await filter.focus();
+	await page.keyboard.press('2');
+	await page.keyboard.press('w');
+	await expect(filter).toHaveValue('2w');
 	await expect(unified).toHaveAttribute('aria-pressed', 'true');
 	await expect(wrap).toHaveAttribute('aria-pressed', 'false');
-	await page.getByRole('searchbox', { name: 'Filter files' }).fill('');
+	await expect(diff.locator('pre[data-diff-type="single"][data-overflow="scroll"]')).toHaveCount(1);
+	await filter.fill('');
 	await page.getByRole('banner').getByRole('button', { name: 'Finish review' }).click();
 	const finish = page.getByRole('dialog');
 	await expect(finish).toBeVisible();

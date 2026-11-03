@@ -24,6 +24,25 @@ const AA_TEXT: f64 = 4.5;
 /// as comments. Light palettes' row colors already leave that room.
 const DARK_ROW_STEP: u8 = 50;
 
+/// How far, in percent, a dark palette's changed-word background steps from
+/// its row toward the change color, before [`word_background`] darkens it.
+///
+/// Darkening scales every channel alike, so the hue of this step survives it.
+const DARK_WORD_STEP: u8 = 40;
+
+/// The contrast a dark palette's changed-word background keeps from its row.
+///
+/// The syntax colors leave no room to lighten it, and a word only tinted
+/// toward the change color is hard to tell from a grey row, so it darkens.
+const DARK_WORD_SEPARATION: f64 = 1.2;
+
+/// How far, in percent, a light palette's changed-word background steps from
+/// its row toward the change color.
+///
+/// Lightening would wash this step back out to the row, so the syntax colors
+/// darken to fit it instead.
+const LIGHT_WORD_STEP: u8 = 10;
+
 /// Builds CSS custom properties for every palette, selected by the
 /// `data-theme-family` and `data-theme` attributes on the root element.
 ///
@@ -51,10 +70,12 @@ pub fn web_stylesheet() -> String {
 /// The CSS custom properties the browser reads, paired with their colors.
 ///
 /// The diff draws plain rows on `--surface`, and added and removed rows on
-/// `--diff-added` and `--diff-removed`. The `--syntax-*` colors come from the
-/// terminal's syntax roles in [`Theme::syntax`]; where a role falls short of
-/// 4.5:1 on one of those rows, [`readable`] darkens or lightens it just enough.
-fn properties(variant: ThemeVariant) -> [(&'static str, Color); 28] {
+/// `--diff-added` and `--diff-removed`. Changed words within those rows take
+/// `--diff-added-word` and `--diff-removed-word`, from [`word_background`].
+/// The `--syntax-*` colors come from the terminal's syntax roles in
+/// [`Theme::syntax`]; where a role falls short of 4.5:1 on one of those five
+/// backgrounds, [`readable`] darkens or lightens it just enough.
+fn properties(variant: ThemeVariant) -> [(&'static str, Color); 30] {
     let theme = Theme::from_palette(variant, ColorDepth::Truecolor);
     let fg = |style: Style| style.fg.expect("palette roles set a foreground");
     let bg = |style: Style| style.bg.expect("palette roles set a background");
@@ -63,7 +84,20 @@ fn properties(variant: ThemeVariant) -> [(&'static str, Color); 28] {
         if light { bg(terminal_row) } else { mix(bg(theme.panel), bg(terminal_row), DARK_ROW_STEP) }
     };
     let rows = [bg(theme.panel), row(theme.addition), row(theme.deletion)];
-    let syntax = |color: Color| readable(color, light, &rows);
+    let roles = [
+        theme.syntax.comment,
+        theme.syntax.string,
+        theme.syntax.constant,
+        theme.syntax.keyword,
+        theme.syntax.function,
+        theme.syntax.r#type,
+    ];
+    let mut text = roles.map(|role| readable(role, light, &rows)).to_vec();
+    text.push(fg(theme.application));
+    let added_word = word_background(rows[1], fg(theme.addition_meta), light, &text);
+    let removed_word = word_background(rows[2], bg(theme.error), light, &text);
+    let backgrounds = [rows[0], rows[1], rows[2], added_word, removed_word];
+    let syntax = |color: Color| readable(color, light, &backgrounds);
     [
         ("paper", bg(theme.application)),
         ("ink", fg(theme.application)),
@@ -87,6 +121,8 @@ fn properties(variant: ThemeVariant) -> [(&'static str, Color); 28] {
         ("severity-critical", fg(theme.severity(NoteSeverity::Critical))),
         ("diff-added", rows[1]),
         ("diff-removed", rows[2]),
+        ("diff-added-word", added_word),
+        ("diff-removed-word", removed_word),
         ("syntax-comment", syntax(theme.syntax.comment)),
         ("syntax-string", syntax(theme.syntax.string)),
         ("syntax-constant", syntax(theme.syntax.constant)),
@@ -109,6 +145,30 @@ fn readable(color: Color, light: bool, backgrounds: &[Color]) -> Color {
                 .all(|background| contrast_ratio(*candidate, *background) >= AA_TEXT)
         })
         .expect("black or white reaches AA text contrast on a palette's diff rows")
+}
+
+/// Returns the background for changed words on `row`: a step from `row`
+/// toward `change`, the palette's added or removed color, so the words stand
+/// out from the rest of the row.
+///
+/// On a dark palette the step then darkens in 1% steps until every color in
+/// `text` reaches 4.5:1 on it and it reaches [`DARK_WORD_SEPARATION`] from
+/// `row`. On a light palette the step stays as it is, and [`readable`] darkens
+/// the syntax colors to fit it.
+fn word_background(row: Color, change: Color, light: bool, text: &[Color]) -> Color {
+    if light {
+        return mix(row, change, LIGHT_WORD_STEP);
+    }
+    let tinted = mix(row, change, DARK_WORD_STEP);
+    (0..=100)
+        .map(|percent| mix(tinted, Color::Rgb(0, 0, 0), percent))
+        .find(|candidate| {
+            contrast_ratio(row, *candidate) >= DARK_WORD_SEPARATION
+                && text
+                    .iter()
+                    .all(|foreground| contrast_ratio(*foreground, *candidate) >= AA_TEXT)
+        })
+        .expect("black reaches AA text contrast with a dark palette's text and parts from its rows")
 }
 
 /// Mixes `percent` of `to` into `from`, channel by channel, rounding to the
@@ -205,7 +265,13 @@ mod tests {
         for variant in ThemeVariant::ALL {
             let properties = properties(variant);
             let color = |name: &str| property(&properties, name);
-            for background in ["surface", "diff-added", "diff-removed"] {
+            for background in [
+                "surface",
+                "diff-added",
+                "diff-removed",
+                "diff-added-word",
+                "diff-removed-word",
+            ] {
                 for foreground in [
                     "ink",
                     "syntax-comment",
@@ -232,7 +298,13 @@ mod tests {
             let theme = Theme::from_palette(variant, ColorDepth::Truecolor);
             let properties = properties(variant);
             let color = |name: &str| property(&properties, name);
-            let rows = [color("surface"), color("diff-added"), color("diff-removed")];
+            let rows = [
+                color("surface"),
+                color("diff-added"),
+                color("diff-removed"),
+                color("diff-added-word"),
+                color("diff-removed-word"),
+            ];
             for (name, role) in [
                 ("syntax-comment", theme.syntax.comment),
                 ("syntax-string", theme.syntax.string),
@@ -250,15 +322,32 @@ mod tests {
                         variant.as_str()
                     );
                 } else {
-                    // The nudge stays small: 15% of the way to black or white already passes.
+                    // The nudge stays small: a quarter of the way to black or white already passes.
+                    // Light palettes' changed words take most of it, as they cannot lighten.
                     let target = if variant.is_light() { Color::Rgb(0, 0, 0) } else { Color::Rgb(255, 255, 255) };
-                    let limit = mix(role, target, 15);
+                    let limit = mix(role, target, 25);
                     assert!(
                         rows.iter().all(|row| contrast_ratio(limit, *row) >= AA_TEXT),
-                        "{}: --{name} needs more than a 15% step from the terminal role",
+                        "{}: --{name} needs more than a 25% step from the terminal role",
                         variant.as_str()
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn changed_words_stand_out_from_their_row() {
+        for variant in ThemeVariant::ALL {
+            let properties = properties(variant);
+            let color = |name: &str| property(&properties, name);
+            for (word, row) in [("diff-added-word", "diff-added"), ("diff-removed-word", "diff-removed")] {
+                let distance = delta_e(color(word), color(row));
+                assert!(
+                    distance >= 5.0,
+                    "{}: --{word} is {distance:.1} delta E from --{row}",
+                    variant.as_str()
+                );
             }
         }
     }
@@ -306,6 +395,28 @@ mod tests {
         let css = web_stylesheet();
         assert!(css.contains("/* nord-light */\n:root,\n:root[data-theme-family='auto'],\n"));
         assert!(css.contains(":root[data-theme-family='catppuccin'][data-theme='dark'] {"));
+    }
+
+    /// The CIE76 color difference between two colors, where 2.3 is about the
+    /// smallest a viewer notices side by side.
+    fn delta_e(left: Color, right: Color) -> f64 {
+        let lab = |color: Color| {
+            let Color::Rgb(red, green, blue) = color else {
+                unreachable!("palettes hold RGB colors");
+            };
+            let linear = |channel: u8| {
+                let value = f64::from(channel) / 255.0;
+                if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
+            };
+            let (r, g, b) = (linear(red), linear(green), linear(blue));
+            let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+            let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+            let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+            let f = |t: f64| if t > 0.008856 { t.cbrt() } else { 7.787 * t + 16.0 / 116.0 };
+            [116.0 * f(y) - 16.0, 500.0 * (f(x) - f(y)), 200.0 * (f(y) - f(z))]
+        };
+        let (left, right) = (lab(left), lab(right));
+        left.iter().zip(right).map(|(a, b)| (a - b).powi(2)).sum::<f64>().sqrt()
     }
 
     fn property(properties: &[(&'static str, Color)], name: &str) -> Color {

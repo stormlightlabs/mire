@@ -324,6 +324,8 @@
 		--diffs-modified-color-override: var(--focus);
 		--diffs-bg-addition-override: var(--diff-added);
 		--diffs-bg-deletion-override: var(--diff-removed);
+		--diffs-bg-addition-emphasis-override: var(--diff-added-word);
+		--diffs-bg-deletion-emphasis-override: var(--diff-removed-word);
 		--diffs-font-family: 'Google Sans Code Variable', 'Google Sans Code', monospace;
 		--diffs-header-font-family: 'IBM Plex Sans Variable', 'IBM Plex Sans', sans-serif;
 		--diffs-font-size: 0.75rem;

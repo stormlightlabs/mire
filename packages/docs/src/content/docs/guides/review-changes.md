@@ -287,11 +287,13 @@ detection, for example when a slow tmux leaves the wrong palette. Mire ignores
 any other value.
 
 `mire serve` takes the same flag. The browser diff colors code with the
-terminal's syntax colors. Where a color falls below 4.5:1 contrast on an added
-or removed row, the browser darkens it on a light palette or lightens it on a
-dark one, just enough to pass. On a dark palette, added and removed rows sit
-halfway between the plain row and the terminal's row color, so dim colors such
-as comments stay readable.
+terminal's syntax colors. Where a color falls below 4.5:1 contrast on a plain,
+added or removed row, or on a changed word's highlight, the browser darkens it
+on a light palette or lightens it on a dark one, just enough to pass. On a dark
+palette, added and removed rows sit halfway between the plain row and the
+terminal's row color, so dim colors such as comments stay readable, and a
+changed word's highlight is darker than its row, tinted toward the added or
+removed color.
 
 The browser review follows the browser's light or dark color scheme, and the
 header button switches between the two.

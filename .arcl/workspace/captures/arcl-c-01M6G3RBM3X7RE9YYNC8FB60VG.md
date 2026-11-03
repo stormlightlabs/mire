@@ -1,7 +1,7 @@
 +++
 id = "arcl-c-01M6G3RBM3X7RE9YYNC8FB60VG"
 title = "Changed-word highlights lower syntax contrast in the web diff"
-status = "captured"
+status = "discarded"
 created-at = "2026-11-03T07:07:41.059Z"
 +++
 
@@ -17,3 +17,5 @@ The browser diff marks changed words with a `[data-diff-span]` background: the c
 | Catppuccin Latte | 4.13 | 3.55 |
 
 A dark row leaves almost no room for a brighter highlight, since Iceberg Dark comments sit at 4.53:1 on an added row. Mark changed words without lightening the background, for example with an underline or an outline, or set `--diffs-bg-addition-emphasis-override` from a color `crates/ui/src/theme/web.rs` checks.
+
+Fixed in arcl-t-01M6G2DK2YT9QZ7CMKKMNGFP3W: web.rs emits `--diff-added-word` and `--diff-removed-word`, checked at 4.5:1 against every syntax color and the text.

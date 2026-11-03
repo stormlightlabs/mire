@@ -25,6 +25,8 @@
 	--severity-critical: #eb7d7e;
 	--diff-added: #2a2d2b;
 	--diff-removed: #312329;
+	--diff-added-word: #1c1e17;
+	--diff-removed-word: #201314;
 	--syntax-comment: #8e92a8;
 	--syntax-string: #89b8c2;
 	--syntax-constant: #a093c7;
@@ -60,12 +62,14 @@
 	--severity-critical: #962f48;
 	--diff-added: #daf0dd;
 	--diff-removed: #efd9dc;
+	--diff-added-word: #cae2cc;
+	--diff-removed-word: #e6c8ce;
 	--syntax-comment: #2e3440;
-	--syntax-string: #366499;
+	--syntax-string: #315b8b;
 	--syntax-constant: #97365b;
 	--syntax-keyword: #97365b;
 	--syntax-function: #99324b;
-	--syntax-type: #366499;
+	--syntax-type: #315b8b;
 }
 
 /* eldritch-minimal */
@@ -94,6 +98,8 @@
 	--severity-critical: #f7737b;
 	--diff-added: #17272e;
 	--diff-removed: #281f2e;
+	--diff-added-word: #061610;
+	--diff-removed-word: #180c0f;
 	--syntax-comment: #7a89cc;
 	--syntax-string: #04d1f9;
 	--syntax-constant: #a48cf2;
@@ -127,12 +133,14 @@
 	--severity-critical: #a02d37;
 	--diff-added: #d4f5e6;
 	--diff-removed: #f2dcde;
+	--diff-added-word: #c0e7d5;
+	--diff-removed-word: #eacbcd;
 	--syntax-comment: #1e2029;
-	--syntax-string: #6246be;
-	--syntax-constant: #6246be;
-	--syntax-keyword: #6246be;
-	--syntax-function: #6246be;
-	--syntax-type: #6246be;
+	--syntax-string: #6145bc;
+	--syntax-constant: #6145bc;
+	--syntax-keyword: #6145bc;
+	--syntax-function: #6145bc;
+	--syntax-type: #6145bc;
 }
 
 /* catppuccin-mocha */
@@ -160,6 +168,8 @@
 	--severity-critical: #ff9bb7;
 	--diff-added: #252a31;
 	--diff-removed: #331c3b;
+	--diff-added-word: #151c17;
+	--diff-removed-word: #1c1017;
 	--syntax-comment: #8a8fa7;
 	--syntax-string: #94e2d5;
 	--syntax-constant: #cba6f7;
@@ -193,10 +203,12 @@
 	--severity-critical: #ba0c32;
 	--diff-added: #ceebd0;
 	--diff-removed: #edd1db;
+	--diff-added-word: #bddebe;
+	--diff-removed-word: #e8bdca;
 	--syntax-comment: #4c4f69;
-	--syntax-string: #1755d1;
-	--syntax-constant: #7933d5;
-	--syntax-keyword: #7933d5;
-	--syntax-function: #ba0c32;
-	--syntax-type: #1755d1;
+	--syntax-string: #154cb9;
+	--syntax-constant: #6b2dbd;
+	--syntax-keyword: #6b2dbd;
+	--syntax-function: #a90b2e;
+	--syntax-type: #154cb9;
 }

@@ -34,6 +34,30 @@ async function expectCommentColor(page: import('@playwright/test').Page, mire: M
 	await expect(comment).toHaveCSS('color', expected);
 }
 
+/**
+ * Changes words within line 2 of `one.txt`, opens it, and checks the
+ * background of the added and removed changed words, which `themes.css` sets
+ * as `--diff-added-word` and `--diff-removed-word`.
+ */
+async function expectChangedWordBackgrounds(
+	page: import('@playwright/test').Page,
+	mire: MireServer,
+	expected: { added: string; removed: string }
+) {
+	await mire.writeSource('one.txt', 'alpha\nbetas also\ngamma\n');
+	await page.getByRole('button', { name: /Apply revision/ }).click();
+	await page.getByRole('treeitem', { name: /one\.txt/ }).click();
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await expect(diff.locator("[data-line-type='change-addition'] [data-diff-span]").first()).toHaveCSS(
+		'background-color',
+		expected.added
+	);
+	await expect(diff.locator("[data-line-type='change-deletion'] [data-diff-span]").first()).toHaveCSS(
+		'background-color',
+		expected.removed
+	);
+}
+
 test.describe('with a light browser and --theme iceberg', () => {
 	test.use({ mireTheme: 'iceberg', colorScheme: 'light' });
 
@@ -66,6 +90,12 @@ test.describe('with a light browser and --theme iceberg', () => {
 		// --syntax-comment in Nord Light: the terminal's comment role, its text color.
 		await expectCommentColor(page, mire, 'rgb(46, 52, 64)');
 	});
+
+	test('marks changed words with the palette', async ({ page, mire }) => {
+		await open(page, mire.url);
+		// --diff-added-word and --diff-removed-word in Nord Light.
+		await expectChangedWordBackgrounds(page, mire, { added: 'rgb(202, 226, 204)', removed: 'rgb(230, 200, 206)' });
+	});
 });
 
 test.describe('with a dark browser and --theme catppuccin', () => {
@@ -87,6 +117,12 @@ test.describe('with a dark browser and --theme catppuccin', () => {
 		await open(page, mire.url);
 		// --syntax-comment in Catppuccin Mocha: overlay1, lightened a step to reach 4.5:1 on the diff rows.
 		await expectCommentColor(page, mire, 'rgb(138, 143, 167)');
+	});
+
+	test('marks changed words with the palette', async ({ page, mire }) => {
+		await open(page, mire.url);
+		// --diff-added-word and --diff-removed-word in Catppuccin Mocha.
+		await expectChangedWordBackgrounds(page, mire, { added: 'rgb(21, 28, 23)', removed: 'rgb(28, 16, 23)' });
 	});
 });
 

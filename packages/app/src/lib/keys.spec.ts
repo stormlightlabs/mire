@@ -63,6 +63,12 @@ describe('keyBarEntries', () => {
 	it('leaves out the layout and wrap keys on a narrow screen', () => {
 		expect(listed(true)).toEqual(['[', ']', '{', '}', 'j', 'k', 'p', 'P', 'b', 'Esc']);
 	});
+
+	it('marks the layout and wrap keys as the wide-only ones', () => {
+		const wideOnly = keyBarEntries(false).filter((entry) => entry.wideOnly);
+		expect(wideOnly.flatMap((entry) => entry.keys)).toEqual(['1', '2', 'w']);
+		expect(keyBarEntries(true).some((entry) => entry.wideOnly)).toBe(false);
+	});
 });
 
 describe('hunkTarget', () => {

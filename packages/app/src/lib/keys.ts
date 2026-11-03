@@ -13,8 +13,11 @@ export type KeyAction =
 	| 'toggle-focus'
 	| 'leave-focus';
 
-/** One row of the focus-mode key bar: the keys and what they do. */
-export type KeyBarEntry = { keys: string[]; action: string };
+/**
+ * One row of the focus-mode key bar: the keys, what they do, and whether only
+ * a wide screen lists them because a narrow one ignores them.
+ */
+export type KeyBarEntry = { keys: string[]; action: string; wideOnly?: boolean };
 
 /** The review's keys, matching the terminal's for the same actions. */
 const ACTIONS: Record<string, KeyAction> = {
@@ -45,13 +48,13 @@ const WIDE_KEY_BAR: KeyBarEntry[] = [
 	{ keys: ['[', ']'], action: 'file' },
 	{ keys: ['{', '}'], action: 'hunk' },
 	{ keys: ['j', 'k', 'p', 'P'], action: 'finding' },
-	{ keys: ['1', '2'], action: 'unified or split' },
-	{ keys: ['w'], action: 'wrap' },
+	{ keys: ['1', '2'], action: 'unified or split', wideOnly: true },
+	{ keys: ['w'], action: 'wrap', wideOnly: true },
 	{ keys: ['b', 'Esc'], action: 'leave focus' }
 ];
 
-/** The layout and wrap keys do nothing on a narrow screen, so its key bar leaves them out. */
-const NARROW_KEY_BAR = WIDE_KEY_BAR.filter((entry) => entry.action !== 'unified or split' && entry.action !== 'wrap');
+/** What the focus-mode key bar lists on a narrow screen, which ignores the wide-only keys. */
+const NARROW_KEY_BAR = WIDE_KEY_BAR.filter((entry) => !entry.wideOnly);
 
 /**
  * Maps a key press to the review action it asks for, or `null` for a key the

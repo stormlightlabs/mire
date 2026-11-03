@@ -168,6 +168,22 @@ test('the layout and wrap keys leave the narrow diff as it is', async ({ page, m
 	await expectNoSidewaysOverflow(page);
 });
 
+test('the focus key bar wraps rather than clipping a key at any narrow width', async ({ page, mire }) => {
+	await open(page, mire.url);
+	await mire.writeSource('one.txt', 'alpha\nBETA\ngamma\ndelta\n');
+	await expect(page.getByRole('region', { name: 'Revision 4 is ready.' })).toBeVisible();
+	await tabs(page).getByRole('button', { name: 'Focus' }).click();
+	const keys = page.getByRole('contentinfo', { name: 'Keys' });
+	await expect(keys).toContainText(/u\s*apply revision 4/);
+
+	// The held revision adds the longest entry, and the last entry must still fit up to the wide layout.
+	for (const width of [400, 505, 513, 520, 600, 700, 860]) {
+		await page.setViewportSize({ width, height: 844 });
+		for (const entry of await keys.getByRole('listitem').all()) await expect(entry).toBeInViewport({ ratio: 1 });
+		await expectNoSidewaysOverflow(page);
+	}
+});
+
 test('a wider window closes an open drawer and keeps focus on the page', async ({ page, mire }) => {
 	await open(page, mire.url);
 	await tabs(page)

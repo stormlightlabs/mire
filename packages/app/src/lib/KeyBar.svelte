@@ -34,19 +34,19 @@
 	.key-bar {
 		min-width: 0;
 		display: flex;
-		align-items: center;
-		gap: 1.25rem;
+		align-items: baseline;
+		gap: 0.75rem 1.25rem;
 		padding: 0.45rem 1rem calc(0.45rem + env(safe-area-inset-bottom));
 		border-top: 1px solid var(--line);
 		background: var(--surface);
 		color: var(--muted);
 		font-size: 0.72rem;
-		white-space: nowrap;
-		overflow: hidden;
 	}
+	/* The list wraps to more rows wherever it would run past the edge, at any width. */
 	ul {
 		display: flex;
-		gap: 1.25rem;
+		flex-wrap: wrap;
+		gap: 0.2rem 1.25rem;
 		margin: 0;
 		padding: 0;
 		list-style: none;
@@ -55,6 +55,7 @@
 		display: inline-flex;
 		align-items: baseline;
 		gap: 0.3rem;
+		white-space: nowrap;
 	}
 	kbd {
 		color: var(--ink);
@@ -63,14 +64,12 @@
 			'Google Sans Code',
 			monospace;
 	}
-	/* At phone width the list takes two rows rather than running past the edge. */
+	/* At phone width the gaps tighten so more entries fit on a row. */
 	@media (max-width: 32rem) {
 		.key-bar {
-			align-items: baseline;
 			gap: 0.75rem;
 		}
 		ul {
-			flex-wrap: wrap;
 			gap: 0.2rem 0.9rem;
 		}
 	}

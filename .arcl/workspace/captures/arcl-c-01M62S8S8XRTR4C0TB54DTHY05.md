@@ -1,8 +1,12 @@
 +++
 id = "arcl-c-01M62S8S8XRTR4C0TB54DTHY05"
 title = "Comment colour contrast in the web diff"
-status = "captured"
+status = "promoted"
 created-at = "2026-10-29T02:54:17.373Z"
+
+[promoted-to]
+kind = "task"
+id = "arcl-t-01M6G2DK2YT9QZ7CMKKMNGFP3W"
 +++
 
 The web diff colours syntax with the Shiki `github-light` and `github-dark` themes (set in `packages/app/src/lib/DiffViewer.svelte`), not with `themes.css`. Their comment colour is `#6A737D` in both. Measured in Chromium:

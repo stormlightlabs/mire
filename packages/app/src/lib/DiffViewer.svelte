@@ -2,6 +2,7 @@
 	import { FileDiff, type DiffLineAnnotation, type FileDiffMetadata, type Hunk } from '@pierre/diffs';
 	import { onMount } from 'svelte';
 	import { isWholeFileChange, type FileDetail, type FindingSummary, type SemanticHunk } from './review';
+	import { SYNTAX_THEMES } from './syntax';
 	import type { Theme } from './theme';
 
 	let {
@@ -33,6 +34,17 @@
 	 */
 	const GUTTER_CSS = `[data-indicators='bars'] [data-column-number]:has(+ [data-column-number][data-line-type^='change-'])::before { height: calc(100% + 1px); }`;
 
+	/**
+	 * Changed rows take `--diff-added` and `--diff-removed` as they are, rather
+	 * than a blend of them with the plain row, so the syntax colors keep the
+	 * contrast `themes.css` was checked for. The library picks a token's weight
+	 * with `light-dark()`, which takes colors only, so the bold that
+	 * `syntax.ts` gives keywords, types and functions is read directly; both
+	 * themes give the same weight.
+	 */
+	const SYNTAX_CSS = `[data-line], [data-no-newline] { --mix-light: 0%; --mix-dark: 0%; }
+[data-line] span { font-weight: var(--diffs-token-light-font-weight, inherit); }`;
+
 	let host = $state<HTMLElement>();
 	let viewer: FileDiff<FindingSummary> | undefined;
 
@@ -50,11 +62,11 @@
 
 	function viewerOptions() {
 		return {
-			theme: { light: 'github-light', dark: 'github-dark' },
+			theme: SYNTAX_THEMES,
 			themeType: theme,
 			diffStyle,
 			disableFileHeader: !showHeader,
-			unsafeCSS: GUTTER_CSS,
+			unsafeCSS: `${GUTTER_CSS}\n${SYNTAX_CSS}`,
 			// A whole-file addition or deletion reads as plain code, with only the gutter bar marking it.
 			disableBackground: isWholeFileChange(file.status),
 			hunkSeparators: 'line-info' as const,
@@ -307,9 +319,13 @@
 		min-width: 0;
 		border: 1px solid var(--line);
 		background: var(--surface);
-		--diffs-bg: var(--surface);
-		--diffs-light-bg: var(--surface);
-		--diffs-light: var(--ink);
+		--diffs-addition-color-override: var(--success);
+		--diffs-deletion-color-override: var(--danger);
+		--diffs-modified-color-override: var(--focus);
+		--diffs-bg-addition-override: var(--diff-added);
+		--diffs-bg-deletion-override: var(--diff-removed);
+		--diffs-bg-addition-emphasis-override: var(--diff-added-word);
+		--diffs-bg-deletion-emphasis-override: var(--diff-removed-word);
 		--diffs-font-family: 'Google Sans Code Variable', 'Google Sans Code', monospace;
 		--diffs-header-font-family: 'IBM Plex Sans Variable', 'IBM Plex Sans', sans-serif;
 		--diffs-font-size: 0.75rem;

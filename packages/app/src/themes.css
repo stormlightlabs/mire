@@ -23,6 +23,14 @@
 	--severity-medium: #e2a478;
 	--severity-high: #eb7d7e;
 	--severity-critical: #eb7d7e;
+	--diff-added: #2a2d2b;
+	--diff-removed: #312329;
+	--syntax-comment: #8e92a8;
+	--syntax-string: #89b8c2;
+	--syntax-constant: #a093c7;
+	--syntax-keyword: #e2a478;
+	--syntax-function: #f265b5;
+	--syntax-type: #84a0c6;
 }
 
 /* nord-light */
@@ -50,6 +58,14 @@
 	--severity-medium: #724e09;
 	--severity-high: #962f48;
 	--severity-critical: #962f48;
+	--diff-added: #daf0dd;
+	--diff-removed: #efd9dc;
+	--syntax-comment: #2e3440;
+	--syntax-string: #366499;
+	--syntax-constant: #97365b;
+	--syntax-keyword: #97365b;
+	--syntax-function: #99324b;
+	--syntax-type: #366499;
 }
 
 /* eldritch-minimal */
@@ -76,6 +92,14 @@
 	--severity-medium: #f7c67f;
 	--severity-high: #f7737b;
 	--severity-critical: #f7737b;
+	--diff-added: #17272e;
+	--diff-removed: #281f2e;
+	--syntax-comment: #7a89cc;
+	--syntax-string: #04d1f9;
+	--syntax-constant: #a48cf2;
+	--syntax-keyword: #f1fc79;
+	--syntax-function: #f265b5;
+	--syntax-type: #04d1f9;
 }
 
 /* eldritch-dusk */
@@ -101,6 +125,14 @@
 	--severity-medium: #724100;
 	--severity-high: #a02d37;
 	--severity-critical: #a02d37;
+	--diff-added: #d4f5e6;
+	--diff-removed: #f2dcde;
+	--syntax-comment: #1e2029;
+	--syntax-string: #6246be;
+	--syntax-constant: #6246be;
+	--syntax-keyword: #6246be;
+	--syntax-function: #6246be;
+	--syntax-type: #6246be;
 }
 
 /* catppuccin-mocha */
@@ -126,6 +158,14 @@
 	--severity-medium: #fab387;
 	--severity-high: #ff9bb7;
 	--severity-critical: #ff9bb7;
+	--diff-added: #252a31;
+	--diff-removed: #331c3b;
+	--syntax-comment: #8a8fa7;
+	--syntax-string: #94e2d5;
+	--syntax-constant: #cba6f7;
+	--syntax-keyword: #f9e2af;
+	--syntax-function: #f5c2e7;
+	--syntax-type: #89b4fa;
 }
 
 /* catppuccin-latte */
@@ -151,4 +191,12 @@
 	--severity-medium: #724100;
 	--severity-high: #ba0c32;
 	--severity-critical: #ba0c32;
+	--diff-added: #ceebd0;
+	--diff-removed: #edd1db;
+	--syntax-comment: #4c4f69;
+	--syntax-string: #1755d1;
+	--syntax-constant: #7933d5;
+	--syntax-keyword: #7933d5;
+	--syntax-function: #ba0c32;
+	--syntax-type: #1755d1;
 }

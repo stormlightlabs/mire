@@ -1,4 +1,4 @@
-//! WCAG 2 contrast ratios for palette tests.
+//! WCAG 2 contrast ratios, for palette tests and the browser's diff colors.
 
 use ratatui::style::Color;
 

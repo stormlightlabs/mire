@@ -7,6 +7,9 @@ const TEXT = ['ink', 'muted', 'focus', 'danger'];
 /** Graphics, such as the ready status dot and the finish panel's anchor mark, need 3:1 rather than 4.5:1. */
 const GRAPHICS = ['success', 'severity-medium'];
 const BACKGROUNDS = ['paper', 'surface'];
+/** The diff draws plain rows on --surface and changed rows on their own colors. */
+const DIFF_ROWS = ['surface', 'diff-added', 'diff-removed'];
+const SYNTAX = ['comment', 'string', 'constant', 'keyword', 'function', 'type'].map((role) => `syntax-${role}`);
 
 /** Reads each palette block of the generated stylesheet into its custom properties. */
 function palettes(css: string) {
@@ -46,6 +49,18 @@ describe('generated themes', () => {
 		for (const { name, colors } of palettes(stylesheet)) {
 			for (const background of BACKGROUNDS) {
 				for (const foreground of TEXT) {
+					const ratio = contrast(colors[foreground], colors[background]);
+					expect(ratio, `${name}: --${foreground} on --${background}`).toBeGreaterThanOrEqual(4.5);
+				}
+			}
+		}
+	});
+
+	it('gives text and every syntax color 4.5:1 on plain, added and removed diff rows', () => {
+		for (const { name, colors } of palettes(stylesheet)) {
+			for (const background of DIFF_ROWS) {
+				for (const foreground of ['ink', ...SYNTAX]) {
+					expect(colors[foreground], `${name}: --${foreground}`).toBeDefined();
 					const ratio = contrast(colors[foreground], colors[background]);
 					expect(ratio, `${name}: --${foreground} on --${background}`).toBeGreaterThanOrEqual(4.5);
 				}

@@ -169,6 +169,17 @@ the gutter, without tinted rows.
 Focus mode lasts until you leave it or reload the page. The server stores
 nothing about it, so each tab has its own.
 
+## Use the browser on a narrow screen
+
+In a narrow window, as on a phone, the browser review shows one column. At
+the browser's default font size, narrow means under about 864 pixels, and a
+larger font size raises that width. Long lines wrap instead of scrolling
+sideways, and the diff is always unified.
+The header keeps the review's title and revision and shows its buttons as
+icons. A bar at the bottom shows how many files and open findings there are.
+Its Files and Findings buttons open the file tree and the review queue as
+drawers, and its Focus and Finish buttons work as they do in the header.
+
 ## Finish a review in the browser
 
 Select Finish review in the header, or in the focus bar in focus mode, to see

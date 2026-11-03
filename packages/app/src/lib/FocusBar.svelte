@@ -227,14 +227,28 @@
 			display: none;
 		}
 	}
+	/* At phone width the bar takes two rows: the file and its arrows, then the actions. */
 	@media (max-width: 32rem) {
+		.focus-bar {
+			flex-wrap: wrap;
+		}
 		.brand {
 			display: none;
+		}
+		.path {
+			flex: 1 1 0;
+		}
+		.spacer {
+			flex-basis: 100%;
+		}
+		.viewed {
+			margin-right: auto;
 		}
 	}
 	@media (pointer: coarse) {
 		.step,
-		.bar-button {
+		.bar-button,
+		.viewed {
 			min-height: 2.75rem;
 		}
 		.step {

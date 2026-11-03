@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { readFile, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { expect, test } from './mire';
 
 test('reviews a change from load to export', async ({ page, mire }) => {
@@ -14,6 +16,9 @@ test('reviews a change from load to export', async ({ page, mire }) => {
 	// Load: the first file opens and both findings are queued.
 	await expect(header).toContainText('revision 3');
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+	// The diff header draws an old path and an arrow only for a rename.
+	await expect(diff.locator('[data-diffs-header]')).toContainText('one.txt');
+	await expect(diff.locator('[data-prev-name]')).toHaveCount(0);
 	await expect(queue).toContainText('2 open');
 	await expect(first).toBeVisible();
 	await expect(second).toBeVisible();
@@ -154,4 +159,23 @@ test('empties the diff pane when the last file leaves the review', async ({ page
 	await expect(diff.getByRole('status')).toHaveText(/is no longer in the review\./);
 	await expect(diff.getByRole('button', { name: /Viewed/ })).toHaveCount(0);
 	await expect(files.getByRole('treeitem')).toHaveCount(0);
+});
+
+test('the diff header shows the old path of a renamed and changed file', async ({ page, mire }) => {
+	// Move two.txt and add a line, and mark the new path intent-to-add so the
+	// working tree diff pairs the two as a rename with a content change.
+	await writeFile(path.join(mire.root, 'two-moved.txt'), 'x\ny\nz\n');
+	await rm(path.join(mire.root, 'two.txt'));
+	execFileSync('git', ['add', '--intent-to-add', 'two-moved.txt'], { cwd: mire.root, stdio: 'pipe' });
+
+	await page.goto(mire.url);
+	const header = page.getByRole('banner');
+	await header.getByRole('button', { name: 'Refresh source' }).click();
+	const files = page.getByRole('tree', { name: 'Changed file tree' });
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await files.getByRole('treeitem', { name: /two-moved\.txt/ }).click();
+
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('two-moved.txt');
+	await expect(diff.locator('[data-prev-name]')).toContainText('two.txt');
+	await expect(diff.locator('[data-diffs-header]')).toContainText('two-moved.txt');
 });

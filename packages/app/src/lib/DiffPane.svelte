@@ -26,6 +26,7 @@
 		showHeading = true,
 		heldChange = null,
 		keptDraft = null,
+		narrow = false,
 		onDismissNotice = () => {},
 		onToggleViewed,
 		onFindingClick,
@@ -53,6 +54,8 @@
 		heldChange?: { change: FileChange; revision: number } | null;
 		/** The reader's edit to the active finding that a revision conflict kept from saving. */
 		keptDraft?: FindingDraft | null;
+		/** Whether the screen is narrow. The diff then wraps long lines and shows one column, so Split is not offered. */
+		narrow?: boolean;
 		onDismissNotice?: () => void;
 		onToggleViewed: () => void;
 		onFindingClick: (finding: FindingSummary) => void;
@@ -66,6 +69,7 @@
 
 	let diffStyle = $state<'unified' | 'split'>('unified');
 	let expandContext = $state(false);
+	const shownStyle = $derived(narrow ? 'unified' : diffStyle);
 	const generatedCollapsed = $derived(file !== null && file.generated && openedGenerated !== file.path.raw);
 
 	// Another file closes the opened generated diff, so returning to it starts collapsed.
@@ -74,7 +78,7 @@
 	});
 </script>
 
-<section class="diff-pane" aria-label="File diff" aria-busy={fileLoading}>
+<section id="diff-pane" class="diff-pane" aria-label="File diff" aria-busy={fileLoading} tabindex="-1">
 	{#if notice}
 		<div class="notice" role="status">
 			<p>{notice}</p>
@@ -163,16 +167,25 @@
 			</section>
 		{:else}
 			<div class="diff-controls" role="group" aria-label="Diff display">
-				<div class="control-group" role="group" aria-label="Diff layout">
-					<button aria-pressed={diffStyle === 'unified'} onclick={() => (diffStyle = 'unified')}>Unified</button>
-					<button aria-pressed={diffStyle === 'split'} onclick={() => (diffStyle = 'split')}>Split</button>
-				</div>
+				{#if !narrow}
+					<div class="control-group" role="group" aria-label="Diff layout">
+						<button aria-pressed={diffStyle === 'unified'} onclick={() => (diffStyle = 'unified')}>Unified</button>
+						<button aria-pressed={diffStyle === 'split'} onclick={() => (diffStyle = 'split')}>Split</button>
+					</div>
+				{/if}
 				<button onclick={() => (expandContext = !expandContext)}>
 					{expandContext ? 'Collapse context' : 'Expand context'}
 				</button>
 			</div>
 			<p class="diff-help">Show or collapse all available context around the captured changes.</p>
-			<DiffViewer {file} {diffStyle} {expandContext} {theme} showHeader={showHeading} {onFindingClick} />
+			<DiffViewer
+				{file}
+				diffStyle={shownStyle}
+				{expandContext}
+				{theme}
+				showHeader={showHeading}
+				wrap={narrow}
+				{onFindingClick} />
 		{/if}
 	{/if}
 </section>
@@ -372,7 +385,10 @@
 		}
 	}
 	@media (pointer: coarse) {
-		.diff-controls button {
+		.diff-controls button,
+		.viewed-toggle,
+		.notice button,
+		.show-diff {
 			min-height: 2.75rem;
 		}
 	}

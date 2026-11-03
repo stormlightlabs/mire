@@ -146,8 +146,9 @@ its status.
 ## Browser review
 
 The browser review that `mire serve` opens takes these keys. None of them work
-while a text field or a menu has focus, and `]`, `[`, `b`, `Esc` and `u` leave the
-page alone while a dialog is open.
+while a text field or a menu has focus, and none of them act on the page behind
+an open dialog, such as a drawer on a narrow screen. Pick a finding in the
+Findings drawer to open it.
 
 | Key       | Action                                                |
 | --------- | ----------------------------------------------------- |

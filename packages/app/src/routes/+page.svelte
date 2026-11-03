@@ -166,8 +166,20 @@
 	onMount(() => {
 		const narrowScreen = window.matchMedia('(max-width: 54rem)');
 		const updateNarrowScreen = () => {
+			// Each layout removes controls the other shows: widening drops the
+			// drawers and the tab bar, narrowing drops the file tree, the queue and
+			// the topbar's Focus and Finish buttons. When the control that had focus
+			// goes, focus would fall to the body, so it moves to the review content.
+			const before = document.activeElement;
 			isNarrow = narrowScreen.matches;
 			if (!isNarrow) mobilePane = null;
+			if (!before || before === document.body) return;
+			void tick().then(() => {
+				const now = document.activeElement;
+				if (!before.isConnected || !now || now === document.body) {
+					document.getElementById('review-content')?.focus();
+				}
+			});
 		};
 		theme = loadTheme();
 		themeReady = true;
@@ -745,18 +757,12 @@
 			return;
 		}
 		if (event.ctrlKey || event.altKey) return;
-		if (event.key === 'j') {
-			event.preventDefault();
-			navigateQueue(1);
-			return;
-		} else if (event.key === 'k') {
-			event.preventDefault();
-			navigateQueue(-1);
-			return;
-		}
 		// An open dialog takes Esc for itself, and the page behind it stays as it is.
 		if (!review || inDialog(target)) return;
-		if (event.key === 'u' && held) {
+		if (event.key === 'j' || event.key === 'k') {
+			event.preventDefault();
+			navigateQueue(event.key === 'j' ? 1 : -1);
+		} else if (event.key === 'u' && held) {
 			event.preventDefault();
 			if (!event.repeat) applyHeld();
 		} else if (event.key === 'b') {
@@ -793,13 +799,23 @@
 	}
 
 	function selectFileFromDrawer(id: string) {
-		mobilePane = null;
 		chooseFile(id);
+		void closeDrawerToDiff();
 	}
 
 	function selectFindingFromDrawer(finding: FindingSummary) {
-		mobilePane = null;
 		void selectFinding(finding);
+		void closeDrawerToDiff();
+	}
+
+	/**
+	 * Closes the open drawer and moves keyboard focus to the diff pane, where
+	 * the file or finding the reader picked shows.
+	 */
+	async function closeDrawerToDiff() {
+		mobilePane = null;
+		await tick();
+		document.getElementById('diff-pane')?.focus();
 	}
 </script>
 
@@ -819,7 +835,7 @@
 
 <a class="skip-link" href="#review-content">Skip to diff</a>
 
-<div class="app-shell" class:focused={inFocus}>
+<div class="app-shell" class:focused={inFocus} class:with-tabs={review !== null && isNarrow && !inFocus}>
 	{#if inFocus}
 		<FocusBar
 			bind:this={focusBar}
@@ -847,15 +863,8 @@
 				</span>
 			</div>
 			<div class="topbar-actions">
-				{#if review && isNarrow}
-					<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'files')}>
-						<span class="i-lucide-files icon" aria-hidden="true"></span>Files
-					</button>
-					<button class="topbar-button mobile-pane-button" onclick={() => (mobilePane = 'findings')}>
-						<span class="i-lucide-list-checks icon" aria-hidden="true"></span>Findings
-					</button>
-				{/if}
-				{#if review}
+				<!-- On a narrow screen the tab bar at the bottom holds Focus and Finish review. -->
+				{#if review && !isNarrow}
 					<button
 						bind:this={focusButton}
 						class="topbar-button"
@@ -880,9 +889,11 @@
 							Refresh source
 						{/if}
 					</button>
-					<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>
-						<span class="i-lucide-circle-check-big icon" aria-hidden="true"></span>Finish review
-					</button>
+					{#if !isNarrow}
+						<button class="topbar-button" onclick={() => (finishReviewOpen = true)}>
+							<span class="i-lucide-circle-check-big icon" aria-hidden="true"></span>Finish review
+						</button>
+					{/if}
 					<button
 						class="topbar-button icon-button"
 						aria-label={themeLabel}
@@ -995,6 +1006,7 @@
 				{viewedError}
 				heldChange={shownChange && changes ? { change: shownChange, revision: changes.revision } : null}
 				keptDraft={shownDraft}
+				narrow={isNarrow}
 				onDraftTaken={() => (keptDraft = null)}
 				onEditStart={startEdit}
 				bind:openedGenerated
@@ -1016,32 +1028,65 @@
 	</main>
 	{#if inFocus}
 		<KeyBar heldRevision={changes?.revision ?? null} />
+	{:else if review && isNarrow}
+		<nav class="tab-bar" aria-label="Review sections">
+			<button class="tab" aria-haspopup="dialog" onclick={() => (mobilePane = 'files')}>
+				<span class="tab-mark">{review.files.length}</span>Files
+			</button>
+			<button class="tab" aria-haspopup="dialog" onclick={() => (mobilePane = 'findings')}>
+				<span class="tab-mark">{review.totals.open}<span class="sr-only"> open</span></span>Findings
+			</button>
+			<button bind:this={focusButton} class="tab" aria-keyshortcuts="b" onclick={() => void setFocused(true)}>
+				<span class="i-lucide-maximize-2 tab-mark tab-icon" aria-hidden="true"></span>Focus
+			</button>
+			<button class="tab" aria-haspopup="dialog" onclick={() => (finishReviewOpen = true)}>
+				<span class="i-lucide-circle-check-big tab-mark tab-icon" aria-hidden="true"></span>Finish
+			</button>
+		</nav>
 	{/if}
-	{#if review && isNarrow && mobilePane === 'files'}
-		<Overlay open={true} labelledBy="files-drawer-heading" variant="drawer" onClose={() => (mobilePane = null)}>
-			<section class="drawer-content">
-				<header class="drawer-heading">
-					<h2 id="files-drawer-heading">Changed files</h2>
-					<button onclick={() => (mobilePane = null)}>Close files</button>
-				</header>
-				<FileNavigator files={review.files} {activeFile} drawer onSelect={selectFileFromDrawer} />
-			</section>
+	{#if review}
+		<!-- The drawers stay mounted while closed, so closing one, even by a wider window, goes through close() and returns focus. -->
+		<Overlay
+			open={isNarrow && mobilePane === 'files'}
+			labelledBy="files-drawer-heading"
+			variant="drawer"
+			onClose={() => (mobilePane = null)}>
+			{#if isNarrow && mobilePane === 'files'}
+				<section class="drawer-content">
+					<header class="drawer-heading">
+						<div class="drawer-title">
+							<h2 id="files-drawer-heading">Changed files</h2>
+							<span>{review.files.length}</span>
+						</div>
+						<button onclick={() => (mobilePane = null)}>Close files</button>
+					</header>
+					<FileNavigator files={review.files} {activeFile} drawer onSelect={selectFileFromDrawer} />
+				</section>
+			{/if}
 		</Overlay>
-	{:else if review && isNarrow && mobilePane === 'findings'}
-		<Overlay open={true} labelledBy="findings-drawer-heading" variant="drawer" onClose={() => (mobilePane = null)}>
-			<section class="drawer-content">
-				<header class="drawer-heading">
-					<h2 id="findings-drawer-heading">Review queue</h2>
-					<button onclick={() => (mobilePane = null)}>Close findings</button>
-				</header>
-				<FindingQueue
-					findings={visibleFindings}
-					activeFindingId={activeFinding?.id ?? null}
-					openCount={review.totals.open}
-					drawer
-					bind:filters
-					onSelect={selectFindingFromDrawer} />
-			</section>
+		<Overlay
+			open={isNarrow && mobilePane === 'findings'}
+			labelledBy="findings-drawer-heading"
+			variant="drawer"
+			onClose={() => (mobilePane = null)}>
+			{#if isNarrow && mobilePane === 'findings'}
+				<section class="drawer-content">
+					<header class="drawer-heading">
+						<div class="drawer-title">
+							<h2 id="findings-drawer-heading">Review queue</h2>
+							<span>{review.totals.open} open</span>
+						</div>
+						<button onclick={() => (mobilePane = null)}>Close findings</button>
+					</header>
+					<FindingQueue
+						findings={visibleFindings}
+						activeFindingId={activeFinding?.id ?? null}
+						openCount={review.totals.open}
+						drawer
+						bind:filters
+						onSelect={selectFindingFromDrawer} />
+				</section>
+			{/if}
 		</Overlay>
 	{/if}
 	{#if review}
@@ -1141,9 +1186,55 @@
 		overflow: hidden;
 		display: grid;
 		grid-template-rows: auto auto 1fr;
+		/* A phone's notch and rounded corners stay clear of the bars and the diff. */
+		padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
 	}
-	.app-shell.focused {
+	.app-shell.focused,
+	.app-shell.with-tabs {
 		grid-template-rows: auto auto 1fr auto;
+	}
+	/* The tab bar and the key bar pad for the home indicator themselves; without either, the shell does. */
+	.app-shell:not(.focused):not(.with-tabs) {
+		padding-bottom: env(safe-area-inset-bottom);
+	}
+	.tab-bar {
+		display: grid;
+		grid-template-columns: repeat(4, minmax(0, 1fr));
+		border-top: 1px solid var(--line);
+		padding-bottom: env(safe-area-inset-bottom);
+		background: var(--surface);
+	}
+	.tab {
+		min-height: 3.25rem;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 0.2rem;
+		border: 0;
+		padding: 0.35rem 0.25rem;
+		background: transparent;
+		color: var(--muted);
+		font:
+			500 0.72rem 'Google Sans Variable',
+			'Google Sans',
+			sans-serif;
+		cursor: pointer;
+	}
+	.tab-mark {
+		color: var(--focus);
+		font:
+			600 0.85rem/1.1rem 'Google Sans Code Variable',
+			'Google Sans Code',
+			monospace;
+	}
+	.tab-icon {
+		width: 1.1rem;
+		height: 1.1rem;
+	}
+	.tab:focus-visible {
+		outline: 2px solid var(--focus);
+		outline-offset: -2px;
 	}
 	/* The bar is inverted in light palettes. In dark ones an inverted bar would
 	   be the brightest thing on screen, so it sits one step above the page. */
@@ -1560,6 +1651,15 @@
 		display: grid;
 		grid-template-rows: auto minmax(0, 1fr);
 	}
+	.drawer-title {
+		display: flex;
+		align-items: baseline;
+		gap: 0.6rem;
+	}
+	.drawer-title span {
+		color: var(--muted);
+		font-size: 0.78rem;
+	}
 	.drawer-heading {
 		display: flex;
 		align-items: center;
@@ -1596,17 +1696,25 @@
 			padding: 0;
 		}
 		.review-meta {
+			flex-direction: column;
+			gap: 0.1rem;
+		}
+		.review-meta > [aria-hidden='true'] {
 			display: none;
+		}
+		.review-meta .review-title {
+			max-width: none;
 		}
 		.topbar-actions {
 			grid-column: 3;
 			margin-left: 0;
+			gap: 0.35rem;
 		}
 		.workspace {
 			grid-template-columns: minmax(0, 1fr);
 		}
 
-		.topbar-actions .topbar-button:not(.mobile-pane-button):not(.icon-button) {
+		.topbar-actions .topbar-button {
 			width: 2.75rem;
 			padding-inline: 0;
 			font-size: 0;
@@ -1617,15 +1725,6 @@
 		}
 	}
 	@media (max-width: 32rem) {
-		.topbar-actions {
-			flex-wrap: wrap;
-			gap: 0.35rem;
-		}
-		.topbar-actions .mobile-pane-button {
-			width: 2.75rem;
-			padding-inline: 0;
-			font-size: 0;
-		}
 		.status {
 			gap: 0;
 			font-size: 0;
@@ -1641,7 +1740,15 @@
 			width: 100%;
 		}
 	}
+	@media (hover: hover) {
+		.tab:hover {
+			background: var(--button-hover);
+			color: var(--ink);
+		}
+	}
 	@media (pointer: coarse) {
+		.held-actions button,
+		.watch-stopped button,
 		.topbar-button,
 		.dialog-content .close,
 		.primary-button,

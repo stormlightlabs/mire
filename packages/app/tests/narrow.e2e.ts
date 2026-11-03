@@ -148,6 +148,50 @@ test('fits focus mode and the finish panel', async ({ page, mire }) => {
 	await expectNoSidewaysOverflow(page);
 });
 
+test('the layout and wrap keys leave the narrow diff as it is', async ({ page, mire }) => {
+	await open(page, mire.url);
+	const header = page.getByRole('banner');
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await expect(diff.getByRole('button', { name: 'Wrap' })).toHaveCount(0);
+	await page.keyboard.press('2');
+	await page.keyboard.press('w');
+	await expect(diff.locator('pre[data-diff-type="single"][data-overflow="wrap"]')).toHaveCount(1);
+
+	// The keys left the wide layout alone too, so widening the screen shows it as it was.
+	await page.setViewportSize({ width: 1280, height: 844 });
+	await expect(diff.getByRole('button', { name: 'Unified' })).toHaveAttribute('aria-pressed', 'true');
+	await expect(diff.getByRole('button', { name: 'Wrap' })).toHaveAttribute('aria-pressed', 'false');
+	await expect(diff.locator('pre[data-diff-type="single"][data-overflow="scroll"]')).toHaveCount(1);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(diff.getByRole('button', { name: 'Wrap' })).toHaveCount(0);
+
+	// The focus key bar leaves out the keys that do nothing here, and every key it lists is on screen.
+	await tabs(page).getByRole('button', { name: 'Focus' }).click();
+	await expect(header.getByRole('heading', { level: 1 })).toHaveText('one.txt');
+	const keys = page.getByRole('contentinfo', { name: 'Keys' });
+	await expect(keys).toContainText('{} hunk');
+	await expect(keys).not.toContainText('wrap');
+	await expect(keys).not.toContainText('unified or split');
+	for (const entry of await keys.getByRole('listitem').all()) await expect(entry).toBeInViewport({ ratio: 1 });
+	await expectNoSidewaysOverflow(page);
+});
+
+test('the focus key bar wraps rather than clipping a key at any narrow width', async ({ page, mire }) => {
+	await open(page, mire.url);
+	await mire.writeSource('one.txt', 'alpha\nBETA\ngamma\ndelta\n');
+	await expect(page.getByRole('region', { name: 'Revision 4 is ready.' })).toBeVisible();
+	await tabs(page).getByRole('button', { name: 'Focus' }).click();
+	const keys = page.getByRole('contentinfo', { name: 'Keys' });
+	await expect(keys).toContainText(/u\s*apply revision 4/);
+
+	// The held revision adds the longest entry, and the last entry must still fit up to the wide layout.
+	for (const width of [400, 505, 513, 520, 600, 700, 860]) {
+		await page.setViewportSize({ width, height: 844 });
+		for (const entry of await keys.getByRole('listitem').all()) await expect(entry).toBeInViewport({ ratio: 1 });
+		await expectNoSidewaysOverflow(page);
+	}
+});
+
 test('a wider window closes an open drawer and keeps focus on the page', async ({ page, mire }) => {
 	await open(page, mire.url);
 	await tabs(page)

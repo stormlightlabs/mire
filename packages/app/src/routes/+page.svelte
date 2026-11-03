@@ -9,6 +9,7 @@
 	import Overlay from '$lib/Overlay.svelte';
 	import { handoffItems, uncountedGenerated, type ExportChoice, type HandoffItem } from '$lib/finish';
 	import { filePosition, takesText } from '$lib/focus';
+	import { keyAction } from '$lib/keys';
 	import {
 		FIRST_RETRY_DELAY,
 		heldChanges,
@@ -98,6 +99,8 @@
 	let focusButton = $state<HTMLButtonElement>();
 	/** The focus bar, which takes keyboard focus when focus mode starts. */
 	let focusBar = $state<FocusBar>();
+	/** The diff pane, which answers the hunk, layout and wrap keys. */
+	let diffPane = $state<DiffPane>();
 	/**
 	 * A revision other than the one on screen, held until the reader applies
 	 * it. It is usually newer; a lower one means the review file was replaced.
@@ -744,34 +747,49 @@
 	}
 
 	function onKeydown(event: KeyboardEvent) {
-		if (event.defaultPrevented || event.metaKey) return;
-		const target = event.target;
-		if (takesText(target)) return;
-		// [ and ] need AltGr or Option on many layouts, so only those two keys accept Alt.
-		// Windows reports AltGr as Ctrl+Alt, so Ctrl counts only without Alt.
-		if (event.key === '[' || event.key === ']') {
-			if (event.ctrlKey && !event.altKey && !event.getModifierState('AltGraph')) return;
-			if (!review || inDialog(target)) return;
-			event.preventDefault();
-			moveFile(event.key === ']' ? 1 : -1);
-			return;
-		}
-		if (event.ctrlKey || event.altKey) return;
+		if (event.defaultPrevented || takesText(event.target)) return;
+		const action = keyAction({
+			key: event.key,
+			ctrlKey: event.ctrlKey,
+			altKey: event.altKey,
+			metaKey: event.metaKey,
+			altGraph: event.getModifierState('AltGraph')
+		});
 		// An open dialog takes Esc for itself, and the page behind it stays as it is.
-		if (!review || inDialog(target)) return;
-		if (event.key === 'j' || event.key === 'k') {
-			event.preventDefault();
-			navigateQueue(event.key === 'j' ? 1 : -1);
-		} else if (event.key === 'u' && held) {
-			event.preventDefault();
-			if (!event.repeat) applyHeld();
-		} else if (event.key === 'b') {
-			event.preventDefault();
-			// A held key would flip focus mode on every repeat.
-			if (!event.repeat) void setFocused(!focused);
-		} else if (event.key === 'Escape' && focused) {
-			event.preventDefault();
-			if (!event.repeat) void setFocused(false);
+		if (!action || !review || inDialog(event.target)) return;
+		if (action === 'apply-revision' && !held) return;
+		if (action === 'leave-focus' && !focused) return;
+		event.preventDefault();
+		switch (action) {
+			case 'previous-file':
+			case 'next-file':
+				moveFile(action === 'next-file' ? 1 : -1);
+				break;
+			case 'previous-hunk':
+			case 'next-hunk':
+				diffPane?.jumpHunk(action === 'next-hunk' ? 1 : -1);
+				break;
+			case 'previous-finding':
+			case 'next-finding':
+				navigateQueue(action === 'next-finding' ? 1 : -1);
+				break;
+			case 'unified':
+			case 'split':
+				diffPane?.setLayout(action);
+				break;
+			// A held key would flip these on every repeat.
+			case 'wrap':
+				if (!event.repeat) diffPane?.toggleWrap();
+				break;
+			case 'apply-revision':
+				if (!event.repeat) applyHeld();
+				break;
+			case 'toggle-focus':
+				if (!event.repeat) void setFocused(!focused);
+				break;
+			case 'leave-focus':
+				if (!event.repeat) void setFocused(false);
+				break;
 		}
 	}
 
@@ -995,6 +1013,7 @@
 				<FileNavigator files={review.files} {activeFile} onSelect={chooseFile} />
 			{/if}
 			<DiffPane
+				bind:this={diffPane}
 				{file}
 				{fileError}
 				{fileLoading}
@@ -1027,7 +1046,7 @@
 		{/if}
 	</main>
 	{#if inFocus}
-		<KeyBar heldRevision={changes?.revision ?? null} />
+		<KeyBar heldRevision={changes?.revision ?? null} narrow={isNarrow} />
 	{:else if review && isNarrow}
 		<nav class="tab-bar" aria-label="Review sections">
 			<button class="tab" aria-haspopup="dialog" onclick={() => (mobilePane = 'files')}>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import DiffViewer from './DiffViewer.svelte';
 	import FindingEditor from './FindingEditor.svelte';
+	import { hunkTarget } from './keys';
 	import {
 		formatPath,
 		type FileViewState,
@@ -67,10 +68,43 @@
 		onEditStart?: () => void;
 	} = $props();
 
+	/** Space left above a hunk that a jump brings to the top of the pane, in pixels. */
+	const HUNK_MARGIN = 8;
+
 	let diffStyle = $state<'unified' | 'split'>('unified');
+	let wrapLines = $state(false);
 	let expandContext = $state(false);
+	let pane = $state<HTMLElement>();
+	let viewer = $state<DiffViewer>();
 	const shownStyle = $derived(narrow ? 'unified' : diffStyle);
 	const generatedCollapsed = $derived(file !== null && file.generated && openedGenerated !== file.path.raw);
+
+	/** Chooses the unified or split layout. A narrow screen always shows unified, so there it does nothing. */
+	export function setLayout(style: 'unified' | 'split') {
+		if (!narrow) diffStyle = style;
+	}
+
+	/** Turns line wrapping on or off. A narrow screen always wraps, so there it does nothing. */
+	export function toggleWrap() {
+		if (!narrow) wrapLines = !wrapLines;
+	}
+
+	/**
+	 * Scrolls the next or previous hunk of the shown file to the top of the
+	 * pane. The jumps stop at the first and last hunk.
+	 */
+	export function jumpHunk(direction: 1 | -1) {
+		if (!pane || !viewer) return;
+		const paneTop = pane.getBoundingClientRect().top;
+		const furthest = pane.scrollHeight - pane.clientHeight;
+		const starts = viewer
+			.hunkStarts()
+			.map((start) =>
+				Math.max(0, Math.min(furthest, start.getBoundingClientRect().top - paneTop + pane!.scrollTop - HUNK_MARGIN))
+			);
+		const target = hunkTarget(starts, pane.scrollTop, direction);
+		if (target !== null) pane.scrollTo({ top: target });
+	}
 
 	// Another file closes the opened generated diff, so returning to it starts collapsed.
 	$effect(() => {
@@ -78,7 +112,7 @@
 	});
 </script>
 
-<section id="diff-pane" class="diff-pane" aria-label="File diff" aria-busy={fileLoading} tabindex="-1">
+<section bind:this={pane} id="diff-pane" class="diff-pane" aria-label="File diff" aria-busy={fileLoading} tabindex="-1">
 	{#if notice}
 		<div class="notice" role="status">
 			<p>{notice}</p>
@@ -169,22 +203,31 @@
 			<div class="diff-controls" role="group" aria-label="Diff display">
 				{#if !narrow}
 					<div class="control-group" role="group" aria-label="Diff layout">
-						<button aria-pressed={diffStyle === 'unified'} onclick={() => (diffStyle = 'unified')}>Unified</button>
-						<button aria-pressed={diffStyle === 'split'} onclick={() => (diffStyle = 'split')}>Split</button>
+						<button aria-pressed={diffStyle === 'unified'} aria-keyshortcuts="1" onclick={() => (diffStyle = 'unified')}
+							>Unified</button>
+						<button aria-pressed={diffStyle === 'split'} aria-keyshortcuts="2" onclick={() => (diffStyle = 'split')}
+							>Split</button>
 					</div>
 				{/if}
-				<button onclick={() => (expandContext = !expandContext)}>
-					{expandContext ? 'Collapse context' : 'Expand context'}
-				</button>
+				<div class="control-group">
+					{#if !narrow}
+						<button aria-pressed={wrapLines} aria-keyshortcuts="w" onclick={() => (wrapLines = !wrapLines)}
+							>Wrap</button>
+					{/if}
+					<button onclick={() => (expandContext = !expandContext)}>
+						{expandContext ? 'Collapse context' : 'Expand context'}
+					</button>
+				</div>
 			</div>
 			<p class="diff-help">Show or collapse all available context around the captured changes.</p>
 			<DiffViewer
+				bind:this={viewer}
 				{file}
 				diffStyle={shownStyle}
 				{expandContext}
 				{theme}
 				showHeader={showHeading}
-				wrap={narrow}
+				wrap={narrow || wrapLines}
 				{onFindingClick} />
 		{/if}
 	{/if}

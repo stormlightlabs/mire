@@ -47,6 +47,29 @@
 
 	let host = $state<HTMLElement>();
 	let viewer: FileDiff<FindingSummary> | undefined;
+	/** Where each hunk's rows begin and how many there are, in both layouts, as last rendered. */
+	let hunkSpans: { unified: [number, number]; split: [number, number] }[] = [];
+
+	/**
+	 * Returns the element that starts each hunk on screen, in order: the
+	 * separator above the hunk where there is one, or else its first row.
+	 */
+	export function hunkStarts(): HTMLElement[] {
+		const root = host?.shadowRoot;
+		if (!root) return [];
+		const column = diffStyle === 'split' ? 1 : 0;
+		const rows = [...root.querySelectorAll<HTMLElement>('[data-line][data-line-index]')];
+		return hunkSpans.flatMap((span) => {
+			const [start, count] = column ? span.split : span.unified;
+			const row = rows.find((candidate) => {
+				const index = Number(candidate.dataset.lineIndex?.split(',')[column]);
+				return index >= start && index < start + count;
+			});
+			if (!row) return [];
+			const above = row.previousElementSibling;
+			return [above instanceof HTMLElement && above.hasAttribute('data-separator') ? above : row];
+		});
+	}
 
 	onMount(() => {
 		viewer = new FileDiff<FindingSummary>(viewerOptions());
@@ -148,9 +171,14 @@
 
 	function render(currentFile: FileDetail) {
 		if (!viewer || !host || currentFile.content.kind !== 'text') return;
+		const fileDiff = toPierreDiff(currentFile);
+		hunkSpans = fileDiff.hunks.map((hunk) => ({
+			unified: [hunk.unifiedLineStart, hunk.unifiedLineCount],
+			split: [hunk.splitLineStart, hunk.splitLineCount]
+		}));
 		viewer.render({
 			fileContainer: host,
-			fileDiff: toPierreDiff(currentFile),
+			fileDiff,
 			lineAnnotations: annotations(currentFile.findings)
 		});
 	}

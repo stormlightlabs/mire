@@ -1,20 +1,20 @@
 <script lang="ts">
-	/** The keys focus mode answers to, each with the action it takes. */
-	const KEYS: { keys: string[]; action: string }[] = [
-		{ keys: ['[', ']'], action: 'file' },
-		{ keys: ['j', 'k'], action: 'finding' },
-		{ keys: ['b', 'Esc'], action: 'leave focus' }
-	];
+	import { keyBarEntries } from './keys';
 
 	let {
-		heldRevision = null
+		heldRevision = null,
+		narrow = false
 	}: {
 		/** The revision waiting for the reader, which `u` applies, or `null` when none waits. */
 		heldRevision?: number | null;
+		/** Whether the screen is narrow, where the layout and wrap keys do nothing and are not listed. */
+		narrow?: boolean;
 	} = $props();
 
 	const keys = $derived(
-		heldRevision === null ? KEYS : [{ keys: ['u'], action: `apply revision ${heldRevision}` }, ...KEYS]
+		heldRevision === null
+			? keyBarEntries(narrow)
+			: [{ keys: ['u'], action: `apply revision ${heldRevision}` }, ...keyBarEntries(narrow)]
 	);
 </script>
 
@@ -62,5 +62,16 @@
 			600 0.72rem 'Google Sans Code Variable',
 			'Google Sans Code',
 			monospace;
+	}
+	/* At phone width the list takes two rows rather than running past the edge. */
+	@media (max-width: 32rem) {
+		.key-bar {
+			align-items: baseline;
+			gap: 0.75rem;
+		}
+		ul {
+			flex-wrap: wrap;
+			gap: 0.2rem 0.9rem;
+		}
 	}
 </style>

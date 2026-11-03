@@ -166,13 +166,20 @@
 	onMount(() => {
 		const narrowScreen = window.matchMedia('(max-width: 54rem)');
 		const updateNarrowScreen = () => {
-			// Widening removes the drawers and the tab bar. Focus inside them would
-			// fall to the body, so it moves to the review content instead.
-			const lost = mobilePane !== null || document.activeElement?.closest('.tab-bar') != null;
+			// Each layout removes controls the other shows: widening drops the
+			// drawers and the tab bar, narrowing drops the file tree, the queue and
+			// the topbar's Focus and Finish buttons. When the control that had focus
+			// goes, focus would fall to the body, so it moves to the review content.
+			const before = document.activeElement;
 			isNarrow = narrowScreen.matches;
-			if (isNarrow) return;
-			mobilePane = null;
-			if (lost) void tick().then(() => document.getElementById('review-content')?.focus());
+			if (!isNarrow) mobilePane = null;
+			if (!before || before === document.body) return;
+			void tick().then(() => {
+				const now = document.activeElement;
+				if (!before.isConnected || !now || now === document.body) {
+					document.getElementById('review-content')?.focus();
+				}
+			});
 		};
 		theme = loadTheme();
 		themeReady = true;
@@ -750,18 +757,12 @@
 			return;
 		}
 		if (event.ctrlKey || event.altKey) return;
-		if (event.key === 'j') {
-			event.preventDefault();
-			navigateQueue(1);
-			return;
-		} else if (event.key === 'k') {
-			event.preventDefault();
-			navigateQueue(-1);
-			return;
-		}
 		// An open dialog takes Esc for itself, and the page behind it stays as it is.
 		if (!review || inDialog(target)) return;
-		if (event.key === 'u' && held) {
+		if (event.key === 'j' || event.key === 'k') {
+			event.preventDefault();
+			navigateQueue(event.key === 'j' ? 1 : -1);
+		} else if (event.key === 'u' && held) {
 			event.preventDefault();
 			if (!event.repeat) applyHeld();
 		} else if (event.key === 'b') {

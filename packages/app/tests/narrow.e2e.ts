@@ -18,7 +18,9 @@ async function open(page: Page, url: string) {
  * Checks that no scroll container is wider than its box and that no visible
  * element reaches past either edge of the screen. The app shell and the
  * workspace clip what overflows them, so the document itself never scrolls;
- * the check measures their content instead.
+ * the check measures their content instead. The diff viewer draws its rows in
+ * a shadow root and clips them, so neither query sees a row that runs wide;
+ * each row is measured against the viewer's box instead.
  */
 async function expectNoSidewaysOverflow(page: Page) {
 	const result = await page.evaluate(() => {
@@ -33,10 +35,21 @@ async function expectNoSidewaysOverflow(page: Page) {
 				return box.width > 1 && (box.right > width + 0.5 || box.left < -0.5);
 			})
 			.map((element) => `${element.tagName.toLowerCase()}.${element.className}`);
-		return { scrollers, outside };
+		const rows = [...document.querySelectorAll<HTMLElement>('.diff-host')].flatMap((host) => {
+			const box = host.getBoundingClientRect();
+			return [...(host.shadowRoot?.querySelectorAll<HTMLElement>('[data-line]') ?? [])]
+				.filter((row) => row.checkVisibility())
+				.filter((row) => {
+					const edge = row.getBoundingClientRect();
+					return edge.right > box.right + 0.5 || edge.left < box.left - 0.5;
+				})
+				.map((row) => `line ${row.dataset.line}: ${row.textContent?.slice(0, 40)}`);
+		});
+		return { scrollers, outside, rows };
 	});
 	expect(result.scrollers).toEqual([]);
 	expect(result.outside).toEqual([]);
+	expect(result.rows).toEqual([]);
 }
 
 /** The bar at the bottom of a narrow screen. */
@@ -155,6 +168,36 @@ test('a wider window closes an open drawer and keeps focus on the page', async (
 	await expect(page.getByRole('region', { name: 'File diff' }).getByRole('heading', { level: 1 })).toHaveText(
 		'two.txt'
 	);
+});
+
+test('a narrower window moves focus from a removed control to the page', async ({ page, mire }) => {
+	await page.setViewportSize({ width: 1200, height: 800 });
+	await open(page, mire.url);
+	const status = page.getByRole('complementary', { name: 'Review queue' }).getByRole('combobox', { name: 'Status' });
+	await status.focus();
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(tabs(page)).toBeVisible();
+	await expect(page.getByRole('main')).toBeFocused();
+
+	await page.setViewportSize({ width: 1200, height: 800 });
+	await page.getByRole('banner').getByRole('button', { name: 'Focus' }).focus();
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(tabs(page)).toBeVisible();
+	await expect(page.getByRole('main')).toBeFocused();
+});
+
+test('j and k leave the page behind an open drawer alone', async ({ page, mire }) => {
+	await open(page, mire.url);
+	const diff = page.getByRole('region', { name: 'File diff' });
+	await tabs(page)
+		.getByRole('button', { name: /Findings/ })
+		.click();
+	const queue = page.getByRole('dialog', { name: 'Review queue' });
+	await queue.getByRole('button', { name: /second line should stay lowercase/ }).focus();
+	await page.keyboard.press('j');
+	await page.keyboard.press('k');
+	await expect(queue).toBeVisible();
+	await expect(diff.getByRole('article')).toHaveCount(0);
 });
 
 test('fits the stopped watch bar and a conflict dialog', async ({ page, mire }) => {

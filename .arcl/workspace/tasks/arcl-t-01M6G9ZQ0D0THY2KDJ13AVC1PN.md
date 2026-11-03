@@ -2,9 +2,10 @@
 id = "arcl-t-01M6G9ZQ0D0THY2KDJ13AVC1PN"
 plan = "arcl-pl-01M5YRTHS95J67NZ6THREDG33F"
 title = "Terminal display keys in the web review"
-status = "in_progress"
+status = "completed"
 priority = "normal"
 position = 0
+evidence = "Done in #30 at 0086566: web review takes { } hunk, p P finding, 1 2 layout and w wrap keys, listed in the key bar; c waits for note creation in the web"
 +++
 
 The terminal's focus board lists `{ }` hunk, `p P` note, `c` note on this line, `1 2` unified or split, and `w` wrap. The web review answers to `[ ]`, `j k`, `b` and `Esc`, and its focus-mode key bar lists only those. Add the display keys to the web review and its key bar. Leave out `c` until the web can create findings; `mire serve` has no endpoint for a new finding today.

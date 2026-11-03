@@ -313,25 +313,31 @@ mod tests {
                 ("syntax-function", theme.syntax.function),
                 ("syntax-type", theme.syntax.r#type),
             ] {
-                let passes = rows.iter().all(|row| contrast_ratio(role, *row) >= AA_TEXT);
-                if passes {
-                    assert_eq!(
-                        color(name),
-                        role,
-                        "{}: --{name} leaves the terminal role",
-                        variant.as_str()
-                    );
-                } else {
-                    // The nudge stays small: a quarter of the way to black or white already passes.
-                    // Light palettes' changed words take most of it, as they cannot lighten.
-                    let target = if variant.is_light() { Color::Rgb(0, 0, 0) } else { Color::Rgb(255, 255, 255) };
-                    let limit = mix(role, target, 25);
-                    assert!(
-                        rows.iter().all(|row| contrast_ratio(limit, *row) >= AA_TEXT),
-                        "{}: --{name} needs more than a 25% step from the terminal role",
-                        variant.as_str()
-                    );
-                }
+                // The first 1% step toward black or white that reaches AA on every row,
+                // found here without `readable`. Zero means the role passes as it is.
+                let target = if variant.is_light() { Color::Rgb(0, 0, 0) } else { Color::Rgb(255, 255, 255) };
+                let mut step = 0;
+                let expected = loop {
+                    let candidate = mix(role, target, step);
+                    if rows.iter().all(|row| contrast_ratio(candidate, *row) >= AA_TEXT) {
+                        break candidate;
+                    }
+                    step += 1;
+                    assert!(step <= 100, "{}: --{name} never reaches AA", variant.as_str());
+                };
+                assert_eq!(
+                    color(name),
+                    expected,
+                    "{}: --{name} is not the first {step}% step from the terminal role",
+                    variant.as_str()
+                );
+                // The nudge stays small. Light palettes' changed words take most of it,
+                // as they cannot lighten.
+                assert!(
+                    step <= 25,
+                    "{}: --{name} needs a {step}% step from the terminal role",
+                    variant.as_str()
+                );
             }
         }
     }

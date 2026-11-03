@@ -15,7 +15,8 @@ export const SYNTAX_THEMES = { light: 'mire-light', dark: 'mire-dark' } as const
  * TextMate scopes for each syntax role, matching the terminal's highlight
  * names in `crates/ui/src/theme.rs`: comments, strings and markup, constants
  * and numbers, keywords, types, and functions. Keywords, types and functions
- * are bold, as in the terminal. Operators, punctuation and names take `--ink`.
+ * are bold, as in the terminal. Word operators, such as Python's `and` and
+ * `in`, are keywords too. Other operators, punctuation and names take `--ink`.
  */
 const TOKEN_COLORS: ThemeRegistration['tokenColors'] = [
 	{
@@ -31,7 +32,14 @@ const TOKEN_COLORS: ThemeRegistration['tokenColors'] = [
 		settings: { foreground: 'var(--syntax-constant)' }
 	},
 	{
-		scope: ['keyword', 'storage', 'keyword.operator.new', 'keyword.operator.expression'],
+		scope: [
+			'keyword',
+			'storage',
+			'keyword.operator.new',
+			'keyword.operator.expression',
+			'keyword.operator.logical',
+			'keyword.operator.word'
+		],
 		settings: { foreground: 'var(--syntax-keyword)', fontStyle: 'bold' }
 	},
 	{

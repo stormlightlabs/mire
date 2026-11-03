@@ -35,9 +35,28 @@ async function expectCommentColor(page: import('@playwright/test').Page, mire: M
 }
 
 /**
- * Changes words within line 2 of `one.txt`, opens it, and checks the
- * background of the added and removed changed words, which `themes.css` sets
- * as `--diff-added-word` and `--diff-removed-word`.
+ * Resolves a CSS color on the page to its sRGB channels. The library mixes row
+ * colors in Lab, so a row's computed color and the variable it should equal
+ * only compare once both are pixels.
+ */
+function srgb(page: import('@playwright/test').Page, color: string) {
+	return page.evaluate((color) => {
+		const probe = document.body.appendChild(document.createElement('span'));
+		probe.style.backgroundColor = color;
+		const resolved = getComputedStyle(probe).backgroundColor;
+		probe.remove();
+		const canvas = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;
+		canvas.fillStyle = resolved;
+		canvas.fillRect(0, 0, 1, 1);
+		return [...canvas.getImageData(0, 0, 1, 1).data.slice(0, 3)];
+	}, color);
+}
+
+/**
+ * Changes words within line 2 of `one.txt`, opens it, and checks that the
+ * added and removed rows take `--diff-added` and `--diff-removed` from
+ * `themes.css` as they are, and that their changed words take
+ * `--diff-added-word` and `--diff-removed-word`.
  */
 async function expectChangedWordBackgrounds(
 	page: import('@playwright/test').Page,
@@ -48,6 +67,17 @@ async function expectChangedWordBackgrounds(
 	await page.getByRole('button', { name: /Apply revision/ }).click();
 	await page.getByRole('treeitem', { name: /one\.txt/ }).click();
 	const diff = page.getByRole('region', { name: 'File diff' });
+	// The rows take --diff-added and --diff-removed unblended.
+	for (const [type, variable] of [
+		['change-addition', '--diff-added'],
+		['change-deletion', '--diff-removed']
+	]) {
+		const row = diff.locator(`[data-line][data-line-type='${type}']`).first();
+		const expected = await srgb(page, `var(${variable})`);
+		await expect
+			.poll(async () => srgb(page, await row.evaluate((element) => getComputedStyle(element).backgroundColor)))
+			.toEqual(expected);
+	}
 	await expect(diff.locator("[data-line-type='change-addition'] [data-diff-span]").first()).toHaveCSS(
 		'background-color',
 		expected.added

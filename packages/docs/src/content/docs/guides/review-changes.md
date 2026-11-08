@@ -161,7 +161,9 @@ line count, its place in the file tree's order, such as "3 of 6", and its
 Viewed box. An added or deleted file
 reports how many lines it has; any other file reports the lines added and
 removed. Press `[` and `]`, or use the arrows beside the path, to open the
-previous or next file. A generated file keeps its Show diff button.
+previous or next file. Press `{` and `}` to scroll to the previous or next
+hunk. A generated file keeps its Show diff button. A bar at the bottom lists
+the keys focus mode answers to.
 
 In both views, an added or deleted file shows as plain code with one bar in
 the gutter, without tinted rows.

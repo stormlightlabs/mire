@@ -150,13 +150,21 @@ while a text field or a menu has focus, and none of them act on the page behind
 an open dialog, such as a drawer on a narrow screen. Pick a finding in the
 Findings drawer to open it.
 
-| Key       | Action                                                |
-| --------- | ----------------------------------------------------- |
-| `j` / `k` | Open the next or previous finding in the review queue |
-| `]` / `[` | Open the next or previous file in the file tree order |
-| `b`       | Enter or leave focus mode                             |
-| `Esc`     | Leave focus mode                                      |
-| `u`       | Apply a new revision that is waiting                  |
+| Key                  | Action                                                |
+| -------------------- | ----------------------------------------------------- |
+| `j` / `k`, `p` / `P` | Open the next or previous finding in the review queue |
+| `]` / `[`            | Open the next or previous file in the file tree order |
+| `}` / `{`            | Scroll to the next or previous hunk of the open file  |
+| `1` / `2`            | Show the diff unified or split                        |
+| `w`                  | Turn line wrapping on or off                          |
+| `b`                  | Enter or leave focus mode                             |
+| `Esc`                | Leave focus mode                                      |
+| `u`                  | Apply a new revision that is waiting                  |
+
+The hunk keys stop at the first and last hunk of the file. On a narrow screen
+the diff is always unified and always wraps, so `1`, `2` and `w` do nothing
+there. Mire has no browser key for a new finding, since `mire serve` cannot
+create one.
 
 See [Read one file in the browser](/docs/guides/review-changes/#read-one-file-in-the-browser)
 for focus mode, and

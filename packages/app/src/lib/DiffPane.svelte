@@ -31,6 +31,7 @@
 		onDismissNotice = () => {},
 		onToggleViewed,
 		onFindingClick,
+		onDiffRender = () => {},
 		onEditFinding,
 		onDecideFinding,
 		onDraftTaken = () => {},
@@ -60,6 +61,8 @@
 		onDismissNotice?: () => void;
 		onToggleViewed: () => void;
 		onFindingClick: (finding: FindingSummary) => void;
+		/** Called after each render of the diff, once its finding annotations are on the page. */
+		onDiffRender?: () => void;
 		onEditFinding: (draft: FindingDraft) => Promise<string | null>;
 		onDecideFinding: (decision: 'resolve' | 'reopen' | 'dismiss' | 'accept-risk') => Promise<string | null>;
 		/** Called once the reader changes the editor's text after it was filled from `keptDraft`. */
@@ -228,7 +231,8 @@
 				{theme}
 				showHeader={showHeading}
 				wrap={narrow || wrapLines}
-				{onFindingClick} />
+				{onFindingClick}
+				onRender={onDiffRender} />
 		{/if}
 	{/if}
 </section>

@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -55,7 +55,13 @@ impl Fixture {
             .stderr(Stdio::piped())
             .spawn()
             .expect("mire runs");
-        child.stdin.take().unwrap().write_all(stdin).unwrap();
+        // Mire can exit before it reads its input, as when it rejects the
+        // arguments. The write then fails with a broken pipe, and the exit
+        // status and message are what the test checks.
+        match child.stdin.take().unwrap().write_all(stdin) {
+            Err(error) if error.kind() == ErrorKind::BrokenPipe => {}
+            result => result.unwrap(),
+        }
         child.wait_with_output().unwrap()
     }
 

@@ -157,6 +157,22 @@ test('p and P move between findings as j and k do', async ({ page, mire }) => {
 	await expect(finding).toContainText('The second line should stay lowercase.');
 });
 
+test('j pressed again before a finding loads moves on from it', async ({ page, mire }) => {
+	await open(page, mire.url);
+	const diff = page.getByRole('region', { name: 'File diff' });
+	// Slow finding loads, so the second press comes while the first finding is still loading.
+	await page.route('**/api/v1/findings/*', async (route) => {
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		await route.continue();
+	});
+
+	await page.keyboard.press('j');
+	await page.keyboard.press('j');
+	await expect(diff.getByRole('article')).toContainText('Is the capital Y intended?');
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('two.txt');
+	await expect(diff.getByRole('button', { name: /Open low question, open: Is the capital Y/ })).toBeInViewport();
+});
+
 test('the focus key bar lists the display keys', async ({ page, mire }) => {
 	await open(page, mire.url);
 	await page.keyboard.press('b');

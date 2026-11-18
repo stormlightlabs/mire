@@ -173,6 +173,32 @@ test('j pressed again before a finding loads moves on from it', async ({ page, m
 	await expect(diff.getByRole('button', { name: /Open low question, open: Is the capital Y/ })).toBeInViewport();
 });
 
+test('a finding that loads late does not replace a newer one', async ({ page, mire }) => {
+	await open(page, mire.url);
+	const diff = page.getByRole('region', { name: 'File diff' });
+	// Hold only the first finding request, so its response lands after the second one's.
+	let first: string | null = null;
+	await page.route('**/api/v1/findings/*', async (route) => {
+		if (first === null) {
+			first = route.request().url();
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+		}
+		await route.continue();
+	});
+
+	const late = page.waitForResponse((response) => response.url() === first);
+
+	await page.keyboard.press('j');
+	await page.keyboard.press('j');
+	await expect(diff.getByRole('article')).toContainText('Is the capital Y intended?');
+	await late;
+	// Let the page handle the late response before checking it left the newer finding open.
+	await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
+	await expect(diff.getByRole('article')).toContainText('Is the capital Y intended?');
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('two.txt');
+	await expect(diff.getByRole('button', { name: /Open low question, open: Is the capital Y/ })).toBeInViewport();
+});
+
 test('the focus key bar lists the display keys', async ({ page, mire }) => {
 	await open(page, mire.url);
 	await page.keyboard.press('b');

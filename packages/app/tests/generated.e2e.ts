@@ -64,7 +64,7 @@ test('collapses generated files until the reader opens them', async ({ page, mir
 	await files.getByRole('treeitem', { name: /one\.txt/ }).click();
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
 	await page.keyboard.press('k');
-	// One.txt is already open, so wait for the finding K opened before pressing J.
+	// Wait for the finding K opened in one.txt before pressing J.
 	await expect(diff.getByRole('article')).toContainText('The second line should stay lowercase.');
 	await expect(diff.getByRole('button', { name: /Open medium defect, open: The second line/ })).toBeInViewport();
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');

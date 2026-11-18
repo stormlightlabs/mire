@@ -42,7 +42,10 @@ Changes go through [fabrial](https://github.com/stormlightlabs/fabrial): push a
 standard review and an adversarial review before the owner merges it. Pull
 request titles are conventional commits, because the squash commit uses the
 title and [git-cliff](https://git-cliff.org) builds the changelog from those
-subjects. `just changelog` previews the entries since the last tag.
+subjects. `just check-changelog` prints the entries since the last tag, and
+fails when git-cliff warns, as it does for a subject it cannot parse. The
+release script fails the same way, so no commit drops out of a release
+unnoticed.
 
 ## Snapshot tests
 
@@ -234,6 +237,11 @@ the lines again in that pull request.
 version differs from the one in `Cargo.toml`. After changing
 `dist-workspace.toml` or `.github/build-setup.yml`, run `dist generate` to
 rewrite `.github/workflows/release.yml`.
+
+Before the first release, `main` held internal docs commits and terse
+subjects. `cliff.toml` skips the internal ones by SHA and rewrites each terse
+one by its exact subject. Later commits take their entry from the PR title, so
+neither list grows.
 
 ## Troubleshooting
 

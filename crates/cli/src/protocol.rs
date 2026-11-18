@@ -877,7 +877,7 @@ fn markdown_body(output: &mut String, body: &str) {
         .unwrap_or(0);
     let fence = "`".repeat(longest_run.max(2) + 1);
     output.push_str(&format!("\n{fence}markdown\n{body}"));
-    if !body.ends_with('\n') {
+    if !body.is_empty() && !body.ends_with('\n') {
         output.push('\n');
     }
     output.push_str(&fence);

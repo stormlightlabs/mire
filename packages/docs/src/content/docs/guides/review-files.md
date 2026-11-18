@@ -45,7 +45,8 @@ anchors, and re-anchor outcomes. The Markdown export renders those details for
 reading, with one section per finding that ends in the finding's body. The body
 sits in a fenced `markdown` block, so its own headings and fences stay inside
 it. Control characters in stored text appear as `\u{..}` escapes, such as
-`\u{1b}` for ESC; the body keeps its newlines and tabs. `mire review status review.json` prints a compact progress report; add
+`\u{1b}` for ESC; the body keeps its newlines and tabs.
+`mire review status review.json` prints a compact progress report; add
 `--format json` for structured output.
 
 ## Export the captured patch

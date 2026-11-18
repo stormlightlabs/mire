@@ -6,14 +6,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use mire::{read_review, write_review_atomic};
 use mire_core::{
-    Anchor, AnchorSide, Author, BytePath, ChangesetSource, LineNumber, LineRange, NoteId, NoteSeverity, NoteStatus,
-    PatchLimits, Provenance, Review, ReviewNote, ReviewRevision, parse_patch,
+    Anchor, AnchorSide, Author, ChangesetSource, LineNumber, LineRange, NoteId, NoteSeverity, NoteStatus, PatchLimits,
+    Provenance, Review, ReviewNote, ReviewRevision, parse_patch,
 };
 use serde_json::{Value, json};
 
 static TEST_ID: AtomicU64 = AtomicU64::new(0);
 
 const PATCH: &[u8] = b"--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,2 +1,2 @@\n-old value\n+new value\n context\n";
+const PATCH_WITH_HOSTILE_PATH: &[u8] = b"--- \"a/src/\\033[2Jx\\r\\n## injected.rs\"\n+++ \"b/src/\\033[2Jx\\r\\n## injected.rs\"\n@@ -1,2 +1,2 @@\n-old value\n+new value\n context\n";
 const PATCH_WITH_EXTRA_FILE: &[u8] = b"--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,2 +1,2 @@\n-old value\n+new value\n context\n--- /dev/null\n+++ b/src/extra.rs\n@@ -0,0 +1 @@\n+extra\n";
 
 #[test]
@@ -280,6 +281,66 @@ fn markdown_export_escapes_control_characters_in_stored_text() {
 }
 
 #[test]
+fn markdown_export_escapes_control_characters_in_ids_provenance_and_paths() {
+    let fixture = Fixture::with_patch(PATCH_WITH_HOSTILE_PATH);
+    let producer = Provenance::Agent { producer: "bot\u{1b}[31m\r\n## producer".to_owned() };
+    let hostile = note(&fixture.review, "id\u{1b}[2J\r\n## id", producer);
+    fs::write(&fixture.batch_path, fixture.batch(&[hostile])).unwrap();
+    assert_success(&mire(&[
+        "notes",
+        "import",
+        fixture.review_str(),
+        fixture.batch_str(),
+        "--revision",
+        "1",
+    ]));
+
+    let markdown = mire(&["notes", "export", fixture.review_str(), "--format", "markdown"]);
+    assert_success(&markdown);
+    let markdown = String::from_utf8(markdown.stdout).expect("Markdown is UTF-8");
+    assert!(!markdown.chars().any(|c| c.is_control() && c != '\n'), "{markdown:?}");
+    assert!(
+        markdown.contains("\n## Medium: id\\u{1b}[2J\\u{d}\\u{a}## id\n"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("- Provenance: agent (bot\\u{1b}[31m\\u{d}\\u{a}## producer)\n"),
+        "{markdown}"
+    );
+    let path = "`src/\\u{1b}[2Jx\\u{d}\\u{a}## injected.rs` (new side, lines 1–1)";
+    assert!(
+        markdown.contains(&format!("- Original location: {path}\n")),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains(&format!("- Current location: {path}\n")),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn markdown_export_writes_an_empty_fence_for_an_empty_body() {
+    let fixture = Fixture::new();
+    let mut empty = serde_json::to_value(note(&fixture.review, "empty", Provenance::Human)).unwrap();
+    empty["body"] = json!("");
+    let batch = json!({ "schema_version": { "major": 1, "minor": 0 }, "notes": [empty] });
+    fs::write(&fixture.batch_path, serde_json::to_vec(&batch).unwrap()).unwrap();
+    assert_success(&mire(&[
+        "notes",
+        "import",
+        fixture.review_str(),
+        fixture.batch_str(),
+        "--revision",
+        "1",
+    ]));
+
+    let markdown = mire(&["notes", "export", fixture.review_str(), "--format", "markdown"]);
+    assert_success(&markdown);
+    let markdown = String::from_utf8(markdown.stdout).expect("Markdown is UTF-8");
+    assert!(markdown.ends_with("\n```markdown\n```\n"), "{markdown}");
+}
+
+#[test]
 fn rejected_batches_report_every_invalid_anchor_without_rewriting_the_review() {
     let fixture = Fixture::new();
     let mut first = serde_json::to_value(note(&fixture.review, "bad-a", Provenance::Human)).unwrap();
@@ -351,12 +412,16 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_patch(PATCH)
+    }
+
+    fn with_patch(patch: &[u8]) -> Self {
         let id = TEST_ID.fetch_add(1, Ordering::Relaxed);
         let directory = std::env::temp_dir().join(format!("mire-review-protocol-{}-{id}", std::process::id()));
         fs::create_dir(&directory).expect("fixture directory can be created");
         let review_path = directory.join("review.json");
         let batch_path = directory.join("batch.json");
-        let changeset = parse_patch(PATCH, ChangesetSource::Patch { label: None }, PatchLimits::default())
+        let changeset = parse_patch(patch, ChangesetSource::Patch { label: None }, PatchLimits::default())
             .expect("fixture patch parses");
         let review = Review::new(ReviewRevision::new(1).unwrap(), changeset, Vec::new(), Vec::new()).unwrap();
         write_review_atomic(&review_path, &review).expect("fixture review can be written");
@@ -395,7 +460,11 @@ fn note(review: &Review, id: &str, provenance: Provenance) -> ReviewNote {
     let line = LineNumber::new(1).unwrap();
     let anchor = Anchor::new(
         changeset,
-        BytePath::new(b"src/lib.rs".to_vec()).unwrap(),
+        changeset.files()[0]
+            .new_side()
+            .expect("fixture file has a new side")
+            .path
+            .clone(),
         AnchorSide::New,
         LineRange::new(line, line).unwrap(),
         hunk.fingerprint(),

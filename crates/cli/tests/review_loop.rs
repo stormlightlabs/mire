@@ -214,7 +214,7 @@ fn complete_review_loop_preserves_history_and_reanchor_results_in_exports() {
     assert!(markdown.contains("- Re-anchor: `exact`"));
     assert!(markdown.contains("- Re-anchor: `stale`"));
     assert!(markdown.contains("- Events:"));
-    assert!(markdown.contains("reviewer changed the status from `open` to `resolved`"));
+    assert!(markdown.contains("`reviewer` changed the status from `open` to `resolved`"));
 }
 
 fn request(file: &str, body: &str) -> Value {

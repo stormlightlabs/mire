@@ -15,6 +15,7 @@ static TEST_ID: AtomicU64 = AtomicU64::new(0);
 
 const PATCH: &[u8] = b"--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,2 +1,2 @@\n-old value\n+new value\n context\n";
 const PATCH_WITH_HOSTILE_PATH: &[u8] = b"--- \"a/src/\\033[2Jx\\r\\n## injected.rs\"\n+++ \"b/src/\\033[2Jx\\r\\n## injected.rs\"\n@@ -1,2 +1,2 @@\n-old value\n+new value\n context\n";
+const PATCH_WITH_BACKTICK_PATH: &[u8] = b"--- a/src/x`<img src=x onerror=alert(1)>`.rs\n+++ b/src/x`<img src=x onerror=alert(1)>`.rs\n@@ -1,2 +1,2 @@\n-old value\n+new value\n context\n";
 const PATCH_WITH_EXTRA_FILE: &[u8] = b"--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1,2 +1,2 @@\n-old value\n+new value\n context\n--- /dev/null\n+++ b/src/extra.rs\n@@ -0,0 +1 @@\n+extra\n";
 
 #[test]
@@ -204,9 +205,9 @@ fn mixed_provenance_round_trips_through_json_and_markdown() {
     assert_success(&markdown);
     let markdown = String::from_utf8(markdown.stdout).expect("Markdown is UTF-8");
     assert!(markdown.contains("# Mire review notes"));
-    assert!(markdown.contains("agent (codex)"));
-    assert!(markdown.contains("analyzer (clippy)"));
-    assert!(markdown.contains("external-json interchange (scanner)"));
+    assert!(markdown.contains("- Provenance: `agent (codex)`"));
+    assert!(markdown.contains("`analyzer (clippy)`"));
+    assert!(markdown.contains("`external-json interchange (scanner)`"));
     assert!(markdown.contains("`src/lib.rs` (new side, lines 1–1)"));
 }
 
@@ -232,7 +233,7 @@ fn markdown_export_fences_each_note_body_in_its_section() {
     let markdown = String::from_utf8(markdown.stdout).expect("Markdown is UTF-8");
     let first_section = markdown
         .split("\n## Medium: ")
-        .find(|section| section.starts_with("first\n"))
+        .find(|section| section.starts_with("`first`\n"))
         .unwrap_or_else(|| panic!("the first note has no section: {markdown}"));
     assert!(
         first_section
@@ -241,7 +242,7 @@ fn markdown_export_fences_each_note_body_in_its_section() {
     );
     let second_section = markdown
         .split("\n## Medium: ")
-        .find(|section| section.starts_with("second\n"))
+        .find(|section| section.starts_with("`second`\n"))
         .unwrap_or_else(|| panic!("the second note has no section: {markdown}"));
     assert!(
         second_section.ends_with("\n```markdown\nFinding from second.\n```\n"),
@@ -275,7 +276,7 @@ fn markdown_export_escapes_control_characters_in_stored_text() {
         "{markdown}"
     );
     assert!(
-        markdown.contains("- Author: Eve\\u{1b}[31m\\u{1b}]8;;https://x\\u{7}\\u{d}Mallory\\u{a}## injected\n"),
+        markdown.contains("- Author: `Eve\\u{1b}[31m\\u{1b}]8;;https://x\\u{7}\\u{d}Mallory\\u{a}## injected`\n"),
         "{markdown}"
     );
 }
@@ -300,11 +301,11 @@ fn markdown_export_escapes_control_characters_in_ids_provenance_and_paths() {
     let markdown = String::from_utf8(markdown.stdout).expect("Markdown is UTF-8");
     assert!(!markdown.chars().any(|c| c.is_control() && c != '\n'), "{markdown:?}");
     assert!(
-        markdown.contains("\n## Medium: id\\u{1b}[2J\\u{d}\\u{a}## id\n"),
+        markdown.contains("\n## Medium: `id\\u{1b}[2J\\u{d}\\u{a}## id`\n"),
         "{markdown}"
     );
     assert!(
-        markdown.contains("- Provenance: agent (bot\\u{1b}[31m\\u{d}\\u{a}## producer)\n"),
+        markdown.contains("- Provenance: `agent (bot\\u{1b}[31m\\u{d}\\u{a}## producer)`\n"),
         "{markdown}"
     );
     let path = "`src/\\u{1b}[2Jx\\u{d}\\u{a}## injected.rs` (new side, lines 1–1)";
@@ -314,6 +315,57 @@ fn markdown_export_escapes_control_characters_in_ids_provenance_and_paths() {
     );
     assert!(
         markdown.contains(&format!("- Current location: {path}\n")),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn markdown_export_renders_markup_in_inline_fields_as_literal_code() {
+    let fixture = Fixture::with_patch(PATCH_WITH_BACKTICK_PATH);
+    let producer = Provenance::Agent { producer: "</details><script>alert(4)</script>".to_owned() };
+    let mut hostile = serde_json::to_value(note(&fixture.review, "`[x](javascript:alert(5))", producer)).unwrap();
+    hostile["author"]["display_name"] = json!("<img src=x onerror=alert(2)> [click](javascript:alert(3)) ``");
+    hostile["body"] = json!("fake\u{202e}txt.exe\u{200b} \u{2028}\\u{1b}[2J literal \u{1b}[2J escaped");
+    let batch = json!({ "schema_version": { "major": 1, "minor": 0 }, "notes": [hostile] });
+    fs::write(&fixture.batch_path, serde_json::to_vec(&batch).unwrap()).unwrap();
+    assert_success(&mire(&[
+        "notes",
+        "import",
+        fixture.review_str(),
+        fixture.batch_str(),
+        "--revision",
+        "1",
+    ]));
+
+    let markdown = mire(&["notes", "export", fixture.review_str(), "--format", "markdown"]);
+    assert_success(&markdown);
+    let markdown = String::from_utf8(markdown.stdout).expect("Markdown is UTF-8");
+    assert!(
+        markdown.contains("\n## Medium: `` `[x](javascript:alert(5)) ``\n"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("- Author: ``` <img src=x onerror=alert(2)> [click](javascript:alert(3)) `` ```\n"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("- Provenance: `agent (</details><script>alert(4)</script>)`\n"),
+        "{markdown}"
+    );
+    let path = "``src/x`<img src=x onerror=alert(1)>`.rs`` (new side, lines 1–1)";
+    assert!(
+        markdown.contains(&format!("- Original location: {path}\n")),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains(&format!("- Current location: {path}\n")),
+        "{markdown}"
+    );
+    for hidden in ['\u{202e}', '\u{200b}', '\u{2028}'] {
+        assert!(!markdown.contains(hidden), "{hidden:?} reached {markdown:?}");
+    }
+    assert!(
+        markdown.contains("fake\\u{202e}txt.exe\\u{200b} \\u{2028}\\\\u{1b}[2J literal \\u{1b}[2J escaped\n"),
         "{markdown}"
     );
 }

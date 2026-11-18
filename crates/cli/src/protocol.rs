@@ -778,8 +778,10 @@ fn rejection_json(failures: Vec<serde_json::Value>) -> Result<Vec<u8>> {
 ///
 /// Each note gets a section with its metadata, its events and its body. The
 /// body sits in a fenced block longer than any backtick run it holds, so its
-/// own headings and fences cannot end the section. Control characters in
-/// stored text are written as visible `\u{..}` escapes; the body keeps its
+/// own headings and fences cannot end the section. Ids, authors, provenance and
+/// paths sit in inline code spans sized the same way, so Markdown and HTML in
+/// them render as literal text. Control and invisible formatting characters
+/// in stored text are written as visible `\u{..}` escapes; the body keeps its
 /// newlines and tabs, and treats `\r\n` as a newline.
 pub fn notes_markdown(review: &Review) -> Vec<u8> {
     let mut output = format!(
@@ -796,11 +798,11 @@ pub fn notes_markdown(review: &Review) -> Vec<u8> {
         output.push_str(&format!(
             "\n## {}: {}\n\n- Kind: `{}`\n- Status: `{}`\n- Author: {}\n- Provenance: {}\n- Re-anchor: `{}`\n- Original location: {}\n- Current location: {}\n{}",
             note.severity(),
-            escape_line_controls(note.id().as_str()),
+            code_span(note.id().as_str()),
             note.annotation_kind(),
             note.status(),
             author_markdown(note.author()),
-            escape_line_controls(&note.provenance().to_string()),
+            code_span(&note.provenance().to_string()),
             reanchor_label(note),
             anchor_location(note.anchor()),
             anchor_location(anchor),
@@ -885,7 +887,7 @@ fn markdown_body(output: &mut String, body: &str) {
 }
 
 fn author_markdown(author: &Author) -> String {
-    escape_line_controls(author.display_name().unwrap_or(author.id())).into_owned()
+    code_span(author.display_name().unwrap_or(author.id()))
 }
 
 fn event_description(event: &NoteEventKind) -> String {
@@ -907,12 +909,34 @@ fn evidence_markdown(evidence: ReanchorEvidence) -> String {
 
 fn anchor_location(anchor: &mire_core::Anchor) -> String {
     format!(
-        "`{}` ({}, lines {}–{})",
-        escape_line_controls(&String::from_utf8_lossy(anchor.path().as_bytes())),
+        "{} ({}, lines {}–{})",
+        code_span(&String::from_utf8_lossy(anchor.path().as_bytes())),
         anchor.side(),
         anchor.range().start().get(),
         anchor.range().end().get()
     )
+}
+
+/// Writes stored text as one inline Markdown code span, so Markdown and HTML in
+/// it render as literal text.
+///
+/// Controls and line breaks become `\u{..}` escapes first. The delimiter is
+/// one backtick longer than the longest backtick run in the text. A space pads
+/// each side where the text starts or ends with a backtick, which CommonMark
+/// would read as part of the delimiter, or starts and ends with a space, which
+/// CommonMark would strip. Empty text becomes a span holding one space.
+fn code_span(text: &str) -> String {
+    let text = escape_line_controls(text);
+    let longest_run = text
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    let fence = "`".repeat(longest_run + 1);
+    let all_spaces = text.chars().all(|character| character == ' ');
+    let stripped = text.starts_with(' ') && text.ends_with(' ') && !all_spaces;
+    let padding = if text.is_empty() || text.starts_with('`') || text.ends_with('`') || stripped { " " } else { "" };
+    format!("{fence}{padding}{text}{padding}{fence}")
 }
 
 fn bounded_json(value: &impl Serialize, limit: usize) -> Result<Vec<u8>> {

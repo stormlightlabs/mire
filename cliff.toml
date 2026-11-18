@@ -26,9 +26,8 @@ split_commits = false
 # terse subjects from before PR titles became the subject. The sha parsers
 # skip the internal ones. The preprocessors rewrite each terse subject, matched
 # whole and kept to its conventional type, and the initial commit, so git-cliff
-# warns about nothing. A new commit with one of these exact subjects would be
-# rewritten too, but PR titles are specific enough not to repeat them. Do not
-# add to either list.
+# warns about nothing. Each pattern must match the whole subject, so a squash
+# commit, which ends in ` (#N)`, never matches. Do not add to either list.
 commit_preprocessors = [
     { pattern = '\Ainitial commit(\n|\z)', replace = 'chore: initial commit$1' },
     { pattern = '\Adocs: add license & README(\n|\z)', replace = 'docs: add the license and README$1' },

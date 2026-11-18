@@ -43,7 +43,9 @@ standard review and an adversarial review before the owner merges it. Pull
 request titles are conventional commits, because the squash commit uses the
 title and [git-cliff](https://git-cliff.org) builds the changelog from those
 subjects. `just check-changelog` prints the entries since the last tag, and
-fails when git-cliff warns, as it does for a subject it cannot parse.
+fails when git-cliff warns, as it does for a subject it cannot parse. The
+release script fails the same way, so no commit drops out of a release
+unnoticed.
 
 ## Snapshot tests
 

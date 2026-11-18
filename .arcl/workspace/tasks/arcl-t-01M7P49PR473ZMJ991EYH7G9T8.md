@@ -17,5 +17,5 @@ Acceptance criteria:
 - [ ] The terse early subjects are rewritten into specific lines that name the real command or feature, matched on the whole original subject, and each line matches the CLI and the docs.
 - [ ] The Documentation group lists only user-facing docs: license and README, the docs site, the review workflow guide and screencaps.
 - [ ] Commits after these keep today's behaviour: the PR title becomes the entry.
-- [ ] A comment in `cliff.toml` says the lists are a one-time pre-release cleanup and should not grow.
+- [ ] A comment in `cliff.toml` says the lists are a pre-release cleanup, and that a new entry is only for a subject git-cliff rejects.
 - [ ] git-cliff fails on a subject that is not a conventional commit (`require_conventional`), so `just check-changelog`, `scripts/release.sh` and the Release tag check never drop one silently.

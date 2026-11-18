@@ -46,8 +46,8 @@ subjects. `just check-changelog` prints the entries since the last tag.
 `cliff.toml` sets `require_conventional`, so git-cliff fails on a subject that
 is not a conventional commit instead of leaving it out, in that recipe, in the
 release script and in the Release tag check. To release past such a commit,
-add a preprocessor for its exact subject, or a sha parser that skips it, to
-`cliff.toml`.
+add a preprocessor to `cliff.toml` that rewrites its exact subject to a
+conventional one.
 
 ## Snapshot tests
 

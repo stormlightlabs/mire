@@ -89,7 +89,10 @@ jobs:
             cargo update --workspace --quiet
           fi
           # Fails when v$VERSION is already tagged.
-          scripts/release.sh "$VERSION"
+          if ! scripts/release.sh "$VERSION"; then
+            echo "::error title=release::scripts/release.sh failed; its message is in the step log above."
+            exit 1
+          fi
           # dist's Release workflow runs only once the tag exists, so check
           # here that its config, release.yml and the notes still agree.
           dist_version=$(sed -n 's/^cargo-dist-version = "\(.*\)"$/\1/p' dist-workspace.toml)

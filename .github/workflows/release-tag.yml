@@ -144,7 +144,7 @@ jobs:
             exit 1
           fi
           if ! since=$(git cliff --config cliff.toml --strip all "$base..$sha^"); then
-            echo "::error title=release::git-cliff rejected a commit merged after the $version section was written; nothing was tagged. Give its subject a preprocessor or sha parser in cliff.toml. $rerun"
+            echo "::error title=release::git-cliff rejected a commit merged after the $version section was written; nothing was tagged. Add a preprocessor for its exact subject in cliff.toml. $rerun"
             exit 1
           fi
           missed=$(grep '^- ' <<<"$since" || true)

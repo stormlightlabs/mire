@@ -52,7 +52,7 @@ if git remote get-url origin >/dev/null 2>&1; then
 fi
 
 section=$(git cliff --config cliff.toml --unreleased --tag "$tag" --strip all) ||
-  fail "git-cliff rejected a commit; give its subject a preprocessor or sha parser in cliff.toml."
+  fail "git-cliff rejected a commit; add a preprocessor for its exact subject in cliff.toml."
 grep -q '^- ' <<<"$section" || fail "no commits to list since the last release."
 
 # Replace the version's section, which runs to the next `## [` heading, or

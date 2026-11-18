@@ -28,9 +28,8 @@ them.
 
 ## Plan
 
-- Open work lives in arcl, in `.arcl/workspace`. Use the `arclightning` skill
-  to pick up, hand off, and complete tasks. Put task status updates and new
-  tasks in the PR they describe.
+- Open work lives in arcl; the Tasks section below has its commands. Put task
+  status updates and new tasks in the PR they describe.
 - [ROADMAP.md](ROADMAP.md) holds the product direction and scope.
 
 ## Tasks

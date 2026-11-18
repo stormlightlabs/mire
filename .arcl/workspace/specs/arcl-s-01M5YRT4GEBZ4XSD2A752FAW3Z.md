@@ -1,9 +1,9 @@
 +++
 id = "arcl-s-01M5YRT4GEBZ4XSD2A752FAW3Z"
-title = "Reading-first web review"
+title = "Reading-first browser review"
 status = "open"
 acceptance-criteria = """
-- The web app uses the six terminal themes from `crates/ui/src/theme.rs`, with Nord Light as the light theme.
+- The browser review uses the six terminal themes from `crates/ui/src/theme.rs`, with Nord Light as the light theme.
 - The file list groups files by walkthrough step when the review has a walkthrough, and by directory otherwise. Generated files are marked and collapsed.
 - Focus mode, live-update handling, the finish-review panel and the narrow layout match their boards.
 - Playwright covers each new state."""

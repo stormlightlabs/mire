@@ -1328,7 +1328,7 @@ async fn static_asset(State(state): State<AppState>, uri: Uri) -> Response<Body>
         return problem(
             StatusCode::NOT_FOUND,
             "asset_not_found",
-            "The browser application is unavailable.",
+            "The browser review is unavailable.",
         );
     };
 

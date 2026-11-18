@@ -42,6 +42,10 @@ shots *names:
 changelog:
     git cliff --unreleased
 
+# Check that cliff.toml's pre-release cleanup still applies (needs git-cliff)
+changelog-check:
+    scripts/changelog-check.sh
+
 # Write the release's section of CHANGELOG.md; the workspace version must already be <version>
 release version:
     scripts/release.sh {{version}}

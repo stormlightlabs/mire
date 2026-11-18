@@ -9,7 +9,22 @@ use std::borrow::Cow;
 /// CSI, OSC, BEL, CR, NUL and the other C0 and C1 controls keeps that text
 /// from moving the cursor, clearing the screen or rewriting earlier lines.
 pub fn escape_controls(text: &str) -> Cow<'_, str> {
-    if !text.chars().any(needs_escape) {
+    escape_where(text, |character| {
+        character.is_control() && character != '\n' && character != '\t'
+    })
+}
+
+/// Replaces every control character, `\n` and `\t` included, with its
+/// visible `\u{..}` escape.
+///
+/// Use it for text that must stay on one line, such as an author name or a
+/// path inside a Markdown list item.
+pub fn escape_line_controls(text: &str) -> Cow<'_, str> {
+    escape_where(text, char::is_control)
+}
+
+fn escape_where(text: &str, needs_escape: impl Fn(char) -> bool) -> Cow<'_, str> {
+    if !text.chars().any(&needs_escape) {
         return Cow::Borrowed(text);
     }
     let mut escaped = String::with_capacity(text.len() + 8);
@@ -23,10 +38,6 @@ pub fn escape_controls(text: &str) -> Cow<'_, str> {
     Cow::Owned(escaped)
 }
 
-fn needs_escape(character: char) -> bool {
-    character.is_control() && character != '\n' && character != '\t'
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -38,6 +49,11 @@ mod tests {
             escape_controls(text),
             "a\\u{1b}[2Jb\\u{1b}]0;title\\u{7}c\\u{d}d\\u{0}e\\u{9b}f\\u{7f}\n\tg"
         );
+    }
+
+    #[test]
+    fn line_escape_also_escapes_newlines_and_tabs() {
+        assert_eq!(escape_line_controls("a\nb\tc\u{1b}d"), "a\\u{a}b\\u{9}c\\u{1b}d");
     }
 
     #[test]

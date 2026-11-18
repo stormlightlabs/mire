@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
 
+use crate::terminal_text::{escape_controls, escape_line_controls};
+
 /// Protocol schema emitted by non-interactive review commands.
 pub const CURRENT_PROTOCOL_SCHEMA_VERSION: SchemaVersion = SchemaVersion { major: 1, minor: 6 };
 
@@ -773,6 +775,12 @@ fn rejection_json(failures: Vec<serde_json::Value>) -> Result<Vec<u8>> {
 }
 
 /// Renders review notes as standalone Markdown.
+///
+/// Each note gets a section with its metadata, its events and its body. The
+/// body sits in a fenced block longer than any backtick run it holds, so its
+/// own headings and fences cannot end the section. Control characters in
+/// stored text are written as visible `\u{..}` escapes; the body keeps its
+/// newlines and tabs, and treats `\r\n` as a newline.
 pub fn notes_markdown(review: &Review) -> Vec<u8> {
     let mut output = format!(
         "# Mire review notes\n\nReview revision: {}\n\nChangeset: `{}`\n",
@@ -786,19 +794,20 @@ pub fn notes_markdown(review: &Review) -> Vec<u8> {
     for note in review.notes() {
         let anchor = note.current_anchor().unwrap_or_else(|| note.anchor());
         output.push_str(&format!(
-            "\n## {}: {}\n\n- Kind: `{}`\n- Status: `{}`\n- Author: {}\n- Provenance: {}\n- Re-anchor: `{}`\n- Original location: {}\n- Current location: {}\n{}\n",
+            "\n## {}: {}\n\n- Kind: `{}`\n- Status: `{}`\n- Author: {}\n- Provenance: {}\n- Re-anchor: `{}`\n- Original location: {}\n- Current location: {}\n{}",
             note.severity(),
-            note.id().as_str(),
+            escape_line_controls(note.id().as_str()),
             note.annotation_kind(),
             note.status(),
-            note.author().display_name().unwrap_or(note.author().id()),
-            note.provenance(),
+            author_markdown(note.author()),
+            escape_line_controls(&note.provenance().to_string()),
             reanchor_label(note),
             anchor_location(note.anchor()),
             anchor_location(anchor),
             reanchor_details(note)
         ));
         markdown_events(&mut output, review.events(), note);
+        markdown_body(&mut output, note.body());
     }
     output.into_bytes()
 }
@@ -849,14 +858,34 @@ fn markdown_events(output: &mut String, events: &[NoteEvent], note: &ReviewNote)
     }
     output.push_str("- Events:\n");
     for event in events {
-        let author = event.author().display_name().unwrap_or(event.author().id());
         output.push_str(&format!(
             "  - {}. {} {}\n",
             event.sequence(),
-            author,
+            author_markdown(event.author()),
             event_description(event.event())
         ));
     }
+}
+
+fn markdown_body(output: &mut String, body: &str) {
+    let body = body.replace("\r\n", "\n");
+    let body = escape_controls(&body);
+    let longest_run = body
+        .split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    let fence = "`".repeat(longest_run.max(2) + 1);
+    output.push_str(&format!("\n{fence}markdown\n{body}"));
+    if !body.ends_with('\n') {
+        output.push('\n');
+    }
+    output.push_str(&fence);
+    output.push('\n');
+}
+
+fn author_markdown(author: &Author) -> String {
+    escape_line_controls(author.display_name().unwrap_or(author.id())).into_owned()
 }
 
 fn event_description(event: &NoteEventKind) -> String {
@@ -879,7 +908,7 @@ fn evidence_markdown(evidence: ReanchorEvidence) -> String {
 fn anchor_location(anchor: &mire_core::Anchor) -> String {
     format!(
         "`{}` ({}, lines {}–{})",
-        String::from_utf8_lossy(anchor.path().as_bytes()),
+        escape_line_controls(&String::from_utf8_lossy(anchor.path().as_bytes())),
         anchor.side(),
         anchor.range().start().get(),
         anchor.range().end().get()

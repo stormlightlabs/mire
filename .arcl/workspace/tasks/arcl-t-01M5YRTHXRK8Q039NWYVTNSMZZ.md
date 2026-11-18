@@ -2,7 +2,7 @@
 id = "arcl-t-01M5YRTHXRK8Q039NWYVTNSMZZ"
 plan = "arcl-pl-01M5SXDG5F6QV83EW8GZ6VFSSP"
 title = "Markdown note export leaves out note bodies"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 0
 +++

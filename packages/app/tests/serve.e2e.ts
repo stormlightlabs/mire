@@ -55,7 +55,7 @@ test('reviews a change from load to export', async ({ page, mire }) => {
 	await expect(viewed).toHaveAttribute('aria-pressed', 'true');
 	await expect(files.getByRole('treeitem', { name: /one\.txt/ })).toContainText('viewed');
 
-	// Export: the Markdown download carries the decision.
+	// Export: the Markdown download carries the decision and each note's body.
 	await header.getByRole('button', { name: 'Finish review' }).click();
 	const dialog = page.getByRole('dialog', { name: 'Finish review' });
 	await expect(dialog).toContainText('1 open finding');
@@ -68,6 +68,8 @@ test('reviews a change from load to export', async ({ page, mire }) => {
 	expect(markdown).toContain('Review revision: 4');
 	expect(markdown).toMatch(/## Medium: note-1\n[\s\S]*- Status: `resolved`/);
 	expect(markdown).toMatch(/## Low: note-2\n[\s\S]*- Status: `open`/);
+	expect(markdown).toMatch(/## Medium: note-1\n[^#]*\n```markdown\nThe second line should stay lowercase\.\n```\n/);
+	expect(markdown).toMatch(/## Low: note-2\n[^#]*\n```markdown\nIs the capital Y intended\?\n```\n/);
 	await dialog.getByRole('button', { name: 'Keep reviewing' }).click();
 
 	// Refresh: a source edit waits until the reader applies it. Then it reaches

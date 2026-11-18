@@ -246,7 +246,9 @@ fingerprints. It validates the whole batch before writing. Every mutation
 requires the revision returned by `mire context` or `mire notes list`; stale
 writes fail with `revision_conflict`. Full-note import remains available for
 compatible clients. List returns deterministic JSON. Export can produce JSON
-or standalone Markdown.
+or standalone Markdown. The Markdown gives each finding a section with its
+metadata, events and body, and the browser's Markdown download is the same
+file.
 
 ## Walkthrough commands
 

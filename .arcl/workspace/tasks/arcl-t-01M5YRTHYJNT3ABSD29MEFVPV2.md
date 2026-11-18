@@ -2,7 +2,7 @@
 id = "arcl-t-01M5YRTHYJNT3ABSD29MEFVPV2"
 plan = "arcl-pl-01M5SXDG5F6QV83EW8GZ6VFSSP"
 title = "Markdown note export writes control characters raw"
-status = "pending"
+status = "in_progress"
 priority = "normal"
 position = 0
 +++

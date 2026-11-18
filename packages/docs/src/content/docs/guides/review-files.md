@@ -42,7 +42,10 @@ mire notes export review.json --format markdown > review-notes.md
 
 The JSON export includes finding authorship, provenance, events, original
 anchors, and re-anchor outcomes. The Markdown export renders those details for
-reading. `mire review status review.json` prints a compact progress report; add
+reading, with one section per finding that ends in the finding's body. The body
+sits in a fenced `markdown` block, so its own headings and fences stay inside
+it. Control characters in stored text appear as `\u{..}` escapes, such as
+`\u{1b}` for ESC; the body keeps its newlines and tabs. `mire review status review.json` prints a compact progress report; add
 `--format json` for structured output.
 
 ## Export the captured patch

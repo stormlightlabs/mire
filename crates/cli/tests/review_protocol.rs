@@ -210,6 +210,76 @@ fn mixed_provenance_round_trips_through_json_and_markdown() {
 }
 
 #[test]
+fn markdown_export_fences_each_note_body_in_its_section() {
+    let fixture = Fixture::new();
+    let mut first = serde_json::to_value(note(&fixture.review, "first", Provenance::Human)).unwrap();
+    first["body"] = json!("Line one.\n\n## Not a section\n\n```rust\nlet x = 1;\n```\n\tindented");
+    let second = serde_json::to_value(note(&fixture.review, "second", Provenance::Human)).unwrap();
+    let batch = json!({ "schema_version": { "major": 1, "minor": 0 }, "notes": [first, second] });
+    fs::write(&fixture.batch_path, serde_json::to_vec(&batch).unwrap()).unwrap();
+    assert_success(&mire(&[
+        "notes",
+        "import",
+        fixture.review_str(),
+        fixture.batch_str(),
+        "--revision",
+        "1",
+    ]));
+
+    let markdown = mire(&["notes", "export", fixture.review_str(), "--format", "markdown"]);
+    assert_success(&markdown);
+    let markdown = String::from_utf8(markdown.stdout).expect("Markdown is UTF-8");
+    let first_section = markdown
+        .split("\n## Medium: ")
+        .find(|section| section.starts_with("first\n"))
+        .unwrap_or_else(|| panic!("the first note has no section: {markdown}"));
+    assert!(
+        first_section
+            .contains("\n````markdown\nLine one.\n\n## Not a section\n\n```rust\nlet x = 1;\n```\n\tindented\n````\n"),
+        "{markdown}"
+    );
+    let second_section = markdown
+        .split("\n## Medium: ")
+        .find(|section| section.starts_with("second\n"))
+        .unwrap_or_else(|| panic!("the second note has no section: {markdown}"));
+    assert!(
+        second_section.ends_with("\n```markdown\nFinding from second.\n```\n"),
+        "{markdown}"
+    );
+}
+
+#[test]
+fn markdown_export_escapes_control_characters_in_stored_text() {
+    let fixture = Fixture::new();
+    let mut hostile = serde_json::to_value(note(&fixture.review, "hostile", Provenance::Human)).unwrap();
+    hostile["body"] = json!("a\u{1b}[2Jb\u{1b}]0;title\u{7}c\rd\r\ne");
+    hostile["author"]["display_name"] = json!("Eve\u{1b}[31m\u{1b}]8;;https://x\u{7}\rMallory\n## injected");
+    let batch = json!({ "schema_version": { "major": 1, "minor": 0 }, "notes": [hostile] });
+    fs::write(&fixture.batch_path, serde_json::to_vec(&batch).unwrap()).unwrap();
+    assert_success(&mire(&[
+        "notes",
+        "import",
+        fixture.review_str(),
+        fixture.batch_str(),
+        "--revision",
+        "1",
+    ]));
+
+    let markdown = mire(&["notes", "export", fixture.review_str(), "--format", "markdown"]);
+    assert_success(&markdown);
+    let markdown = String::from_utf8(markdown.stdout).expect("Markdown is UTF-8");
+    assert!(!markdown.chars().any(|c| c.is_control() && c != '\n'), "{markdown:?}");
+    assert!(
+        markdown.contains("\n```markdown\na\\u{1b}[2Jb\\u{1b}]0;title\\u{7}c\\u{d}d\ne\n```\n"),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("- Author: Eve\\u{1b}[31m\\u{1b}]8;;https://x\\u{7}\\u{d}Mallory\\u{a}## injected\n"),
+        "{markdown}"
+    );
+}
+
+#[test]
 fn rejected_batches_report_every_invalid_anchor_without_rewriting_the_review() {
     let fixture = Fixture::new();
     let mut first = serde_json::to_value(note(&fixture.review, "bad-a", Provenance::Human)).unwrap();

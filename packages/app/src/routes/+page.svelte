@@ -593,8 +593,9 @@
 		}
 	}
 
-	/** Empties the diff pane when no file is left to show, and drops any file load in flight. */
+	/** Empties the diff pane when no file is left to show, and drops any file or finding load in flight. */
 	function closeFile() {
+		dropFindingLoad();
 		fileLoads++;
 		scrollTarget = null;
 		activeFile = null;
@@ -604,10 +605,21 @@
 		viewedError = null;
 	}
 
-	/** Opens a file the reader picked, which replaces any reload notice. */
+	/**
+	 * Opens a file the reader picked, which replaces any reload notice. A
+	 * finding still loading would open its own file when it arrives, so its
+	 * load is dropped.
+	 */
 	function chooseFile(id: string) {
 		notice = null;
+		dropFindingLoad();
 		void selectFile(id);
+	}
+
+	/** Drops the finding load in flight, so its response neither opens the finding nor its file. */
+	function dropFindingLoad() {
+		findingLoads++;
+		requestedFinding = null;
 	}
 
 	async function selectFinding(finding: FindingSummary) {

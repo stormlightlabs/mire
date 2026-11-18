@@ -46,6 +46,9 @@ test('collapses generated files until the reader opens them', async ({ page, mir
 	await group.click();
 	await expect(generated).toHaveCount(0);
 
+	// A short screen puts each finding's marker below the fold until the pane scrolls to it.
+	await page.setViewportSize({ width: 1280, height: 400 });
+
 	// Selecting its finding from the review queue expands the group and opens the diff at the finding.
 	const marker = diff.getByRole('button', { name: /Open low question, open: Is the capital Y/ });
 	await files.getByRole('treeitem', { name: /one\.txt/ }).click();

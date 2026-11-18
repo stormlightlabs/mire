@@ -159,6 +159,8 @@ test('p and P move between findings as j and k do', async ({ page, mire }) => {
 
 test('j pressed again before a finding loads moves on from it', async ({ page, mire }) => {
 	await open(page, mire.url);
+	// A short screen puts the finding's marker below the fold until the pane scrolls to it.
+	await page.setViewportSize({ width: 1280, height: 400 });
 	const diff = page.getByRole('region', { name: 'File diff' });
 	// Slow finding loads, so the second press comes while the first finding is still loading.
 	await page.route('**/api/v1/findings/*', async (route) => {
@@ -175,6 +177,8 @@ test('j pressed again before a finding loads moves on from it', async ({ page, m
 
 test('a finding that loads late does not replace a newer one', async ({ page, mire }) => {
 	await open(page, mire.url);
+	// A short screen puts the finding's marker below the fold until the pane scrolls to it.
+	await page.setViewportSize({ width: 1280, height: 400 });
 	const diff = page.getByRole('region', { name: 'File diff' });
 	// Hold only the first finding request, so its response lands after the second one's.
 	let first: string | null = null;
@@ -197,6 +201,32 @@ test('a finding that loads late does not replace a newer one', async ({ page, mi
 	await expect(diff.getByRole('article')).toContainText('Is the capital Y intended?');
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('two.txt');
 	await expect(diff.getByRole('button', { name: /Open low question, open: Is the capital Y/ })).toBeInViewport();
+});
+
+test('a file the reader picks while a finding loads stays open', async ({ page, mire }) => {
+	await open(page, mire.url);
+	const diff = page.getByRole('region', { name: 'File diff' });
+	let url: string | null = null;
+	await page.route('**/api/v1/findings/*', async (route) => {
+		url = route.request().url();
+		await new Promise((resolve) => setTimeout(resolve, 1000));
+		await route.continue();
+	});
+	const late = page.waitForResponse((response) => url !== null && response.url() === url);
+
+	// J asks for the finding in one.txt, then the reader opens two.txt before it arrives.
+	await page.keyboard.press('j');
+	await expect.poll(() => url).not.toBeNull();
+	await page
+		.getByRole('tree', { name: 'Changed file tree' })
+		.getByRole('treeitem', { name: /two\.txt/ })
+		.click();
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('two.txt');
+	await late;
+	// Let the page handle the late response before checking it left the reader's file open.
+	await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
+	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('two.txt');
+	await expect(diff.getByRole('article')).toHaveCount(0);
 });
 
 test('the focus key bar lists the display keys', async ({ page, mire }) => {

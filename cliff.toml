@@ -22,51 +22,48 @@ trim = true
 conventional_commits = true
 filter_unconventional = true
 split_commits = false
-# Pre-release cleanup. Before the first release, main held commits made before
-# PR titles became the subject: internal planning docs, docs-site internals and
-# terse subjects. The sha parsers at the top of commit_parsers leave the
-# internal ones out, and these preprocessors rewrite the terse subjects. Both
-# key on the commit's full SHA. Do not add to either list: later commits take
-# their entry from the PR title. scripts/changelog-check.sh fails when an old
-# subject comes back.
-#
-# A preprocessor runs its command only on a message that starts with the exact
-# subject, and the command replaces the message only when $COMMIT_SHA matches.
-# The commands need a POSIX sh.
+# Pre-release cleanup. Before 0.1.0, main held internal docs commits and
+# terse subjects from before PR titles became the subject. The sha parsers
+# skip the internal ones. The preprocessors rewrite each terse subject, matched
+# whole and kept to its conventional type, and the initial commit, so git-cliff
+# warns about nothing. A new commit with one of these exact subjects would be
+# rewritten too, but PR titles are specific enough not to repeat them. Do not
+# add to either list.
 commit_preprocessors = [
-    { pattern = '\Adocs: add license & README(\n|\z)', replace_command = "[ $COMMIT_SHA = cfa0afcee440f490f2d4f2a4bac215508ffdcf49 ] && { cat >/dev/null; echo 'docs: add the license and README'; } || cat" },
-    { pattern = '\Afeat: patch JSON normalization cmd(\n|\z)', replace_command = "[ $COMMIT_SHA = 6255aa60703a68fe7a600ff5a7931a8cc7ea2338 ] && { cat >/dev/null; echo 'feat: add `mire patch` to read a patch file or standard input and print it as JSON'; } || cat" },
-    { pattern = '\Afeat: Git-backed diff and show cmds(\n|\z)', replace_command = "[ $COMMIT_SHA = 0469e4cd01712c9ef564b97776c46dd527d31746 ] && { cat >/dev/null; echo 'feat: add `mire diff` and `mire show` to review worktree changes, revision ranges and commits'; } || cat" },
-    { pattern = '\Afeat: interactive TUI review(\n|\z)', replace_command = "[ $COMMIT_SHA = 3aa570c489cfc24fb74d5f7e584a37e711608338 ] && { cat >/dev/null; echo 'feat: review changes in an interactive terminal UI'; } || cat" },
-    { pattern = '\Afeat: add review navigation and layout modes(\n|\z)', replace_command = "[ $COMMIT_SHA = f6e352f5da823527f4c89cd28ec23d934f7b6dbd ] && { cat >/dev/null; echo 'feat: add file sidebar navigation and unified and split layouts to the terminal review'; } || cat" },
-    { pattern = '\Afeat: better ui(\n|\z)', replace_command = "[ $COMMIT_SHA = 4e88f4162056980984f6665fb669193d4d17181c ] && { cat >/dev/null; echo 'feat: add syntax highlighting, changed-word highlighting, search across files, context expansion, line wrapping and `--language` to the terminal review'; } || cat" },
-    { pattern = '\Afeat: review model and atomic file IO(\n|\z)', replace_command = "[ $COMMIT_SHA = d5745ee04d53725a9a002894eb28169ab11598f4 ] && { cat >/dev/null; echo 'feat: add review files that hold anchored notes, written atomically, and open them with `mire review`'; } || cat" },
-    { pattern = '\Afeat: selectable TUI themes(\n|\z)', replace_command = "[ $COMMIT_SHA = ec70ef8a4c9bffba9e849b7084ec45f443222eb1 ] && { cat >/dev/null; echo 'feat: select the Iceberg, Eldritch or Catppuccin theme with `--theme`'; } || cat" },
-    { pattern = '\Afeat: review protocol(\n|\z)', replace_command = "[ $COMMIT_SHA = 81fb360ff7275476bb9b96518b254b0b37072934 ] && { cat >/dev/null; echo 'feat: add `mire context` and `mire notes import`, `list` and `export` so agents can read a review and write notes'; } || cat" },
-    { pattern = '\Afeat: terminal review note editing(\n|\z)', replace_command = "[ $COMMIT_SHA = 3b53b72a42c422b9f2cbf817ccbf04dfbfdaafd0 ] && { cat >/dev/null; echo 'feat: write, edit, filter and set the status of notes in the terminal review'; } || cat" },
-    { pattern = '\Afeat: filesystem watch mode(\n|\z)', replace_command = "[ $COMMIT_SHA = f86cc87e904aebf1ca3256e8cc8b77c60e53912d ] && { cat >/dev/null; echo 'feat: reload Git comparisons, patch files and review files as they change, with `--watch` and `mire watch`'; } || cat" },
-    { pattern = '\Afeat: review init cmd(\n|\z)', replace_command = "[ $COMMIT_SHA = 65d20d7e0012eafc5cc810246f97cd772d41b0d2 ] && { cat >/dev/null; echo 'feat: add `mire review init` to create a review file from a Git comparison'; } || cat" },
-    { pattern = '\Afeat: location-based note commands(\n|\z)', replace_command = "[ $COMMIT_SHA = 164870954b93f84a5c58e3b9b8adc9a4d0228090 ] && { cat >/dev/null; echo 'feat: add `mire note add` and `mire notes apply` to write findings at a file and line, and `mire note resolve`, `dismiss` and `accept-risk`'; } || cat" },
-    { pattern = '\Afeat: bundled skill with command(\n|\z)', replace_command = "[ $COMMIT_SHA = 229786cb3affc92748e4bfe2a997d1fab1675cd3 ] && { cat >/dev/null; echo 'feat: bundle an agent review skill, installed and located with `mire skill path`'; } || cat" },
-    { pattern = '\Afeat: bind reviews to Git repo identity(\n|\z)', replace_command = "[ $COMMIT_SHA = 601f6eef57451abf38b3056e8fbe92d09465717c ] && { cat >/dev/null; echo 'feat: record the Git repository and comparison a review was created from'; } || cat" },
-    { pattern = '\Afeat: review refresh reanchoring(\n|\z)', replace_command = "[ $COMMIT_SHA = ed4ac28afbe4a4b7ee8c388c99948f8d798211f3 ] && { cat >/dev/null; echo 'feat: add `mire review refresh` to capture the comparison again and re-anchor findings as exact, moved, stale or ambiguous'; } || cat" },
-    { pattern = '\Afeat: export note events and reanchor outcomes(\n|\z)', replace_command = "[ $COMMIT_SHA = 91d102342ad921f85ad7f9d68b9a45b5be156fe3 ] && { cat >/dev/null; echo 'feat: include note events and re-anchor results in `mire notes export`'; } || cat" },
-    { pattern = '\Afeat: add live TUI session control(\n|\z)', replace_command = "[ $COMMIT_SHA = bd01bbce0f02303e8cd99f237ebb3a406ba4f6b7 ] && { cat >/dev/null; echo 'feat: add `mire session` commands to inspect and steer an open terminal review'; } || cat" },
-    { pattern = '\Afeat: contextual TUI keyboard hints(\n|\z)', replace_command = "[ $COMMIT_SHA = bf30007c4ed34ace0338b0ac4cc4584491df4430 ] && { cat >/dev/null; echo 'feat: show the keys for the current mode in the terminal review footer'; } || cat" },
-    { pattern = '\Afeat: make file sidebar toggleable(\n|\z)', replace_command = "[ $COMMIT_SHA = d1d9a3262ee23bfb9a5f636142fb383d58804b01 ] && { cat >/dev/null; echo 'feat: show or hide the file sidebar in the terminal review with `b`'; } || cat" },
-    { pattern = '\Afeat: improve TUI note editing and status chrome(\n|\z)', replace_command = "[ $COMMIT_SHA = 847ffe10086119b91bb8d7b451d0724365bea0fe ] && { cat >/dev/null; echo 'feat: edit multiline notes and show review progress in the terminal review'; } || cat" },
-    { pattern = '\Afeat: collapsible diff rows and file picker(\n|\z)', replace_command = "[ $COMMIT_SHA = 2e4bb38595ed675681ea1d51a983178fb6ca1e1c ] && { cat >/dev/null; echo 'feat: collapse files and hunks, and pick files from a filtered list, in the terminal review'; } || cat" },
-    { pattern = '\Afeat: add review status and default diff(\n|\z)', replace_command = "[ $COMMIT_SHA = 904cd1037324eee2d10758dc418478a1d5a2ad39 ] && { cat >/dev/null; echo 'feat: add `mire review status`, and open the worktree diff when `mire` runs without a command'; } || cat" },
-    { pattern = '\Afeat: local browser review server(\n|\z)', replace_command = "[ $COMMIT_SHA = d546205c47972e9266c5d1195aa3a9b4cc8017f1 ] && { cat >/dev/null; echo 'feat: add `mire serve` to open a web review in a local browser'; } || cat" },
-    { pattern = '\Afeat: add file diff and finding navigation(\n|\z)', replace_command = "[ $COMMIT_SHA = d048bb9cf6f452ea977dce307085720bce6a118b ] && { cat >/dev/null; echo 'feat: add file diffs and finding navigation to the web review'; } || cat" },
-    { pattern = '\Afeat: review patch export(\n|\z)', replace_command = "[ $COMMIT_SHA = a1f915a4d58f30c2fdac5fceab754c3dfe3cf7d7 ] && { cat >/dev/null; echo 'feat: add `mire review export --format patch` to write the captured changes as a patch'; } || cat" },
-    { pattern = '\Afeat: finding review actions(\n|\z)', replace_command = "[ $COMMIT_SHA = 3ccf936a5486182d289c8a39221b32db68ecfe64 ] && { cat >/dev/null; echo 'feat: edit findings and resolve, reopen, dismiss or accept their risk in the web review'; } || cat" },
-    { pattern = '\Afeat: web review refresh and completion(\n|\z)', replace_command = "[ $COMMIT_SHA = 976a07c6506ecda786cdfa6946f3892b2e815ec7 ] && { cat >/dev/null; echo 'feat: refresh the source and watch it for changes in the web review, and finish a review with Markdown, JSON and context downloads'; } || cat" },
-    { pattern = '\Afeat: polish diff review interface(\n|\z)', replace_command = "[ $COMMIT_SHA = fb8e69ece622dbf739e4f06ffc14eacb2476c6b9 ] && { cat >/dev/null; echo 'feat: add a split layout, context expansion, a dark theme and mobile drawers to the web review'; } || cat" },
-    { pattern = '\Afeat: add collapsible file tree navigation(\n|\z)', replace_command = "[ $COMMIT_SHA = f0446b2ce0fa768ec881fb60011242a8a6ded5a6 ] && { cat >/dev/null; echo 'feat: add a collapsible file tree to the web review'; } || cat" },
-    { pattern = '\Adocs: build doc site(\n|\z)', replace_command = "[ $COMMIT_SHA = 27ab4cca10acb86ab7c976a1fa783869eaddaece ] && { cat >/dev/null; echo 'docs: add the documentation site'; } || cat" },
-    { pattern = '\Adocs: update for completed review workflow(\n|\z)', replace_command = "[ $COMMIT_SHA = c4961f7c6348bf0c193ccfdaba82107c1c574f63 ] && { cat >/dev/null; echo 'docs: update the README for the review workflow'; } || cat" },
-    { pattern = '\Adocs: add range and split screencaps(\n|\z)', replace_command = "[ $COMMIT_SHA = 751692a15765f217537b82599e0b4b9ed6f247ff ] && { cat >/dev/null; echo 'docs: add screencaps of a revision-range review and the split layout'; } || cat" },
+    { pattern = '\Ainitial commit(\n|\z)', replace = 'chore: initial commit$1' },
+    { pattern = '\Adocs: add license & README(\n|\z)', replace = 'docs: add the license and README$1' },
+    { pattern = '\Afeat: patch JSON normalization cmd(\n|\z)', replace = 'feat: add `mire patch` to read a patch file or standard input and print it as JSON$1' },
+    { pattern = '\Afeat: Git-backed diff and show cmds(\n|\z)', replace = 'feat: add `mire diff` and `mire show` to review worktree changes, revision ranges and commits$1' },
+    { pattern = '\Afeat: interactive TUI review(\n|\z)', replace = 'feat: review changes in an interactive terminal UI$1' },
+    { pattern = '\Afeat: add review navigation and layout modes(\n|\z)', replace = 'feat: add file sidebar navigation and unified and split layouts to the terminal review$1' },
+    { pattern = '\Afeat: better ui(\n|\z)', replace = 'feat: add syntax highlighting, changed-word highlighting, search across files, context expansion, line wrapping and `--language` to the terminal review$1' },
+    { pattern = '\Afeat: review model and atomic file IO(\n|\z)', replace = 'feat: add review files that hold anchored notes, written atomically, and open them with `mire review`$1' },
+    { pattern = '\Afeat: selectable TUI themes(\n|\z)', replace = 'feat: select the Iceberg, Eldritch or Catppuccin theme with `--theme`$1' },
+    { pattern = '\Afeat: review protocol(\n|\z)', replace = 'feat: add `mire context` and `mire notes import`, `list` and `export` so agents can read a review and write notes$1' },
+    { pattern = '\Afeat: terminal review note editing(\n|\z)', replace = 'feat: write, edit, filter and set the status of notes in the terminal review$1' },
+    { pattern = '\Afeat: filesystem watch mode(\n|\z)', replace = 'feat: reload Git comparisons, patch files and review files as they change, with `--watch` and `mire watch`$1' },
+    { pattern = '\Afeat: review init cmd(\n|\z)', replace = 'feat: add `mire review init` to create a review file from a Git comparison$1' },
+    { pattern = '\Afeat: location-based note commands(\n|\z)', replace = 'feat: add `mire note add` and `mire notes apply` to write findings at a file and line, and `mire note resolve`, `dismiss` and `accept-risk`$1' },
+    { pattern = '\Afeat: bundled skill with command(\n|\z)', replace = 'feat: bundle an agent review skill, installed and located with `mire skill path`$1' },
+    { pattern = '\Afeat: bind reviews to Git repo identity(\n|\z)', replace = 'feat: record the Git repository and comparison a review was created from$1' },
+    { pattern = '\Afeat: review refresh reanchoring(\n|\z)', replace = 'feat: add `mire review refresh` to capture the comparison again and re-anchor findings as exact, moved, stale or ambiguous$1' },
+    { pattern = '\Afeat: export note events and reanchor outcomes(\n|\z)', replace = 'feat: include note events and re-anchor results in `mire notes export`$1' },
+    { pattern = '\Afeat: add live TUI session control(\n|\z)', replace = 'feat: add `mire session` commands to inspect and steer an open terminal review$1' },
+    { pattern = '\Afeat: contextual TUI keyboard hints(\n|\z)', replace = 'feat: show the keys for the current mode in the terminal review footer$1' },
+    { pattern = '\Afeat: make file sidebar toggleable(\n|\z)', replace = 'feat: show or hide the file sidebar in the terminal review with `b`$1' },
+    { pattern = '\Afeat: improve TUI note editing and status chrome(\n|\z)', replace = 'feat: edit multiline notes and show review progress in the terminal review$1' },
+    { pattern = '\Afeat: collapsible diff rows and file picker(\n|\z)', replace = 'feat: collapse files and hunks, and pick files from a filtered list, in the terminal review$1' },
+    { pattern = '\Afeat: add review status and default diff(\n|\z)', replace = 'feat: add `mire review status`, and open the worktree diff when `mire` runs without a command$1' },
+    { pattern = '\Afeat: local browser review server(\n|\z)', replace = 'feat: add `mire serve` to open a web review in a local browser$1' },
+    { pattern = '\Afeat: add file diff and finding navigation(\n|\z)', replace = 'feat: add file diffs and finding navigation to the web review$1' },
+    { pattern = '\Afeat: review patch export(\n|\z)', replace = 'feat: add `mire review export --format patch` to write the captured changes as a patch$1' },
+    { pattern = '\Afeat: finding review actions(\n|\z)', replace = 'feat: edit findings and resolve, reopen, dismiss or accept their risk in the web review$1' },
+    { pattern = '\Afeat: web review refresh and completion(\n|\z)', replace = 'feat: refresh the source and watch it for changes in the web review, and finish a review with Markdown, JSON and context downloads$1' },
+    { pattern = '\Afeat: polish diff review interface(\n|\z)', replace = 'feat: add a split layout, context expansion, a dark theme and mobile drawers to the web review$1' },
+    { pattern = '\Afeat: add collapsible file tree navigation(\n|\z)', replace = 'feat: add a collapsible file tree to the web review$1' },
+    { pattern = '\Adocs: build doc site(\n|\z)', replace = 'docs: add the documentation site$1' },
+    { pattern = '\Adocs: update for completed review workflow(\n|\z)', replace = 'docs: update the README for the review workflow$1' },
+    { pattern = '\Adocs: add range and split screencaps(\n|\z)', replace = 'docs: add screencaps of a revision-range review and the split layout$1' },
 ]
 commit_parsers = [
     # Pre-release cleanup: see commit_preprocessors.

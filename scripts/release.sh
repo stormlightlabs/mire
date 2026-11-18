@@ -10,8 +10,7 @@
 # script fails, changing nothing, when <version> is not a release like 0.2.0,
 # differs from the [workspace.package] version in Cargo.toml, is already
 # tagged v<version> here or on origin, or has no commits to list. It also
-# fails when it cannot read origin's tags, or when scripts/changelog-check.sh
-# finds cliff.toml's pre-release cleanup out of step with the history.
+# fails when it cannot read origin's tags.
 set -euo pipefail
 
 usage() {
@@ -51,7 +50,6 @@ if git remote get-url origin >/dev/null 2>&1; then
   esac
 fi
 
-scripts/changelog-check.sh
 section=$(git cliff --config cliff.toml --unreleased --tag "$tag" --strip all)
 grep -q '^- ' <<<"$section" || fail "no commits to list since the last release."
 

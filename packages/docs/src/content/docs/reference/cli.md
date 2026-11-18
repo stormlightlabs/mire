@@ -248,7 +248,11 @@ fingerprints. It validates the whole batch before writing. Every mutation
 requires the revision returned by `mire context` or `mire notes list`; stale
 writes fail with `revision_conflict`. Full-note import remains available for
 compatible clients. List returns deterministic JSON. Export can produce JSON
-or standalone Markdown.
+or standalone Markdown. The Markdown gives each finding a section with its
+metadata, events and body, and the browser's Markdown download is the same
+file. It escapes stored text the same way as `walkthrough show`, and puts ids,
+authors, provenance and paths in inline code spans so their Markdown and HTML
+show as text.
 
 ## Walkthrough commands
 
@@ -334,8 +338,11 @@ with conflicting or missing line fields is a step failure with the code
 
 `walkthrough show` prints the overview, each step with its anchors and their
 re-anchor states, and what the walkthrough leaves out: hunks no anchor covers,
-and files with no hunks. Control characters other than newline and tab print
-as escapes such as `\u{1b}`, so stored text cannot rewrite the terminal. Stale and ambiguous anchors cover nothing.
+and files with no hunks. Control characters other than newline and tab,
+bidirectional controls, zero-width characters and line separators print as
+escapes such as `\u{1b}`, so stored text cannot rewrite the terminal or
+reorder what it shows. Text that spells out an escape prints with its
+backslashes doubled, as `\\u{1b}`. Stale and ambiguous anchors cover nothing.
 `--format json` prints the same as one document with `review_revision`,
 `walkthrough`, and `coverage`. Without a walkthrough, the last two are `null`. Each anchor has a `state` of `original`,
 `exact`, `moved`, `stale`, or `ambiguous`, the recorded `anchor`, the

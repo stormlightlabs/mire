@@ -1,14 +1,19 @@
 # Keeps the storm/review check, which the ruleset on main requires. The agent
-# that opened a pull request reviews it in its own session with the `storm`
+# that opened a pull request reviews it in its own session with the `fab-storm`
 # skill and ends with `Review finished at <sha>`, posted as the bot through the
-# Bot comment workflow (or by the owner, a member or a collaborator). It runs
-# no model: `fab gate` marks each new head pending, turns the check green on
-# that comment or on `/storm:ready <sha>`, and answers `/storm:stop`. An edit
-# to the title or body sets the squash message again, in the status comment.
+# Bot comment workflow (or by a person). It runs no model: `fab gate` marks
+# each new head pending, turns the check green on that comment or on
+# `/storm:ready <sha>` (or `/storm:done <sha>`). An edit to the title or body
+# sets the squash message again, in the status comment. The `if` below lets
+# in only the owner, members and collaborators, and any App's bot; `fab gate`
+# then ignores a person without write access and every App but the one
+# `app` in .github/fabrial.toml names.
 #
 # pull_request_target runs this file from main, and `fab` is the release
 # .github/fabrial.toml names (in fabrial itself, built from main), so a change
 # cannot alter its own gate. The head is checked out only for git to read.
+# Both events run with main as the ref, so the job may use an environment
+# restricted to main, which `environment` in .github/fabrial.toml names.
 name: Review gate
 
 on:
@@ -33,10 +38,10 @@ jobs:
       github.event_name == 'pull_request_target' ||
       (github.event.issue.pull_request &&
        ((startsWith(github.event.comment.body, 'Review finished at ') &&
-         github.event.comment.user.login == 'stormlight-thunderbot[bot]') ||
+         github.event.comment.user.type == 'Bot') ||
         ((startsWith(github.event.comment.body, 'Review finished at ') ||
           startsWith(github.event.comment.body, '/storm:ready') ||
-          startsWith(github.event.comment.body, '/storm:stop')) &&
+          startsWith(github.event.comment.body, '/storm:done')) &&
          github.event.comment.user.type != 'Bot' &&
          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association))))
     runs-on: ubuntu-latest
@@ -90,4 +95,5 @@ jobs:
           BODY: ${{ github.event.comment.body }}
           AUTHOR: ${{ github.event.comment.user.login }}
           SENDER: ${{ github.event.sender.login }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
         run: fab gate

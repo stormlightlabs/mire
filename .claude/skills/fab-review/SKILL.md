@@ -1,17 +1,19 @@
 ---
-name: review
-description: Review a pull request or branch for defects and report the findings. Runs a standard pass or an adversarial pass. Use for /review, /adv-rev, code review, PR review, or when asked to check a diff before merge.
+name: fab-review
+description: Review a pull request or branch for defects and report the findings. Runs a standard pass or an adversarial pass. Use for /fab-review, /fab-adv-rev, code review, PR review, or when asked to check a diff before merge.
 argument-hint: "[pr-number|branch] [standard|adversarial]"
 ---
 
 # Review
 
 Review a diff and report findings. Do not edit code during a review pass; the
-`revise` skill owns changes.
+`fab-revise` skill owns changes.
 
-The `storm` skill runs the review stages `fab sequence` gives the pull request
+The `fab-storm` skill runs the review stages `fab sequence` gives the pull request
 from `.github/fabrial-sequence.toml`, each pass in a fresh agent. A pass checks
 its own findings, reports to whoever invoked it, and posts only when they ask.
+It posts as the `fab-storm` skill's **Posting** says, as a plain comment with the
+same body when `main`'s `comment.yml` has no `review` input.
 
 ## Pick the target and the pass
 
@@ -49,9 +51,9 @@ finding.
 
 Read the changed files around the diff, not only the diff. Read the task the
 change is for: the branch name, the pull request body or the first commit names
-it. For an arcl task, `arcl context <id>` gives its acceptance criteria and
-spec; for an issue, `gh issue view <n>` or `issue_read`; otherwise the pull
-request body is the task.
+it. For a tracked task, read it and its acceptance criteria as the **Tasks**
+section of `AGENTS.md` says; for an issue, `gh issue view <n>` or
+`issue_read`; otherwise the pull request body is the task.
 
 `references/reading-the-diff.md` gives the commands. In short: fetch the
 branch, pin its head commit once and review that, use one transport (`gh`, or
@@ -73,8 +75,13 @@ finding.
 ### Prose
 
 Documentation in the diff is a change like any other, and so are the pull
-request title and body, the branch's commit messages and the comments posted.
-Judge them against the `writing-docs` skill and its tells catalogue.
+request title and body and the comments posted. Judge them against the
+`fab-writing-docs` skill and its tells catalogue.
+
+The squash commit on `main` takes the pull request's title and body, so judge
+those as the commit message that lands. The branch's commits are discarded at
+merge: raise no finding about a commit's body. A first commit's subject
+matters only as the title it gave the pull request, so judge the title.
 
 | What you find                                     | Severity |
 | ------------------------------------------------- | -------- |
@@ -103,19 +110,28 @@ One line per finding:
 | `low`     | Works, but will cause a defect later.                                |
 | `nit`     | Style or naming inside the repository's conventions.                 |
 
+The place is the path from the repository root and a line in the changed
+file, or a range such as `src/a.rs:12-15`. A finding whose place falls in the
+diff is posted on that line, so name the line the problem is on. A finding
+about something with no line, such as the pull request body, names it in
+words instead and stays in the review's body.
+
 State what breaks and with what input. A finding that cannot name a failing
 case is speculation; drop it or mark it `nit`.
 
 ## Keep the report readable
 
 - Most severe first, with no preamble and no closing summary.
-- Under 200 words. Past ten findings, give the ten that matter and say how many
-  you left out. Cut a finding rather than compressing ten into denser prose.
+- 200 words at most: `fab pr-review` refuses a longer report and prints its
+  count. Past ten findings, give the ten that matter and say how many you
+  left out. Cut a finding rather than compressing ten into denser prose.
 - Cite `<path>:<line>` instead of quoting the diff back.
 - Group repeats: one finding naming every site.
 - Open with one line naming the pass, the target and what you ran as:
-  `Adversarial pass on #12 at 4f2a91c · <model> · <effort>`. Use the model
-  identifier the harness reports.
+  `Adversarial pass on #12 at 4f2a91c · <model> · <effort>`. Write the model
+  and effort your invoker gave you. A pass cannot see its own effort, so when
+  it was not told one, it writes `not stated` in its place, and the same for
+  a model it was not told and the harness does not report.
 
 Say `No findings` when there are none rather than inventing one.
 

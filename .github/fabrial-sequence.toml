@@ -1,4 +1,4 @@
-# The review sequence the `storm` skill runs on a pull request, read by
+# The review sequence the `fab-storm` skill runs on a pull request, read by
 # `fab sequence`. Each stage runs once, in this order, in a fresh agent whose
 # role is in .claude/agents/. `depth` is the lowest review depth that runs the
 # stage: `fab review-depth` gives none, standard or full. `when` is the
@@ -11,27 +11,27 @@
 name = "standard review"
 role = "reviewer"
 depth = "standard"
-posts = "The status comment's `Standard pass` section: a line `Standard pass on <short sha> · <model>`, then its findings most severe first, under 200 words."
+posts = "One review on the pinned head, through the Bot comment workflow's `review` mode: a line `Standard pass on <short sha> · <model> · <effort>`, `not stated` for an effort it was not told, then its findings most severe first, 200 words at most. Findings on the diff land on their lines."
 
 [[stage]]
 name = "standard revise"
 role = "reviser"
 depth = "standard"
 when = "the standard review found anything above nit"
-posts = "Its fixes, pushed, and replies to the findings."
+posts = "Its fixes, pushed, then one review answering each finding on its thread, through the Bot comment workflow's `answers` mode."
 
 [[stage]]
 name = "adversarial review"
 role = "adversarial-reviewer"
 depth = "full"
-posts = "Nothing: its findings go in the finish comment under `Adversarial pass on <short sha> · <model>`."
+posts = "One review on the pinned head, through the Bot comment workflow's `review` mode: a line `Adversarial pass on <short sha> · <model> · <effort>`, `not stated` for an effort it was not told, then its findings most severe first, 200 words at most."
 
 [[stage]]
 name = "adversarial revise"
 role = "reviser"
 depth = "full"
 when = "the adversarial review found anything above nit"
-posts = "Its fixes, pushed; it reports back instead of replying, and the finish comment says what it fixed."
+posts = "Its fixes, pushed, then one review answering each finding on its thread, through the Bot comment workflow's `answers` mode."
 
 [finish]
-posts = "One comment whose first line is `Review finished at <full head sha>`, then the depth and its reason, then the adversarial findings and their fixes when that review ran."
+posts = "One comment whose first line is `Review finished at <full head sha>`, then the depth and its reason."

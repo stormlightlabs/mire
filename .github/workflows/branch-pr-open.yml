@@ -1,0 +1,100 @@
+# Opens a draft pull request for an agent's work branch as the repository's
+# GitHub App, the one `app` in .github/fabrial.toml names, so the owner can
+# approve it under the ruleset on main. It runs when a Branch PR run
+# (branch-pr.yml) finishes and that run's Open step ran.
+#
+# GitHub runs a workflow_run workflow from the default branch's copy,
+# whatever branch the run that triggered it came from, so a pushed branch
+# cannot change this file. Only this half holds the App's key; when
+# .github/fabrial.toml sets `environment`, its job names that environment,
+# which only main may use. The triggering run is data: the branch name is checked by `fab branch-pr`
+# against the agent branch prefixes, and the branch is checked out in
+# `head/` only for git to read. `fab` and the action that installs it come
+# from main: in fabrial it is built from main, and elsewhere it is the
+# release main's .github/fabrial.toml names.
+#
+# `fab branch-pr` takes the title from the branch's first commit subject and
+# the body from that commit's body as the squash keeps it, so it needs no
+# model. A pull request already open keeps its title and body. The pull
+# request stays a draft until its review finishes; the Review gate then marks
+# it ready and sets the squash message, and the owner merges it, by hand or
+# with auto-merge. Nothing here turns auto-merge on.
+name: Branch PR open
+
+on:
+  workflow_run:
+    workflows: [Branch PR]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  pr:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      # The decide job skips Open when the push should open nothing. The
+      # branch's tip must still be the run's commit: after a later push, that
+      # push's run opens the pull request, and a dispatch on a tag finds no
+      # branch at the tag's commit, since head_branch names the tag.
+      - name: Check the run
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          opened=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+            --jq '[.jobs[] | select(.name == "decide") | .steps[] | select(.name == "Open" and .conclusion == "success")] | length')
+          tip=$(gh api "repos/$REPO/git/matching-refs/heads/$BRANCH" \
+            --jq '.[] | select(.ref == "refs/heads/" + env.BRANCH) | .object.sha')
+          open=false
+          if [ "$opened" -gt 0 ] && [ "$tip" = "$HEAD_SHA" ]; then
+            open=true
+          elif [ "$opened" -gt 0 ]; then
+            echo "$BRANCH is at ${tip:-no commit}, not $HEAD_SHA; opening nothing."
+          fi
+          echo "open=$open" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        if: steps.run.outputs.open == 'true'
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/checkout@v5
+        if: steps.run.outputs.open == 'true'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          path: head
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/create-github-app-token@v2
+        if: steps.run.outputs.open == 'true'
+        id: app
+        with:
+          app-id: ${{ secrets.THUNDERBOT_APP_ID }}
+          private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
+
+      - uses: ./.github/actions/fab
+        if: steps.run.outputs.open == 'true'
+        with:
+          command: branch-pr
+
+      - name: Open the PR
+        if: steps.run.outputs.open == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_DIR: head
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: fab branch-pr

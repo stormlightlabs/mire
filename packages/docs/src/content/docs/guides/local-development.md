@@ -97,7 +97,7 @@ jq. Where freeze crashes while writing a PNG, install `rsvg-convert` (the
 
 When a change alters the TUI, the implementer and both reviewers capture the
 affected states and report the PNG paths in the pull request, as fabrial's
-`storm` skill describes. CI does not run the captures.
+`fab-storm` skill describes. CI does not run the captures.
 
 ## Start the servers
 

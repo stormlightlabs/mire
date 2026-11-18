@@ -1,17 +1,37 @@
-# Posts a comment on a pull request as stormlight-thunderbot. Agent sessions
-# never hold the App's key, so they post through this workflow instead of with
-# their own GitHub access, which would show the comment as the person whose
-# account the session uses:
+# Posts a comment on a pull request as the repository's GitHub App, the one
+# `app` in .github/fabrial.toml names. Agent sessions never hold the App's
+# key, so they post through this workflow instead of with their own GitHub
+# access, which would show the comment as the person whose account the
+# session uses:
 #
 #   gh workflow run comment.yml -f pr=<n> -f body="$(cat comment.md)"
 #
 # or, through the GitHub MCP tools, actions_run_trigger with method
 # run_workflow, workflow_id comment.yml, ref main and the same inputs.
 #
-# With `section`, such as `-f section="Standard pass"`, the body becomes that
+# With `section`, such as `-f section="Squash message"`, the body becomes that
 # section of the bot's status comment on the pull request instead of a new
 # comment: `fab pr-status` posts the status comment once and edits it after,
 # and an edit sends the owner no notification.
+#
+# With `review`, the full SHA of the head a review pass read, the body is
+# that pass's report and posts as one review: `fab pr-review` puts each
+# finding whose `<path>:<line>` falls in the diff on that line, and the rest
+# of the report in the review's body.
+#
+# With `answers` set to `true`, the body is a revise pass's answers, a line
+# `<comment id> · <outcome>` per finding: `fab pr-answer` posts them as
+# replies on the findings' threads in one review, then resolves each thread
+# whose outcome starts with `Fixed` or `Deferred`. With `reviewer` set to
+# the login of the person whose review the answers address, the bot then
+# requests that person's review again. Nothing here dismisses a review.
+#
+# A dispatch runs the copy of this file on the ref it names, so a run on a
+# branch would run that branch's copy. The job runs only on main, but a
+# branch's copy can drop the `if`. When .github/fabrial.toml sets
+# `environment` and the secrets live only there, as docs/bot-setup.md says,
+# the job names that environment, which only main may use, and a branch's
+# copy cannot reach the key.
 name: Bot comment
 
 on:
@@ -27,12 +47,25 @@ on:
         description: A status comment section to set instead of posting a comment
         required: false
         default: ""
+      review:
+        description: The head SHA a review pass read, to post the body as a review with its findings on the diff
+        required: false
+        default: ""
+      answers:
+        description: true to post the body as answers on the findings' review threads
+        required: false
+        default: "false"
+      reviewer:
+        description: With answers, the login of the person whose review they address, to request their review again
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
   comment:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v2
@@ -45,25 +78,41 @@ jobs:
         env:
           PR: ${{ inputs.pr }}
           BODY: ${{ inputs.body }}
+          SECTION: ${{ inputs.section }}
+          REVIEW: ${{ inputs.review }}
+          ANSWERS: ${{ inputs.answers }}
+          REVIEWER: ${{ inputs.reviewer }}
         run: |
           if [[ ! $PR =~ ^[0-9]+$ ]]; then
             echo "::error title=pr::'$PR' is not a pull request number."
             exit 1
           fi
+          modes=0
+          [[ -n $SECTION ]] && modes=$((modes + 1))
+          [[ -n $REVIEW ]] && modes=$((modes + 1))
+          [[ $ANSWERS == true ]] && modes=$((modes + 1))
+          if ((modes > 1)); then
+            echo "::error title=mode::Set at most one of section, review and answers."
+            exit 1
+          fi
+          if [[ -n $REVIEWER && $ANSWERS != true ]]; then
+            echo "::error title=reviewer::Set reviewer only with answers."
+            exit 1
+          fi
           printf '%s\n' "$BODY" > "$RUNNER_TEMP/body.md"
 
-      # A section needs fab, from the default branch as the Review gate
-      # takes it, whatever ref the run was dispatched on.
+      # A section, a review and answers need fab, from the default branch as
+      # the Review gate takes it, whatever ref the run was dispatched on.
       - uses: actions/checkout@v5
-        if: inputs.section != ''
+        if: inputs.section != '' || inputs.review != '' || inputs.answers == 'true'
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
       - uses: ./.github/actions/fab
-        if: inputs.section != ''
+        if: inputs.section != '' || inputs.review != '' || inputs.answers == 'true'
         with:
-          command: pr-status
+          command: ${{ inputs.review != '' && 'pr-review' || inputs.answers == 'true' && 'pr-answer' || 'pr-status' }}
 
       - name: Post the comment
         env:
@@ -71,9 +120,17 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ inputs.pr }}
           SECTION: ${{ inputs.section }}
+          HEAD_SHA: ${{ inputs.review }}
+          ANSWERS: ${{ inputs.answers }}
+          REVIEWER: ${{ inputs.reviewer }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
         run: |
           if [[ -n $SECTION ]]; then
             fab pr-status --body-file "$RUNNER_TEMP/body.md"
+          elif [[ -n $HEAD_SHA ]]; then
+            fab pr-review --body-file "$RUNNER_TEMP/body.md"
+          elif [[ $ANSWERS == true ]]; then
+            fab pr-answer --body-file "$RUNNER_TEMP/body.md"
           else
             gh pr comment "$PR" --repo "$REPO" --body-file "$RUNNER_TEMP/body.md"
           fi

@@ -1,5 +1,5 @@
 ---
-name: writing-docs
+name: fab-writing-docs
 description: Write, revise, and deslop documentation for this repository in plain technical English. Use for internal plans and specs, README, skills, error messages, and any prose where AI writing tells, density, or readability matter.
 ---
 

@@ -21,6 +21,8 @@ trim = true
 [git]
 conventional_commits = true
 filter_unconventional = true
+# Fail, rather than drop a commit, when a subject is not a conventional commit.
+require_conventional = true
 split_commits = false
 # Pre-release cleanup. Before 0.1.0, main held internal docs commits and
 # terse subjects from before PR titles became the subject. The sha parsers

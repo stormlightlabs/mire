@@ -2,9 +2,10 @@
 id = "arcl-t-01M7P49PR473ZMJ991EYH7G9T8"
 plan = "arcl-pl-01M5YRTHS95J67NZ6THREDG33F"
 title = "Leave internal docs out of the 0.1.0 changelog"
-status = "in_progress"
+status = "completed"
 priority = "normal"
 position = 0
+evidence = "Done in #33 at b92628a: cliff.toml skips 15 internal or vague commits and rewrites 33 terse subjects by SHA; just changelog-check guards both lists"
 +++
 
 Mire has no release yet, so the first Release PR run writes every conventional commit since the project began into the 0.1.0 section. That list mixes user-facing changes with internal planning docs, docs-site internals and vague early subjects such as "better ui".

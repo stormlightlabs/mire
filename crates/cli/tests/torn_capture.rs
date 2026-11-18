@@ -79,9 +79,18 @@ fn a_file_replaced_during_capture_never_yields_a_torn_capture() {
         })
     };
 
-    let (mut torn, mut binary, mut cleared) = (0, 0, 0);
+    let (mut torn, mut binary, mut cleared, mut failed) = (0, 0, 0, 0);
     for _ in 0..CAPTURES {
-        let changeset = load_bound_diff(&binding).unwrap();
+        // Git fails with a short read when the file shrinks while it hashes
+        // it. Mire captures again, and after five such failures it reports the
+        // error and stores nothing, which is not a torn capture.
+        let changeset = match load_bound_diff(&binding) {
+            Err(error) if error.to_string().contains("short read") => {
+                failed += 1;
+                continue;
+            }
+            result => result.unwrap(),
+        };
         let file = &changeset.files()[0];
         let object = file.new_side().unwrap().object.as_ref();
         // A read cut short pads the file with zeros, and Git sees it as
@@ -107,8 +116,10 @@ fn a_file_replaced_during_capture_never_yields_a_torn_capture() {
     stop.store(true, Ordering::Relaxed);
     racer.join().unwrap();
 
-    let kept = CAPTURES - binary - cleared;
-    eprintln!("{kept} captures kept their id, {cleared} text and {binary} binary captures did not");
+    let kept = CAPTURES - binary - cleared - failed;
+    eprintln!(
+        "{kept} captures kept their id, {cleared} text and {binary} binary captures did not, {failed} failed with a short read"
+    );
     assert_eq!(torn, 0, "{torn} of {kept} stored blob ids were torn");
     assert!(kept > CAPTURES / 2, "only {kept} of {CAPTURES} captures kept their id");
 }

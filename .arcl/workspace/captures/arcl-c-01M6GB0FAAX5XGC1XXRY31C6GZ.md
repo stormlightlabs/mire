@@ -1,8 +1,12 @@
 +++
 id = "arcl-c-01M6GB0FAAX5XGC1XXRY31C6GZ"
 title = "Two cargo tests fail intermittently under just check"
-status = "captured"
+status = "promoted"
 created-at = "2026-11-03T09:14:27.018Z"
+
+[promoted-to]
+kind = "task"
+id = "arcl-t-01M7NZ4C01SJWJTP47XGSPZ55H"
 +++
 
 Each failed once in a `just check` run and passed on rerun, with no Rust changes on the branch:

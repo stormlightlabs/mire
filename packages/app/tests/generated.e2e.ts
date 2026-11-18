@@ -46,6 +46,9 @@ test('collapses generated files until the reader opens them', async ({ page, mir
 	await group.click();
 	await expect(generated).toHaveCount(0);
 
+	// A short screen puts each finding's marker below the fold until the pane scrolls to it.
+	await page.setViewportSize({ width: 1280, height: 400 });
+
 	// Selecting its finding from the review queue expands the group and opens the diff at the finding.
 	const marker = diff.getByRole('button', { name: /Open low question, open: Is the capital Y/ });
 	await files.getByRole('treeitem', { name: /one\.txt/ }).click();
@@ -64,6 +67,9 @@ test('collapses generated files until the reader opens them', async ({ page, mir
 	await files.getByRole('treeitem', { name: /one\.txt/ }).click();
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
 	await page.keyboard.press('k');
+	// Wait for the finding K opened in one.txt before pressing J.
+	await expect(diff.getByRole('article')).toContainText('The second line should stay lowercase.');
+	await expect(diff.getByRole('button', { name: /Open medium defect, open: The second line/ })).toBeInViewport();
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('one.txt');
 	await page.keyboard.press('j');
 	await expect(diff.getByRole('heading', { level: 1 })).toHaveText('two.txt');

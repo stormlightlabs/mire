@@ -34,11 +34,13 @@ the hunks and checks it against the blob id. A text file that comes back
 binary is also suspect, since a read cut short pads it with zeros, unless a
 `diff` attribute such as `binary` marks it binary. On a torn file Mire
 captures again, up to five captures in total, and it does the same when Git
-fails with a short read because a file shrank while Git hashed it. If a file is still torn after
-the fifth, Mire keeps that capture and drops the file's new blob id. It also
-drops the id, without capturing again, when the old blob is missing or the
-old or rebuilt file is larger than 64 MiB, which Mire does not read to check.
-The capture succeeds either way, and checkpoints treat a file without an id as
+fails with a short read because a file shrank while Git hashed it. If Git
+still fails that way on the fifth capture, the command reports Git's error and
+stores nothing. If a file is still torn after the fifth, Mire keeps that
+capture and drops the file's new blob id. It also drops the id, without
+capturing again, when the old blob is missing or the old or rebuilt file is
+larger than 64 MiB, which Mire does not read to check. A capture that drops
+an id still succeeds, and checkpoints treat a file without an id as
 one Git does not hold. Staged and revision-to-revision comparisons read only
 stored objects, so Mire does not check them.
 

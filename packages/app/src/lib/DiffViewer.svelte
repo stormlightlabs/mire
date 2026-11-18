@@ -12,7 +12,8 @@
 		theme,
 		showHeader = true,
 		wrap = false,
-		onFindingClick
+		onFindingClick,
+		onRender = () => {}
 	}: {
 		file: FileDetail;
 		diffStyle: 'unified' | 'split';
@@ -23,6 +24,8 @@
 		/** Whether long lines wrap inside the pane instead of scrolling sideways, as on a narrow screen. */
 		wrap?: boolean;
 		onFindingClick: (finding: FindingSummary) => void;
+		/** Called after each render, once the rows and finding annotations are on the page. */
+		onRender?: () => void;
 	} = $props();
 
 	/**
@@ -102,8 +105,10 @@
 			expandUnchanged: expandContext,
 			collapsedContextThreshold: 3,
 			renderAnnotation,
-			onPostRender(node: HTMLElement) {
+			onPostRender(node: HTMLElement, _instance: unknown, phase: 'mount' | 'update' | 'unmount') {
+				if (phase === 'unmount') return;
 				makeExpansionControlsKeyboardAccessible(node);
+				onRender();
 			}
 		};
 	}

@@ -128,6 +128,16 @@
 	let fileRevision = 0;
 	/** Counts file loads, so only the newest one replaces the shown file. */
 	let fileLoads = 0;
+	/** Counts finding loads, so only the newest one replaces the open finding. */
+	let findingLoads = 0;
+	/**
+	 * The finding the reader last asked for while it loads. `j` and `k` step
+	 * from it, so a key pressed before the last one's finding arrives still
+	 * moves one finding on from it.
+	 */
+	let requestedFinding: string | null = null;
+	/** The finding to scroll to once the diff next renders, which draws its annotation. */
+	let scrollTarget: string | null = null;
 	/**
 	 * Whether a viewed mark is being saved. Clicks wait for the reload that
 	 * follows it, so a second click acts on the saved state, not a stale one.
@@ -549,6 +559,7 @@
 	 */
 	async function selectFile(id: string, finding?: FindingSummary) {
 		const ticket = ++fileLoads;
+		scrollTarget = null;
 		const next = review?.files.find((summary) => summary.id === id);
 		const revision = review?.revision ?? 0;
 		activeFile = id;
@@ -571,7 +582,7 @@
 			if (finding) {
 				// A finding's line is inside the diff, so a collapsed generated diff opens first.
 				if (detail.generated) openedGenerated = detail.path.raw;
-				window.setTimeout(() => scrollToFinding(finding.id));
+				scrollTarget = finding.id;
 			}
 		} catch (cause) {
 			if (ticket !== fileLoads) return;
@@ -582,9 +593,11 @@
 		}
 	}
 
-	/** Empties the diff pane when no file is left to show, and drops any file load in flight. */
+	/** Empties the diff pane when no file is left to show, and drops any file or finding load in flight. */
 	function closeFile() {
+		dropFindingLoad();
 		fileLoads++;
+		scrollTarget = null;
 		activeFile = null;
 		file = null;
 		fileError = null;
@@ -592,10 +605,21 @@
 		viewedError = null;
 	}
 
-	/** Opens a file the reader picked, which replaces any reload notice. */
+	/**
+	 * Opens a file the reader picked, which replaces any reload notice. A
+	 * finding still loading would open its own file when it arrives, so its
+	 * load is dropped.
+	 */
 	function chooseFile(id: string) {
 		notice = null;
+		dropFindingLoad();
 		void selectFile(id);
+	}
+
+	/** Drops the finding load in flight, so its response neither opens the finding nor its file. */
+	function dropFindingLoad() {
+		findingLoads++;
+		requestedFinding = null;
 	}
 
 	async function selectFinding(finding: FindingSummary) {
@@ -604,12 +628,19 @@
 		if (keptDraft?.findingId !== finding.id) keptDraft = null;
 		// The editor fills from another finding's text, so its edit starts over.
 		if (activeFinding?.id !== finding.id) editBase = null;
+		const ticket = ++findingLoads;
+		requestedFinding = finding.id;
 		try {
-			activeFinding = await request<FindingDetail>(`/api/v1/findings/${encodeURIComponent(finding.id)}`);
+			const detail = await request<FindingDetail>(`/api/v1/findings/${encodeURIComponent(finding.id)}`);
+			if (ticket !== findingLoads) return;
+			activeFinding = detail;
+			requestedFinding = null;
 			if (!finding.navigable || !review) return;
 			const target = review.files.find((file) => file.path.display === finding.path.display);
 			if (target) await selectFile(target.id, finding);
 		} catch (cause) {
+			if (ticket !== findingLoads) return;
+			requestedFinding = null;
 			findingError = handleErr(cause, 'The finding could not be loaded.');
 		}
 	}
@@ -716,7 +747,8 @@
 
 	function navigateQueue(direction: 1 | -1) {
 		if (!visibleFindings.length) return;
-		const current = visibleFindings.findIndex((finding) => finding.id === activeFinding?.id);
+		const from = requestedFinding ?? activeFinding?.id;
+		const current = visibleFindings.findIndex((finding) => finding.id === from);
 		// FIXME: this is awful
 		const nextIndex =
 			current < 0
@@ -798,7 +830,16 @@
 		return target instanceof Element && target.closest('dialog') !== null;
 	}
 
-	function scrollToFinding(id: string) {
+	/**
+	 * Scrolls to the finding a file load asked for. The diff calls it after
+	 * each render, and the first render of the loaded file holds the finding's
+	 * annotation. A file whose diff draws no annotation for it leaves the
+	 * scroll as it is.
+	 */
+	function scrollToTarget() {
+		const id = scrollTarget;
+		if (!id) return;
+		scrollTarget = null;
 		document.querySelector<HTMLElement>(`[data-mire-finding="${CSS.escape(id)}"]`)?.scrollIntoView({
 			block: 'center',
 			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
@@ -1033,6 +1074,7 @@
 				onDismissNotice={() => (notice = null)}
 				onToggleViewed={toggleViewed}
 				onFindingClick={selectFinding}
+				onDiffRender={scrollToTarget}
 				onEditFinding={editFinding}
 				onDecideFinding={decideFinding} />
 			{#if !isNarrow && !inFocus}

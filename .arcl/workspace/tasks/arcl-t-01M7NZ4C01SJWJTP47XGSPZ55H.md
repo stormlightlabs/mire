@@ -2,9 +2,10 @@
 id = "arcl-t-01M7NZ4C01SJWJTP47XGSPZ55H"
 plan = "arcl-pl-01M5YRTHS95J67NZ6THREDG33F"
 title = "Stop two cargo tests failing intermittently"
-status = "in_progress"
+status = "completed"
 priority = "normal"
 position = 0
+evidence = "Done in #31 at 535899f: metadata test ignores BrokenPipe, torn-capture test accepts Git short reads after five retries; metadata 0 of 50 failed"
 +++
 
 Each failed once in a `just check` run and passed on rerun, with no Rust changes on the branch:

@@ -239,7 +239,8 @@ Before the first release, `main` held internal docs commits and terse
 subjects. `cliff.toml` skips the internal ones and rewrites the terse ones,
 each by its full SHA. Later commits take their entry from the PR title, so
 neither list grows. `just changelog-check` fails when a skipped or rewritten
-commit shows its old subject, and `scripts/release.sh` runs it first. It needs
+commit shows its old subject, when either list changes size, or when it cannot
+read an entry. `scripts/release.sh` runs it first. It needs
 git-cliff and the full history, so `just check` leaves it out.
 
 ## Troubleshooting

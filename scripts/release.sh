@@ -51,7 +51,8 @@ if git remote get-url origin >/dev/null 2>&1; then
   esac
 fi
 
-section=$(git cliff --config cliff.toml --unreleased --tag "$tag" --strip all)
+section=$(git cliff --config cliff.toml --unreleased --tag "$tag" --strip all) ||
+  fail "git-cliff rejected a commit; give its subject a preprocessor or sha parser in cliff.toml."
 grep -q '^- ' <<<"$section" || fail "no commits to list since the last release."
 
 # Replace the version's section, which runs to the next `## [` heading, or

@@ -5,7 +5,7 @@ title = "Leave internal docs out of the 0.1.0 changelog"
 status = "completed"
 priority = "normal"
 position = 0
-evidence = "Done in #33: cliff.toml skips 15 internal or vague commits by SHA and rewrites 33 terse subjects by exact match; git-cliff fails on unconventional subjects"
+evidence = "Done in #33 and #35: cliff.toml skips 15 internal or vague commits by SHA and rewrites 33 terse subjects by exact match; git-cliff fails on unconventional subjects"
 +++
 
 Mire has no release yet, so the first Release PR run writes every conventional commit since the project began into the 0.1.0 section. That list mixes user-facing changes with internal planning docs, docs-site internals and vague early subjects such as "better ui".

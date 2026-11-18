@@ -143,7 +143,10 @@ jobs:
             echo "::error title=release::The changelog base $base of #$found is not on main before $sha; nothing was tagged. $rerun"
             exit 1
           fi
-          since=$(git cliff --config cliff.toml --strip all "$base..$sha^")
+          if ! since=$(git cliff --config cliff.toml --strip all "$base..$sha^"); then
+            echo "::error title=release::git-cliff rejected a commit merged after the $version section was written; nothing was tagged. Give its subject a preprocessor or sha parser in cliff.toml. $rerun"
+            exit 1
+          fi
           missed=$(grep '^- ' <<<"$since" || true)
           if [[ -n $missed ]]; then
             echo "These changes merged after the $version section was written:"

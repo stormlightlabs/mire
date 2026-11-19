@@ -77,6 +77,9 @@ commit_preprocessors = [
     { pattern = '\Afeat: add terminal display keys to the web review \(#30\)(\n|\z)', replace = 'feat: add terminal display keys to the browser review (#30)$1' },
 ]
 commit_parsers = [
+    # git's own message when main is merged into a pull request branch. Squash
+    # merges keep these off main, so only a branch's history has them.
+    { message = "^Merge (remote-tracking )?branch '", skip = true },
     # Pre-release cleanup: see commit_preprocessors.
     { sha = "525378028b73456c5857902ee315108755505043", skip = true }, # docs: plan the project
     { sha = "94a5f6c10f137d468cf31c4697d46496423c3f97", skip = true }, # docs: clarify tool annotation terminology in docs

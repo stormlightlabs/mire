@@ -42,10 +42,12 @@ Changes go through [fabrial](https://github.com/stormlightlabs/fabrial): push a
 standard review and an adversarial review before the owner merges it. Pull
 request titles are conventional commits, because the squash commit uses the
 title and [git-cliff](https://git-cliff.org) builds the changelog from those
-subjects. `just check-changelog` prints the entries since the last tag, and
-fails when git-cliff warns, as it does for a subject it cannot parse. The
-release script fails the same way, so no commit drops out of a release
-unnoticed.
+subjects. `just check-changelog` prints the entries since the last tag.
+`cliff.toml` sets `require_conventional`, so git-cliff fails on a subject that
+is not a conventional commit instead of leaving it out, in that recipe, in the
+release script and in the Release tag check. To release past such a commit,
+add a preprocessor to `cliff.toml` that rewrites its exact subject to a
+conventional one.
 
 ## Snapshot tests
 

@@ -10,7 +10,8 @@
 # script fails, changing nothing, when <version> is not a release like 0.2.0,
 # differs from the [workspace.package] version in Cargo.toml, is already
 # tagged v<version> here or on origin, or has no commits to list. It also
-# fails when it cannot read origin's tags.
+# fails when it cannot read origin's tags, or when git-cliff finds a subject
+# that is not a conventional commit.
 set -euo pipefail
 
 usage() {
@@ -50,16 +51,8 @@ if git remote get-url origin >/dev/null 2>&1; then
   esac
 fi
 
-# git-cliff warns, and leaves the commit out, when a subject is not a
-# conventional commit, such as a squash title edited by hand.
-cliff_log=$(mktemp)
-section=$(git cliff --config cliff.toml --unreleased --tag "$tag" --strip all 2>"$cliff_log") ||
-  { cat "$cliff_log" >&2; rm -f "$cliff_log"; fail "git-cliff failed."; }
-if grep -E 'WARN|ERROR' "$cliff_log" >&2; then
-  rm -f "$cliff_log"
-  fail "git-cliff left out commits; fix their subjects in cliff.toml before releasing."
-fi
-rm -f "$cliff_log"
+section=$(git cliff --config cliff.toml --unreleased --tag "$tag" --strip all) ||
+  fail "git-cliff rejected a commit; add a preprocessor for its exact subject in cliff.toml."
 grep -q '^- ' <<<"$section" || fail "no commits to list since the last release."
 
 # Replace the version's section, which runs to the next `## [` heading, or

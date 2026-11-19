@@ -21,13 +21,20 @@ trim = true
 [git]
 conventional_commits = true
 filter_unconventional = true
+# Fail, rather than drop a commit, when a subject is not a conventional commit.
+require_conventional = true
 split_commits = false
 # Pre-release cleanup. Before 0.1.0, main held internal docs commits and
 # terse subjects from before PR titles became the subject. The sha parsers
 # skip the internal ones. The preprocessors rewrite each terse subject, matched
 # whole and kept to its conventional type, and the initial commit, so git-cliff
-# warns about nothing. Each pattern must match the whole subject, so a squash
-# commit, which ends in ` (#N)`, never matches. Do not add to either list.
+# fails on nothing. These patterns name pre-0.1.0 subjects without a ` (#N)`
+# suffix, so no squash commit matches them.
+#
+# When git-cliff rejects a subject that reached main, such as a hand-edited
+# squash title, add a preprocessor that rewrites that exact subject, suffix
+# included, to a conventional one. Skip a commit by sha only when it changes
+# nothing users get.
 commit_preprocessors = [
     { pattern = '\Ainitial commit(\n|\z)', replace = 'chore: initial commit$1' },
     { pattern = '\Adocs: add license & README(\n|\z)', replace = 'docs: add the license and README$1' },

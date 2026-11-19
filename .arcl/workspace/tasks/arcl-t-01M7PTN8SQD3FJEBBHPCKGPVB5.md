@@ -2,9 +2,10 @@
 id = "arcl-t-01M7PTN8SQD3FJEBBHPCKGPVB5"
 plan = "arcl-pl-01M5YRTHS95J67NZ6THREDG33F"
 title = "Call it the browser review everywhere"
-status = "in_progress"
+status = "completed"
 priority = "normal"
 position = 0
+evidence = "Done in #36: the UI is the browser review in ROADMAP, error messages, the meta description, open arcl records and the 0.1.0 changelog"
 +++
 
 Use "browser review" as the one term for Mire's browser UI, in user-facing text, open planning records and the changelog. The owner asked for it everywhere.

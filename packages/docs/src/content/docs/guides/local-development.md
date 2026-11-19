@@ -92,14 +92,14 @@ it.
 through `.github/storm/shot.sh`. Pass `--wait-for <text>` to wait for text on
 the screen, and `--keys <key>` to press keys before the capture.
 
-The captures need tmux, [freeze](https://github.com/charmbracelet/freeze), and
-jq. Where freeze crashes while writing a PNG, install `rsvg-convert` (the
+The captures need tmux, [freeze](https://github.com/charmbracelet/freeze), jq
+and perl. Where freeze crashes while writing a PNG, install `rsvg-convert` (the
 `librsvg2-bin` package on Debian and Ubuntu); freeze uses it when it is on the
 `PATH`.
 
 When a change alters the TUI, the implementer and both reviewers capture the
 affected states and report the PNG paths in the pull request, as fabrial's
-`storm` skill describes. CI does not run the captures.
+`fab-storm` skill describes. CI does not run the captures.
 
 ## Start the servers
 

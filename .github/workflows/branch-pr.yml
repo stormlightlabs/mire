@@ -1,25 +1,25 @@
-# Opens a draft pull request for an agent's work branch (claude/, codex/ or
-# storm/) as stormlight-thunderbot, so the owner can approve it under the
-# ruleset on main. Ported from desertthunder/knowledgebase.
+# Decides whether to open a draft pull request for an agent's work branch
+# (claude/, codex/ or storm/). It holds no secrets and opens nothing: Branch
+# PR open (branch-pr-open.yml) runs when this finishes, from main's copy,
+# and opens the pull request as the repository's GitHub App.
 #
-# `fab branch-pr` takes the title from the branch's first commit subject and
-# the body from that commit's body as the squash keeps it, so it needs no
-# model. A pull request already open keeps its title and body. The pull
-# request stays a draft until its review finishes; the Review gate then marks
-# it ready and sets the squash message, and the owner merges it, by hand or
-# with auto-merge. Nothing here turns auto-merge on.
+# GitHub runs this file from the pushed branch's own copy, so a branch can
+# change it; that is why it reads no secret. A changed copy can at most make
+# Branch PR open try to open a pull request for its own branch, which Branch
+# PR open checks and does from main.
 #
-# `fab` comes from the branch, as this workflow does: in fabrial it is built
-# from the branch, and elsewhere it is the release the branch's
-# .github/fabrial.toml names, so a branch that runs `fab update` gets the
-# release it updates to. In fabrial, a first push that does not build opens
-# no pull request; once it builds, run this from the Actions tab.
-#
-# It runs only on the push that creates the branch; later pushes skip the job,
-# which costs no runner time. A branch pushed with no commits ahead of main,
-# one whose first run failed, or one whose pull request was closed, gets its
-# pull request when this is run on that branch from the Actions tab or with
+# It runs on the push that creates the branch, and on the push that first
+# puts work on a branch that held only `fab claim` commits, as a claimed
+# `storm/<task>` branch does when `fab claim take` creates it. Later pushes
+# to `claude/` and `codex/` skip the job, which costs no runner time; later
+# pushes to `storm/` stop after a checkout and a `git log`. A branch
+# pushed with no commits ahead of main, one whose first run failed, or one
+# whose pull request was closed, gets its pull request when this is run on
+# that branch from the Actions tab or with
 # `gh workflow run branch-pr.yml --ref <branch>`.
+#
+# Branch PR open reads the outcome of the step named Open in the job named
+# decide; keep both names.
 name: Branch PR
 
 on:
@@ -31,34 +31,46 @@ permissions:
   contents: read
 
 jobs:
-  pr:
+  decide:
     # No concurrency group: a second quick push must not cancel the run that
-    # the branch's creation started, since its own job is skipped.
+    # opens the pull request.
+    # A dispatch can name a tag; only a branch ref opens anything.
     if: >-
-      (github.event_name == 'workflow_dispatch' || github.event.created) &&
+      startsWith(github.ref, 'refs/heads/') &&
+      (github.event_name == 'workflow_dispatch' || github.event.created ||
+       (startsWith(github.ref_name, 'storm/') && !github.event.deleted)) &&
       (startsWith(github.ref_name, 'claude/') || startsWith(github.ref_name, 'codex/') ||
        startsWith(github.ref_name, 'storm/'))
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/create-github-app-token@v2
-        id: app
-        with:
-          app-id: ${{ secrets.THUNDERBOT_APP_ID }}
-          private-key: ${{ secrets.THUNDERBOT_PRIVATE_KEY }}
-
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: ./.github/actions/fab
-        with:
-          command: branch-pr
-
-      - name: Open the PR
+      # A later push opens the pull request only when the tip it replaced held
+      # nothing ahead of main but claim commits and the new tip holds work. A
+      # tip the checkout lacks, after a force push, counts as holding work.
+      - name: Decide
+        id: decide
         env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          REPO: ${{ github.repository }}
-          BRANCH: ${{ github.ref_name }}
-          HEAD_DIR: .
-        run: fab branch-pr
+          EVENT: ${{ github.event_name }}
+          CREATED: ${{ github.event.created }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          work() {
+            git cat-file -e "$1^{commit}" 2>/dev/null || return 0
+            [ -n "$(git log --format=%H --invert-grep --grep='^Fabrial-Claim:' "origin/main..$1")" ]
+          }
+          open=false
+          if [ "$EVENT" = workflow_dispatch ] || [ "$CREATED" = true ]; then
+            open=true
+          elif ! work "$BEFORE" && work HEAD; then
+            open=true
+          fi
+          echo "open=$open" >> "$GITHUB_OUTPUT"
+
+      - name: Open
+        if: steps.decide.outputs.open == 'true'
+        run: echo "Branch PR open opens the pull request from main."

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Capture Mire's TUI states as PNG and ANSI files with .github/storm/shot.sh.
-# Needs tmux, freeze and jq.
+# Needs tmux, freeze, jq and perl.
 # Usage: scripts/shots.sh [<scenario>...]
 #        scripts/shots.sh --list
 #

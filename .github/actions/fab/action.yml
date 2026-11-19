@@ -1,7 +1,9 @@
-# Puts `fab` on the PATH for the Review gate and Branch PR. In fabrial itself
-# it builds fab from the checkout in the working directory; in a repository
+# Puts `fab` on the PATH for the workflows that run it. In fabrial itself it
+# builds fab from the checkout in the working directory; in a repository
 # that installs fabrial it installs the release .github/fabrial.toml names
-# there, and fails when that release has no `command`.
+# there, and fails when that release has no `command`. Every caller checks
+# out main in the working directory, except Release tag, which checks out
+# the commit it tags.
 name: Install fab
 description: Put fab on the PATH, built here in fabrial or installed from the release fabrial.toml names.
 

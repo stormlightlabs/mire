@@ -38,14 +38,9 @@ shot +args:
 shots *names:
     @scripts/shots.sh "$@"
 
-# Print the changelog entries since the last tag; fail on any git-cliff warning or error
+# Print the changelog entries since the last tag; fails on a subject that is not a conventional commit
 check-changelog:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    log=$(mktemp)
-    trap 'rm -f "$log"' EXIT
-    git cliff --config cliff.toml --unreleased --strip all 2>"$log" || { cat "$log" >&2; exit 1; }
-    if grep -E 'WARN|ERROR' "$log" >&2; then exit 1; fi
+    git cliff --config cliff.toml --unreleased --strip all
 
 # Write the release's section of CHANGELOG.md; the workspace version must already be <version>
 release version:

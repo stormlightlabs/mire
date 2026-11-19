@@ -1,9 +1,9 @@
 # Opens the pull request for a Mire release, run by hand with the version.
 # The bot sets the workspace version, writes the release's section of
 # CHANGELOG.md with scripts/release.sh (git-cliff and cliff.toml), checks
-# dist's plan, and pushes storm/release-<version>, which Branch PR opens. The
-# owner edits the lines there before accepting it. Release tag tags the merge
-# commit. Nothing here writes to main.
+# dist's plan, and pushes storm/release-<version>, which Branch PR open opens.
+# The owner edits the lines there before accepting it. Release tag tags the
+# merge commit. Nothing here writes to main.
 #
 # Run it again with the same version when Release tag refused a merged release
 # pull request because main gained changes after the section was written: the
@@ -89,7 +89,10 @@ jobs:
             cargo update --workspace --quiet
           fi
           # Fails when v$VERSION is already tagged.
-          scripts/release.sh "$VERSION"
+          if ! scripts/release.sh "$VERSION"; then
+            echo "::error title=release::scripts/release.sh failed; its message is in the step log above."
+            exit 1
+          fi
           # dist's Release workflow runs only once the tag exists, so check
           # here that its config, release.yml and the notes still agree.
           dist_version=$(sed -n 's/^cargo-dist-version = "\(.*\)"$/\1/p' dist-workspace.toml)

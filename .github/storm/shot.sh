@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Capture a terminal UI as a PNG and an ANSI text file. Needs tmux and freeze.
+# Capture a terminal UI as a PNG and an ANSI text file. Needs tmux, freeze
+# and perl, and sgr.pl beside it.
 # Usage: .github/storm/shot.sh [options] <name> <cols> <rows> <command...>
 #
 #   --wait-for <text>  wait until the screen shows <text>, then settle; fail
@@ -132,7 +133,9 @@ else
 fi
 
 t capture-pane -p -e -t "$pane" >"$out/$name.ansi"
-freeze --language ansi -o "$out/$name.png" <"$out/$name.ansi" >/dev/null
+# freeze 0.2.2 ignores the SGR codes that reset one attribute, so render
+# from a copy that sgr.pl rewrites. The .ansi file keeps what tmux captured.
+perl "$(dirname "$0")/sgr.pl" "$out/$name.ansi" | freeze --language ansi -o "$out/$name.png" >/dev/null
 echo "$out/$name.png"
 
 if dead; then

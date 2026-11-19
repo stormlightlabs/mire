@@ -887,7 +887,7 @@
 {/snippet}
 
 <svelte:head>
-	<meta name="description" content="A local browser surface for reviewing a Mire review file." />
+	<meta name="description" content="The local browser review for a Mire review file." />
 </svelte:head>
 
 <svelte:window onkeydown={onKeydown} />

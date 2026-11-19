@@ -28,8 +28,10 @@ split_commits = false
 # terse subjects from before PR titles became the subject. The sha parsers
 # skip the internal ones. The preprocessors rewrite each terse subject, matched
 # whole and kept to its conventional type, and the initial commit, so git-cliff
-# fails on nothing. These patterns name pre-0.1.0 subjects without a ` (#N)`
-# suffix, so no squash commit matches them.
+# fails on nothing. Most patterns name pre-0.1.0 subjects without a ` (#N)`
+# suffix, so no squash commit matches them. The last three are the one
+# exception: they spell out three merged titles, suffix included, to rename
+# "web review" to "browser review", the UI's one name.
 #
 # When git-cliff rejects a subject that reached main, such as a hand-edited
 # squash title, add a preprocessor that rewrites that exact subject, suffix
@@ -60,18 +62,24 @@ commit_preprocessors = [
     { pattern = '\Afeat: improve TUI note editing and status chrome(\n|\z)', replace = 'feat: edit multiline notes and show review progress in the terminal review$1' },
     { pattern = '\Afeat: collapsible diff rows and file picker(\n|\z)', replace = 'feat: collapse files and hunks, and pick files from a filtered list, in the terminal review$1' },
     { pattern = '\Afeat: add review status and default diff(\n|\z)', replace = 'feat: add `mire review status`, and open the worktree diff when `mire` runs without a command$1' },
-    { pattern = '\Afeat: local browser review server(\n|\z)', replace = 'feat: add `mire serve` to open a web review in a local browser$1' },
-    { pattern = '\Afeat: add file diff and finding navigation(\n|\z)', replace = 'feat: add file diffs and finding navigation to the web review$1' },
+    { pattern = '\Afeat: local browser review server(\n|\z)', replace = 'feat: add `mire serve` to open the browser review$1' },
+    { pattern = '\Afeat: add file diff and finding navigation(\n|\z)', replace = 'feat: add file diffs and finding navigation to the browser review$1' },
     { pattern = '\Afeat: review patch export(\n|\z)', replace = 'feat: add `mire review export --format patch` to write the captured changes as a patch$1' },
-    { pattern = '\Afeat: finding review actions(\n|\z)', replace = 'feat: edit findings and resolve, reopen, dismiss or accept their risk in the web review$1' },
-    { pattern = '\Afeat: web review refresh and completion(\n|\z)', replace = 'feat: refresh the source and watch it for changes in the web review, and finish a review with Markdown, JSON and context downloads$1' },
-    { pattern = '\Afeat: polish diff review interface(\n|\z)', replace = 'feat: add a split layout, context expansion, a dark theme and mobile drawers to the web review$1' },
-    { pattern = '\Afeat: add collapsible file tree navigation(\n|\z)', replace = 'feat: add a collapsible file tree to the web review$1' },
+    { pattern = '\Afeat: finding review actions(\n|\z)', replace = 'feat: edit findings and resolve, reopen, dismiss or accept their risk in the browser review$1' },
+    { pattern = '\Afeat: web review refresh and completion(\n|\z)', replace = 'feat: refresh the source and watch it for changes in the browser review, and finish a review with Markdown, JSON and context downloads$1' },
+    { pattern = '\Afeat: polish diff review interface(\n|\z)', replace = 'feat: add a split layout, context expansion, a dark theme and mobile drawers to the browser review$1' },
+    { pattern = '\Afeat: add collapsible file tree navigation(\n|\z)', replace = 'feat: add a collapsible file tree to the browser review$1' },
     { pattern = '\Adocs: build doc site(\n|\z)', replace = 'docs: add the documentation site$1' },
     { pattern = '\Adocs: update for completed review workflow(\n|\z)', replace = 'docs: update the README for the review workflow$1' },
     { pattern = '\Adocs: add range and split screencaps(\n|\z)', replace = 'docs: add screencaps of a revision-range review and the split layout$1' },
+    { pattern = '\Afeat: use the terminal themes in the web review \(#20\)(\n|\z)', replace = 'feat: use the terminal themes in the browser review (#20)$1' },
+    { pattern = '\Afeat: focus mode in the web review \(#23\)(\n|\z)', replace = 'feat: focus mode in the browser review (#23)$1' },
+    { pattern = '\Afeat: add terminal display keys to the web review \(#30\)(\n|\z)', replace = 'feat: add terminal display keys to the browser review (#30)$1' },
 ]
 commit_parsers = [
+    # git's own message when main is merged into a pull request branch. Squash
+    # merges keep these off main, so only a branch's history has them.
+    { message = "^Merge (remote-tracking )?branch '", skip = true },
     # Pre-release cleanup: see commit_preprocessors.
     { sha = "525378028b73456c5857902ee315108755505043", skip = true }, # docs: plan the project
     { sha = "94a5f6c10f137d468cf31c4697d46496423c3f97", skip = true }, # docs: clarify tool annotation terminology in docs

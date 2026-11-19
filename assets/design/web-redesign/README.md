@@ -1,4 +1,4 @@
-# Web review redesign
+# Browser review redesign
 
 These boards propose a new layout for the browser review that `mire serve`
 opens. They are a design, not the shipped app. The diff text comes from the

@@ -32,10 +32,10 @@ Out of scope:
 - Publishing to crates.io. Releases will ship prebuilt binaries on GitHub and
   a Homebrew formula, as fabrial's do.
 
-The rest of this file records the web review effort, which `mire serve`
+The rest of this file records the browser review effort, which `mire serve`
 delivered.
 
-# Web review
+# Browser review
 
 ## Outcome
 
@@ -50,8 +50,8 @@ needing a hosted service or sending code off the machine.
 
 ## Product boundary
 
-The web app is for human review of an existing Mire review. It is not a hosted PR
-bot, an agent runner, or a replacement for the terminal UI.
+The browser review is for human review of an existing Mire review. It is not a
+hosted PR bot, an agent runner, or a replacement for the terminal UI.
 
 In scope:
 
@@ -99,9 +99,10 @@ Several controls need explicit product semantics before implementation:
   a new global status or imply a remote approval.
 - **Reply:** The review model has editable findings and decision events, not
   discussion threads. Replace Reply with Edit in the first release. Add threads
-  only after designing a durable event model for CLI and web consumers together.
+  only after designing a durable event model for the CLI and the browser review
+  together.
 - **Category:** Use Mire's annotation intent (`comment`, `defect`, `suggestion`,
-  or `question`) rather than introducing a web-only category taxonomy.
+  or `question`) rather than introducing a browser-only category taxonomy.
 - **Reviewed:** Derive this label from the reader's viewed marks and open
   finding counts. Do not persist a second file status.
 
@@ -367,8 +368,8 @@ without the session secret.
 Add finding editing, all existing decisions including reopen, revision-conflict
 recovery, filters, keyboard navigation, and viewed progress.
 
-Exit when web and CLI mutations interleave without lost updates and a conflict
-preserves the user's draft.
+Exit when browser review and CLI mutations interleave without lost updates and a
+conflict preserves the user's draft.
 
 ### 3. Live review lifecycle
 
@@ -414,8 +415,8 @@ output.
   states.
 - A small Playwright end-to-end suite starts the production `mire serve` binary
   and proves the critical load, navigate, decide, refresh, and export path.
-- Existing core, CLI, and TUI suites remain unchanged evidence that the web path
-  did not fork review semantics.
+- Existing core, CLI, and TUI suites remain unchanged evidence that the browser
+  review did not fork review semantics.
 
 ## Success measures
 

@@ -109,7 +109,7 @@ enum AppError {
     DescriptionEncoding { input: OsString },
     #[error("invalid title or description: {0}")]
     Metadata(ReviewError),
-    #[error("cannot create web review runtime: {0}")]
+    #[error("cannot create browser review runtime: {0}")]
     WebReviewRuntime(io::Error),
     #[error("cannot serve review: {0}")]
     Serve(ServeError),

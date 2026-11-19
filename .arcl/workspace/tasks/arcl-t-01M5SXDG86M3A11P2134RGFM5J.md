@@ -1,7 +1,7 @@
 +++
 id = "arcl-t-01M5SXDG86M3A11P2134RGFM5J"
 plan = "arcl-pl-01M5SXDG5F6QV83EW8GZ6VFSSP"
-title = "Update user and security docs for the web review"
+title = "Update user and security docs for the browser review"
 status = "pending"
 priority = "normal"
 position = 4
